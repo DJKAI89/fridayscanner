@@ -4,29 +4,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>F.R.I.D.A.Y — NSE Live</title>
+<title>F.R.I.D.A.Y — Professional NSE Scanner</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#111827;min-height:100vh}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172a;min-height:100vh}
 
 /* ── HEADER ── */
 .hdr{background:#fff;border-bottom:1px solid #e2e8f0;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(0,0,0,.06);flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:200}
 .logo{display:flex;align-items:center;gap:9px}
 .logo-ic{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#0d9488);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(22,163,74,.3)}
 .logo-ic span{color:#fff;font-weight:900;font-size:14px}
-.logo-txt{font-size:15px;font-weight:800;color:#111827}
+.logo-txt{font-size:15px;font-weight:800;color:#0f172a}
 .logo-sub{font-size:8px;color:#94a3b8;letter-spacing:1.5px}
 .hdr-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.dot{width:7px;height:7px;border-radius:50%;background:#16a34a;animation:pulse 2s infinite;flex-shrink:0}
-.dot.warn{background:#f59e0b}.dot.err{background:#dc2626}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
+.dot.live{background:#16a34a}.dot.scan{background:#f59e0b}.dot.err{background:#dc2626}
 .btn{border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:11px;font-weight:700;transition:.15s}
 .btn-g{background:#16a34a;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,.3)}
 .btn-g:hover{opacity:.9}.btn-g:disabled{background:#e2e8f0;color:#94a3b8;box-shadow:none;cursor:not-allowed}
 .btn-s{background:#f8fafc;color:#374151;border:1px solid #e2e8f0}
-.cdown{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;text-align:center;min-width:52px}
+.cdown{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;text-align:center;min-width:50px}
 .cdown-v{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;color:#16a34a}
-.cdown-v.urg{color:#dc2626}
-.cdown-l{font-size:7px;color:#94a3b8}
+.cdown-v.urg{color:#dc2626}.cdown-l{font-size:7px;color:#94a3b8}
 
 /* ── TICKER ── */
 .tkr-w{overflow:hidden;background:#0f172a;padding:5px 0;border-bottom:2px solid #16a34a}
@@ -36,109 +35,116 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#11182
 .tabs{background:#fff;border-bottom:1px solid #e2e8f0;padding:0 16px;display:flex;gap:2px;overflow-x:auto}
 .tab{padding:10px 16px;font-size:12px;font-weight:600;color:#64748b;border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s}
 .tab.active{color:#16a34a;border-bottom-color:#16a34a;font-weight:700}
-.tab:hover:not(.active){color:#374151}
-.tab-badge{background:#dc2626;color:#fff;font-size:8px;font-weight:800;padding:1px 5px;border-radius:10px;margin-left:4px;vertical-align:middle}
 
 /* ── TOKEN GATE ── */
 #token-gate{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px);padding:20px}
-.tc{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:26px;max-width:500px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.08)}
+.tc{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:26px;max-width:520px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.08)}
 .tc h2{font-size:17px;font-weight:800;margin-bottom:12px}
 .info-box{border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:11px;line-height:1.8}
 .info-box.blue{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
-.info-box.green{background:#f0fdf4;border:1px solid #bbf7d0;color:#15803d}
-.crit-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
-.crit-c{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}
-.crit-c label{font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:5px}
-.crit-c input[type=number]{width:100%;border:1.5px solid #e2e8f0;border-radius:5px;padding:5px 8px;font-size:12px;outline:none}
-.crit-c input:focus{border-color:#16a34a}
+.tc label{font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:4px}
 .tc textarea{width:100%;border:1.5px solid #e2e8f0;border-radius:7px;padding:8px 11px;font-size:12px;font-family:monospace;outline:none;resize:vertical}
 .tc textarea:focus{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.1)}
 .t-err{color:#dc2626;font-size:11px;margin-top:5px;display:none}
+.crit-g{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px}
+.crit-c{background:#f8fafc;border:1px solid #e2e8f0;border-radius:7px;padding:9px 11px}
+.crit-c label{font-size:9px;font-weight:700;color:#64748b;margin-bottom:4px;display:block}
+.crit-c input{width:100%;border:1.5px solid #e2e8f0;border-radius:5px;padding:5px 8px;font-size:12px;outline:none}
+.crit-c input:focus{border-color:#16a34a}
 
-/* ── LAYOUT ── */
+/* ── APP ── */
 #app{display:none}
 .pane{display:none;padding:14px 16px 40px}
 .pane.active{display:block}
 
-/* ── CARDS ── */
-.cards-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:11px}
-.card{border-radius:11px;padding:14px;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.05)}
-.card.buy{background:#f0fdf4;border:1.5px solid #bbf7d0}
-.card.sell{background:#fef2f2;border:1.5px solid #fecaca}
-.card.watch{background:#fffbeb;border:1.5px solid #fde68a}
-.card.neutral{background:#fff;border:1.5px solid #e2e8f0}
-.card-rank{position:absolute;top:11px;left:11px;width:18px;height:18px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#64748b}
-.card-act{position:absolute;top:11px;right:11px;color:#fff;font-size:8px;font-weight:800;padding:2px 9px;border-radius:20px;letter-spacing:1px}
-.card-act.buy{background:#16a34a}.card-act.sell{background:#dc2626}.card-act.watch{background:#d97706}.card-act.neutral{background:#6b7280}
-.card-head{margin-bottom:9px;padding-left:24px;padding-right:56px}
-.card-sym{font-size:15px;font-weight:800;color:#111827}
-.card-co{font-size:10px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card-row{display:grid;gap:1px;margin-bottom:9px}
-.card-row-3{grid-template-columns:1fr 1fr 1fr}
-.card-row-2{grid-template-columns:1fr 1fr}
-.card-row-4{grid-template-columns:1fr 1fr 1fr 1fr}
-.cbox{background:#fff;border-radius:6px;padding:6px 8px}
-.cbox.buy{border:1px solid #bbf7d0}.cbox.sell{border:1px solid #fecaca}.cbox.watch{border:1px solid #fde68a}.cbox.neutral{border:1px solid #e2e8f0}
-.cb-l{font-size:8px;color:#94a3b8;margin-bottom:2px}
-.cb-v{font-size:13px;font-weight:700}
-.cb-s{font-size:9px;font-weight:600}
-.card-tags{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:7px}
-.tag{background:#fff;border-radius:5px;padding:2px 7px;font-size:9px;font-weight:600}
-.tag.buy{border:1px solid #bbf7d0;color:#15803d}.tag.sell{border:1px solid #fecaca;color:#b91c1c}.tag.watch{border:1px solid #fde68a;color:#b45309}.tag.neutral{border:1px solid #e2e8f0;color:#6b7280}
-.str-r{display:flex;gap:2px;margin-bottom:7px;align-items:center}
-.str-s{width:18px;height:4px;border-radius:2px;background:#e2e8f0}
-.str-l{font-size:8px;color:#94a3b8;margin-left:3px}
-.card-why{font-size:10px;color:#4b5563;line-height:1.55;padding-top:7px}
-.card-why.buy{border-top:1px solid #bbf7d0}.card-why.sell{border-top:1px solid #fecaca}.card-why.watch{border-top:1px solid #fde68a}.card-why.neutral{border-top:1px solid #e2e8f0}
-
-/* ── STATS BAR ── */
+/* ── STATS ── */
 .stats-g{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:9px;margin-bottom:13px}
 .sc{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:11px 13px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .sc-lbl{font-size:8px;color:#94a3b8;letter-spacing:1px;margin-bottom:3px;text-transform:uppercase}
 .sc-val{font-size:16px;font-weight:800}
 .sc-sub{font-size:10px;font-weight:600;margin-top:1px}
 .sc-note{font-size:8px;color:#94a3b8;margin-top:2px}
-.up{color:#16a34a}.dn{color:#dc2626}.bl{color:#1d4ed8}.am{color:#d97706}
+.up{color:#16a34a}.dn{color:#dc2626}.bl{color:#1d4ed8}.am{color:#d97706}.pu{color:#7c3aed}
 
-/* ── ALERTS FEED ── */
-.alert-feed{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:11px 13px;margin-bottom:12px;max-height:220px;overflow-y:auto}
-.alert-feed h4{font-size:11px;font-weight:800;color:#111827;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
-.al-item{display:flex;align-items:center;gap:7px;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:10px}
-.al-item:last-child{border-bottom:none}
-.al-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.al-sym{font-weight:800;color:#111827;min-width:70px}
-.al-act{font-weight:700;min-width:40px}
-.al-why{color:#6b7280;flex:1}
-.al-time{color:#94a3b8;font-size:8px;margin-left:auto;white-space:nowrap}
-.no-al{font-size:11px;color:#94a3b8}
+/* ── CARDS ── */
+.cards-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(295px,1fr));gap:12px}
+.card{border-radius:11px;padding:14px;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.05);animation:fadeIn .3s ease both}
+.card.strong-buy{background:#f0fdf4;border:2px solid #16a34a}
+.card.buy{background:#f0fdf4;border:1.5px solid #bbf7d0}
+.card.moderate{background:#f0f9ff;border:1.5px solid #bae6fd}
+.card.watch{background:#fffbeb;border:1.5px solid #fde68a}
+.card.avoid{background:#fef2f2;border:1.5px solid #fecaca}
+.card.sell{background:#fef2f2;border:2px solid #dc2626}
+
+.c-rank{position:absolute;top:11px;left:11px;width:19px;height:19px;border-radius:50%;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;color:#64748b}
+.c-rec{position:absolute;top:11px;right:11px;color:#fff;font-size:8px;font-weight:800;padding:3px 8px;border-radius:20px;letter-spacing:.5px;white-space:nowrap}
+.c-rec.strong-buy{background:#16a34a}
+.c-rec.buy{background:#22c55e}
+.c-rec.moderate{background:#0ea5e9}
+.c-rec.watch{background:#d97706}
+.c-rec.avoid,.c-rec.sell{background:#dc2626}
+
+.c-head{margin:0 0 9px;padding-left:24px;padding-right:80px}
+.c-sym{font-size:15px;font-weight:800;color:#0f172a}
+.c-name{font-size:10px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Price / metrics grid */
+.c-metrics{display:grid;gap:1px;margin-bottom:9px}
+.cm3{grid-template-columns:1fr 1fr 1fr}
+.cm4{grid-template-columns:1fr 1fr 1fr 1fr}
+.cm2{grid-template-columns:1fr 1fr}
+.cbox{padding:6px 8px;border-radius:6px}
+.cbox.buy{background:#fff;border:1px solid #bbf7d0}
+.cbox.sell{background:#fff;border:1px solid #fecaca}
+.cbox.moderate{background:#fff;border:1px solid #bae6fd}
+.cbox.watch{background:#fff;border:1px solid #fde68a}
+.cbox.neutral{background:#fff;border:1px solid #e2e8f0}
+.cb-l{font-size:7px;color:#94a3b8;letter-spacing:.5px;margin-bottom:2px}
+.cb-v{font-size:13px;font-weight:700}
+.cb-s{font-size:9px;font-weight:500;margin-top:1px}
+
+/* Indicator pills */
+.c-inds{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.ind{font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px}
+.ind.ok{background:#dcfce7;color:#16a34a}
+.ind.no{background:#fee2e2;color:#dc2626}
+.ind.na{background:#f1f5f9;color:#94a3b8}
+
+/* Strength/confidence bars */
+.c-bars{margin-bottom:8px}
+.bar-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.bar-lbl{font-size:8px;color:#64748b;width:70px;flex-shrink:0}
+.bar-track{flex:1;height:5px;background:#e2e8f0;border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;transition:width .5s ease}
+.bar-val{font-size:9px;font-weight:700;width:32px;text-align:right;flex-shrink:0}
+
+/* Targets */
+.c-targets{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:8px}
+.tgt{text-align:center;padding:4px;border-radius:5px}
+.tgt.cons{background:#f0fdf4;border:1px solid #bbf7d0}
+.tgt.mod{background:#eff6ff;border:1px solid #bfdbfe}
+.tgt.agg{background:#faf5ff;border:1px solid #ddd6fe}
+.tgt-l{font-size:7px;color:#94a3b8}
+.tgt-v{font-size:11px;font-weight:700}
+
+.c-why{font-size:10px;color:#475569;line-height:1.55;padding-top:7px}
+.c-why.strong-buy{border-top:1px solid #16a34a}
+.c-why.buy{border-top:1px solid #bbf7d0}
+.c-why.moderate{border-top:1px solid #bae6fd}
+.c-why.watch{border-top:1px solid #fde68a}
+.c-why.avoid,.c-why.sell{border-top:1px solid #fecaca}
 
 /* ── PORTFOLIO ── */
 .port-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px}
-.port-form{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:13px;margin-bottom:13px;display:none}
-.port-form h4{font-size:12px;font-weight:800;margin-bottom:10px}
-.port-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:10px}
-.pf-inp{border:1.5px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px;width:100%;outline:none}
-.pf-inp:focus{border-color:#16a34a}
-.pf-lbl{font-size:9px;font-weight:700;color:#374151;margin-bottom:3px;display:block}
-.port-table{background:#fff;border:1px solid #e2e8f0;border-radius:9px;overflow:hidden}
-.pt-head{display:grid;grid-template-columns:1fr 80px 80px 80px 80px 80px 60px;gap:8px;padding:9px 13px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:9px;font-weight:700;color:#64748b;letter-spacing:.5px}
-.pt-row{display:grid;grid-template-columns:1fr 80px 80px 80px 80px 80px 60px;gap:8px;padding:9px 13px;border-bottom:1px solid #f1f5f9;font-size:11px;align-items:center}
-.pt-row:last-child{border-bottom:none}
-.pt-row:hover{background:#f8fafc}
-.pt-sym{font-weight:800;color:#111827}
-.pt-del{color:#dc2626;font-size:10px;cursor:pointer;text-align:center}
-.port-total{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin-top:12px}
-
-/* ── OPTIONS ── */
-.opt-controls{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:12px 14px;margin-bottom:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
-.opt-ctrl-g{display:flex;flex-direction:column;gap:3px}
-.opt-ctrl-g label{font-size:9px;font-weight:700;color:#374151}
-.opt-sel{border:1.5px solid #e2e8f0;border-radius:6px;padding:6px 10px;font-size:12px;outline:none;background:#fff}
-.opt-sel:focus{border-color:#16a34a}
+.ptbl{background:#fff;border:1px solid #e2e8f0;border-radius:9px;overflow:hidden}
+.ptbl-h{display:grid;grid-template-columns:2fr 80px 70px 80px 80px 80px 70px;gap:8px;padding:9px 13px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:9px;font-weight:700;color:#64748b;letter-spacing:.5px}
+.ptbl-r{display:grid;grid-template-columns:2fr 80px 70px 80px 80px 80px 70px;gap:8px;padding:9px 13px;border-bottom:1px solid #f1f5f9;font-size:11px;align-items:center}
+.ptbl-r:last-child{border-bottom:none}
+.ptbl-r:hover{background:#f8fafc}
 
 /* ── MISC ── */
-.sec-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px}
-.sec-hdr h3{font-size:13px;font-weight:800;color:#111827}
+.sec-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:11px;flex-wrap:wrap;gap:6px}
+.sec-hdr h3{font-size:13px;font-weight:800;color:#0f172a}
 .sec-hdr span{font-size:10px;color:#94a3b8}
 .mkt-closed{background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px 12px;font-size:11px;color:#b45309;font-weight:600;margin-bottom:11px}
 .err-b{background:#fef2f2;border:1.5px solid #fecaca;border-radius:9px;padding:12px 14px;margin-bottom:12px;display:none}
@@ -153,17 +159,16 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#11182
 .ll{font-size:9px;font-family:monospace;margin-bottom:2px;word-break:break-all;color:#94a3b8}
 .ll.e{color:#f87171}.ll.o{color:#4ade80}.ll.w{color:#fbbf24}
 .disc{margin-top:16px;padding:9px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;font-size:9px;color:#94a3b8;line-height:1.6}
-
-/* ── FLASH ── */
-@keyframes flash-up{0%{background:#dcfce7}100%{background:transparent}}
-@keyframes flash-dn{0%{background:#fee2e2}100%{background:transparent}}
-.flash-up{animation:flash-up .7s ease}
-.flash-dn{animation:flash-dn .7s ease}
+.empty-state{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:40px;text-align:center;color:#94a3b8;font-size:12px}
 
 @keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes fadeIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@keyframes flash-up{0%{background:#dcfce7}100%{background:transparent}}
+@keyframes flash-dn{0%{background:#fee2e2}100%{background:transparent}}
+.flash-up{animation:flash-up .7s ease}
+.flash-dn{animation:flash-dn .7s ease}
 </style>
 
 </head>
@@ -176,63 +181,51 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#11182
     <div class="logo-ic"><span>F</span></div>
     <div>
       <div class="logo-txt">F.R.I.D.A.Y</div>
-      <div class="logo-sub">NSE LIVE SCANNER · UPSTOX</div>
+      <div class="logo-sub">PROFESSIONAL NSE SCANNER</div>
     </div>
   </div>
   <div class="hdr-r" id="hdr-ctrl" style="display:none">
     <div style="text-align:right">
-      <div style="font-size:8px;color:#94a3b8">LAST SCAN</div>
+      <div style="font-size:8px;color:#94a3b8">SCANNED</div>
       <div id="scan-time" style="font-size:10px;font-weight:600;color:#374151">—</div>
     </div>
-    <div class="cdown">
-      <div class="cdown-v" id="cdown">5:00</div>
-      <div class="cdown-l">NEXT SCAN</div>
-    </div>
-    <div style="text-align:center">
-      <div id="tick-cd" style="font-size:12px;font-weight:800;color:#0d9488;font-variant-numeric:tabular-nums">10s</div>
-      <div style="font-size:7px;color:#94a3b8">TICK</div>
-    </div>
-    <div style="display:flex;align-items:center;gap:5px">
-      <div class="dot" id="sdot"></div>
-      <span style="font-size:10px;color:#6b7280" id="stxt">Live</span>
-    </div>
+    <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l">NEXT</div></div>
+    <div style="display:flex;align-items:center;gap:5px"><div class="dot live" id="sdot"></div><span style="font-size:10px;color:#64748b" id="stxt">Live</span></div>
     <button class="btn btn-g" id="scan-btn" onclick="triggerScan()">▶ Scan</button>
     <button class="btn btn-s" onclick="toggleLog()">🔍</button>
-    <button class="btn btn-s" onclick="resetToken()" title="Change token">⚙</button>
+    <button class="btn btn-s" onclick="resetToken()">⚙</button>
   </div>
 </div>
 
 <!-- TICKER -->
 
-<div class="tkr-w"><div class="tkr-i" id="ticker">  F.R.I.D.A.Y  ●  LIVE NSE SCANNER  ●  UPSTOX API  ●  </div></div>
+<div class="tkr-w"><div class="tkr-i" id="ticker">  F.R.I.D.A.Y  ●  PROFESSIONAL NSE SCANNER  ●  UPSTOX API  ●  </div></div>
 
 <!-- TOKEN GATE -->
 
 <div id="token-gate">
   <div class="tc">
-    <h2>🔐 Connect Upstox API</h2>
+    <h2>🔐 Launch F.R.I.D.A.Y</h2>
     <div class="info-box blue">
       <strong>⚠ Open via http:// not file://</strong><br>
-      <strong>PC:</strong> <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">python -m http.server 8080</code> → <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">http://localhost:8080/friday-scanner.html</code><br>
+      <strong>PC:</strong> <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">python -m http.server 8080</code> → open <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">http://localhost:8080/friday-scanner.html</code><br>
       <strong>All devices:</strong> Host free on <a href="https://pages.github.com" target="_blank" style="color:#1d4ed8;font-weight:700">GitHub Pages</a>
     </div>
-    <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px">⚙️ Alert Thresholds</div>
-    <div class="crit-grid">
-      <div class="crit-c"><label>RSI Overbought (SELL)</label><input type="number" id="c-rsi-ob" value="70" min="60" max="90"></div>
-      <div class="crit-c"><label>RSI Oversold (BUY)</label><input type="number" id="c-rsi-os" value="30" min="10" max="40"></div>
-      <div class="crit-c"><label>Volume Spike (×avg)</label><input type="number" id="c-vol" value="2.0" step="0.1" min="1.1"></div>
-      <div class="crit-c"><label>IV Alert Threshold (%)</label><input type="number" id="c-iv" value="20" min="5"></div>
-      <div class="crit-c"><label>Delta Alert (abs)</label><input type="number" id="c-delta" value="0.6" step="0.05" min="0.1" max="1"></div>
-      <div class="crit-c" style="display:flex;align-items:center;gap:8px">
-        <div><label>🔔 Browser Notifications</label><input type="checkbox" id="c-notify" checked style="width:18px;height:18px;cursor:pointer;margin-top:6px"></div>
-      </div>
+    <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px">⚙️ Professional Filter Thresholds</div>
+    <div class="crit-g">
+      <div class="crit-c"><label>Min Confidence %</label><input type="number" id="c-conf" value="65" min="0" max="100"></div>
+      <div class="crit-c"><label>Min Potential %</label><input type="number" id="c-pot" value="8" min="0"></div>
+      <div class="crit-c"><label>Max Risk %</label><input type="number" id="c-risk" value="50" min="0"></div>
+      <div class="crit-c"><label>Min R:R Ratio</label><input type="number" id="c-rr" value="1.5" step="0.1" min="0"></div>
+      <div class="crit-c"><label>Volume Spike (×avg)</label><input type="number" id="c-vol" value="1.2" step="0.1" min="1"></div>
+      <div class="crit-c"><label>Options Delta Alert</label><input type="number" id="c-delta" value="0.5" step="0.05" min="0"></div>
     </div>
-    <label style="font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:5px">ACCESS TOKEN</label>
+    <label>UPSTOX ACCESS TOKEN</label>
     <textarea id="token-input" rows="3" placeholder="Paste your Upstox access token here..."></textarea>
     <div class="t-err" id="t-err">⚠ Token too short.</div>
-    <button class="btn btn-g" style="width:100%;margin-top:11px;padding:11px;font-size:13px" onclick="startWithToken()">▶ Launch FRIDAY</button>
-    <div class="info-box green" style="margin-top:12px;margin-bottom:0">
-      <strong>Token:</strong> <a href="https://developer.upstox.com" target="_blank" style="color:#15803d;font-weight:700">developer.upstox.com</a> → Login → My Apps → Get Access Token · Expires daily.
+    <button class="btn btn-g" style="width:100%;margin-top:11px;padding:11px;font-size:13px" onclick="startWithToken()">▶ Launch Scanner</button>
+    <div class="info-box blue" style="margin-top:12px;margin-bottom:0">
+      Token: <a href="https://developer.upstox.com" target="_blank" style="color:#1e40af;font-weight:700">developer.upstox.com</a> → Login → My Apps → Get Access Token · Expires daily.
     </div>
   </div>
 </div>
@@ -240,300 +233,202 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#11182
 <!-- MAIN APP -->
 
 <div id="app">
-  <!-- TABS -->
   <div class="tabs">
     <button class="tab active" onclick="switchTab('stocks')">📈 Stocks</button>
     <button class="tab" onclick="switchTab('options')">⚡ F&amp;O Options</button>
-    <button class="tab" onclick="switchTab('alerts')">🔔 Alerts <span class="tab-badge" id="alert-badge" style="display:none">0</span></button>
     <button class="tab" onclick="switchTab('portfolio')">💼 Portfolio</button>
   </div>
 
-  <!-- LOG -->
-
   <div id="log-drawer">
-    <div class="log-hdr">
-      <span>SCAN LOG</span>
-      <button onclick="document.getElementById('log-body').innerHTML=''" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:9px">Clear</button>
-    </div>
+    <div class="log-hdr"><span>SCAN LOG</span><button onclick="document.getElementById('log-body').innerHTML=''" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:9px">Clear</button></div>
     <div class="log-body" id="log-body"></div>
   </div>
 
-  <!-- ══ STOCKS PANE ══ -->
+  <!-- STOCKS PANE -->
 
   <div class="pane active" id="pane-stocks">
-    <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-    <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching Nifty50 data...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Quotes · OHLC · RSI · Volume</p></div>
+    <div class="err-b" id="err-stocks"><h4>⚠ Scan Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
+    <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
     <div id="dash-stocks" style="display:none">
-      <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 Market Closed · Showing last data · Hours: 9:15 AM – 3:30 PM IST</div>
+      <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed · Showing last data · 9:15 AM – 3:30 PM IST</div>
       <div class="stats-g" id="stats-stocks"></div>
-      <div class="sec-hdr"><h3 id="stocks-title">Nifty50 Signals</h3><span id="stocks-sub">RSI · Volume · Price · Scan every 5 min</span></div>
+      <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Confidence≥65% · Potential≥8% · Risk&lt;50% · R:R≥1.5 · Sorted by Expected Value</span></div>
       <div class="cards-g" id="cards-stocks"></div>
-      <div class="disc">⚠ Algorithmic signals only. Not SEBI-registered advice. Do your own research.</div>
+      <div class="disc">⚠ AI-assisted analysis. Not SEBI-registered advice. Always do your own research. Past performance ≠ future results.</div>
     </div>
   </div>
 
-  <!-- ══ OPTIONS PANE ══ -->
+  <!-- OPTIONS PANE -->
 
   <div class="pane" id="pane-options">
-    <div class="opt-controls">
-      <div class="opt-ctrl-g"><label>UNDERLYING</label>
-        <select class="opt-sel" id="opt-underlying">
-          <option value="NSE_INDEX|Nifty 50">NIFTY</option>
-          <option value="NSE_INDEX|Nifty Bank">BANKNIFTY</option>
-          <option value="NSE_INDEX|Nifty Fin Service">FINNIFTY</option>
-        </select>
-      </div>
-      <div class="opt-ctrl-g"><label>EXPIRY</label>
-        <select class="opt-sel" id="opt-expiry"><option>Loading...</option></select>
-      </div>
-      <div class="opt-ctrl-g"><label>STRIKES AROUND ATM</label>
-        <select class="opt-sel" id="opt-strikes">
-          <option value="5">±5 strikes</option>
-          <option value="10" selected>±10 strikes</option>
-          <option value="15">±15 strikes</option>
-        </select>
-      </div>
-      <button class="btn btn-g" onclick="loadOptionsChain()">⚡ Load Chain</button>
-    </div>
-    <div class="err-b" id="err-options"><h4>⚠ Error</h4><p id="err-options-msg"></p></div>
-    <div id="loading-options" style="display:none" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning options chain...</p></div>
+    <div class="err-b" id="err-options"><h4>⚠ Options Error</h4><p id="err-options-msg"></p><button onclick="loadOptions()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
+    <div id="loading-options" class="spin-wrap" style="display:none"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning all F&O options...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Nifty · BankNifty · FinNifty · All strikes · PCR · Greeks</p></div>
     <div id="dash-options" style="display:none">
       <div class="stats-g" id="stats-options"></div>
-      <div class="sec-hdr"><h3 id="opt-title">Options Signals</h3><span>Delta · IV · OI · Auto-scan all strikes</span></div>
+      <div class="sec-hdr"><h3 id="opt-title">Options Signals</h3><span>Auto-scan · All Index Options · Sorted by signal strength</span></div>
       <div class="cards-g" id="cards-options"></div>
-      <div class="disc">⚠ Options trading involves significant risk. Greeks are indicative only.</div>
+      <div class="disc">⚠ Options trading carries significant risk. Greeks are indicative.</div>
     </div>
   </div>
 
-  <!-- ══ ALERTS PANE ══ -->
-
-  <div class="pane" id="pane-alerts">
-    <div class="sec-hdr" style="margin-bottom:12px">
-      <h3>🔔 Live Alert Feed</h3>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-s" onclick="clearAlerts()">Clear all</button>
-      </div>
-    </div>
-    <!-- Criteria display -->
-    <div class="stats-g" id="criteria-display" style="margin-bottom:12px"></div>
-    <div id="alerts-empty" style="background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:40px;text-align:center;color:#94a3b8;font-size:12px">
-      No alerts yet. Alerts fire automatically every scan cycle.<br>
-      <span style="font-size:10px;margin-top:4px;display:block">Watching for: RSI crossings, Volume spikes, IV & Delta thresholds</span>
-    </div>
-    <div id="alerts-list" style="display:none">
-      <div id="alerts-cards" class="cards-g"></div>
-    </div>
-    <div class="disc" style="margin-top:12px">🔔 Browser notifications fire when new alerts are detected. Allow notifications when prompted.</div>
-  </div>
-
-  <!-- ══ PORTFOLIO PANE ══ -->
+  <!-- PORTFOLIO PANE -->
 
   <div class="pane" id="pane-portfolio">
     <div class="port-hdr">
-      <h3 style="font-size:13px;font-weight:800;color:#111827">💼 Portfolio</h3>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-s" onclick="togglePortForm()">+ Add Position</button>
-        <button class="btn btn-g" onclick="refreshPortfolio()">↻ Refresh P&amp;L</button>
+      <h3 style="font-size:13px;font-weight:800">💼 Account Portfolio</h3>
+      <button class="btn btn-g" onclick="loadPortfolio()">↻ Refresh P&L</button>
+    </div>
+    <div class="err-b" id="err-port"><h4>⚠ Error</h4><p id="err-port-msg"></p></div>
+    <div class="stats-g" id="port-summary" style="margin-bottom:12px"></div>
+    <div id="port-empty" class="empty-state">Loading your Upstox portfolio...</div>
+    <div id="port-content" style="display:none">
+      <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">📋 Positions & Holdings</div>
+      <div class="ptbl">
+        <div class="ptbl-h"><span>SYMBOL</span><span>TYPE</span><span>QTY</span><span>AVG PRICE</span><span>LTP</span><span>P&L</span><span>P&L %</span></div>
+        <div id="port-rows"></div>
       </div>
     </div>
-
-```
-<!-- Add position form -->
-<div class="port-form" id="port-form">
-  <h4>Add Position</h4>
-  <div class="port-form-grid">
-    <div><span class="pf-lbl">SYMBOL (NSE)</span><input class="pf-inp" id="pf-sym" placeholder="e.g. RELIANCE" style="text-transform:uppercase"></div>
-    <div><span class="pf-lbl">TYPE</span>
-      <select class="pf-inp" id="pf-type">
-        <option value="stock">Stock</option>
-        <option value="call">Call Option</option>
-        <option value="put">Put Option</option>
-      </select>
-    </div>
-    <div><span class="pf-lbl">QTY / LOTS</span><input class="pf-inp" id="pf-qty" type="number" placeholder="e.g. 10"></div>
-    <div><span class="pf-lbl">AVG BUY PRICE (₹)</span><input class="pf-inp" id="pf-price" type="number" step="0.01" placeholder="e.g. 2840"></div>
-    <div><span class="pf-lbl">STRIKE (options)</span><input class="pf-inp" id="pf-strike" type="number" placeholder="e.g. 22500"></div>
-    <div><span class="pf-lbl">EXPIRY (options)</span><input class="pf-inp" id="pf-expiry" placeholder="e.g. 2024-12-26"></div>
-  </div>
-  <div style="display:flex;gap:8px">
-    <button class="btn btn-g" onclick="addPosition()">Add</button>
-    <button class="btn btn-s" onclick="togglePortForm()">Cancel</button>
-  </div>
-</div>
-
-<!-- Summary cards -->
-<div class="port-total" id="port-summary" style="margin-bottom:12px"></div>
-
-<!-- Table -->
-<div id="port-empty" style="background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:40px;text-align:center;color:#94a3b8;font-size:12px">No positions yet. Click + Add Position to begin.</div>
-<div id="port-table-wrap" style="display:none">
-  <div class="port-table">
-    <div class="pt-head"><span>SYMBOL</span><span>TYPE</span><span>QTY</span><span>AVG</span><span>LTP</span><span>P&L</span><span></span></div>
-    <div id="port-rows"></div>
-  </div>
-</div>
-<div class="disc" style="margin-top:12px">P&L is indicative based on Upstox LTP. Options P&L = (LTP − Avg) × Qty × Lot size (not accounted for here).</div>
-```
-
+    <div class="disc" style="margin-top:12px">Live P&L from Upstox account positions and holdings.</div>
   </div>
 </div>
 
 <script>
-// ════════════════════════════════════════════
-//  NIFTY50 INSTRUMENT KEYS
-// ════════════════════════════════════════════
-const INST = [
-  {key:"NSE_EQ|INE002A01018",s:"RELIANCE",  n:"Reliance Industries", sec:"Energy",    beta:1.1},
-  {key:"NSE_EQ|INE467B01029",s:"TCS",        n:"TCS",                 sec:"IT",        beta:0.9},
-  {key:"NSE_EQ|INE040A01034",s:"HDFCBANK",  n:"HDFC Bank",           sec:"Banking",   beta:1.2},
-  {key:"NSE_EQ|INE009A01021",s:"INFY",      n:"Infosys",             sec:"IT",        beta:0.95},
-  {key:"NSE_EQ|INE090A01021",s:"ICICIBANK", n:"ICICI Bank",          sec:"Banking",   beta:1.25},
-  {key:"NSE_EQ|INE030A01027",s:"HINDUNILVR",n:"Hindustan Unilever",  sec:"FMCG",      beta:0.7},
-  {key:"NSE_EQ|INE154A01025",s:"ITC",       n:"ITC",                 sec:"FMCG",      beta:0.8},
-  {key:"NSE_EQ|INE062A01020",s:"SBIN",      n:"State Bank of India", sec:"Banking",   beta:1.3},
-  {key:"NSE_EQ|INE397D01024",s:"BHARTIARTL",n:"Bharti Airtel",       sec:"Telecom",   beta:0.85},
-  {key:"NSE_EQ|INE237A01028",s:"KOTAKBANK", n:"Kotak Mahindra Bank", sec:"Banking",   beta:1.1},
-  {key:"NSE_EQ|INE018A01030",s:"LT",        n:"Larsen & Toubro",     sec:"Infra",     beta:1.15},
-  {key:"NSE_EQ|INE238A01034",s:"AXISBANK",  n:"Axis Bank",           sec:"Banking",   beta:1.3},
-  {key:"NSE_EQ|INE021A01026",s:"ASIANPAINT",n:"Asian Paints",        sec:"Consumer",  beta:0.75},
-  {key:"NSE_EQ|INE860A01027",s:"HCLTECH",   n:"HCL Technologies",    sec:"IT",        beta:0.9},
-  {key:"NSE_EQ|INE585B01010",s:"MARUTI",    n:"Maruti Suzuki",       sec:"Auto",      beta:1.05},
-  {key:"NSE_EQ|INE044A01036",s:"SUNPHARMA", n:"Sun Pharma",          sec:"Pharma",    beta:0.85},
-  {key:"NSE_EQ|INE280A01028",s:"TITAN",     n:"Titan Company",       sec:"Consumer",  beta:1.0},
-  {key:"NSE_EQ|INE296A01024",s:"BAJFINANCE",n:"Bajaj Finance",       sec:"NBFC",      beta:1.4},
-  {key:"NSE_EQ|INE075A01022",s:"WIPRO",     n:"Wipro",               sec:"IT",        beta:0.9},
-  {key:"NSE_EQ|INE239A01016",s:"NESTLEIND", n:"Nestle India",        sec:"FMCG",      beta:0.65},
-  {key:"NSE_EQ|INE669C01036",s:"TECHM",     n:"Tech Mahindra",       sec:"IT",        beta:1.0},
-  {key:"NSE_EQ|INE101A01026",s:"M&M",       n:"Mahindra & Mahindra", sec:"Auto",      beta:1.1},
-  {key:"NSE_EQ|INE752E01010",s:"POWERGRID", n:"Power Grid Corp",     sec:"Power",     beta:0.7},
-  {key:"NSE_EQ|INE733E01010",s:"NTPC",      n:"NTPC",                sec:"Power",     beta:0.75},
-  {key:"NSE_EQ|INE028A01039",s:"TATAMOTORS",n:"Tata Motors",         sec:"Auto",      beta:1.35},
-  {key:"NSE_EQ|INE081A01020",s:"TATASTEEL", n:"Tata Steel",          sec:"Metals",    beta:1.5},
-  {key:"NSE_EQ|INE423A01024",s:"ADANIENT",  n:"Adani Enterprises",   sec:"Conglom",   beta:1.6},
-  {key:"NSE_EQ|INE361B01024",s:"DIVISLAB",  n:"Divi's Laboratories", sec:"Pharma",    beta:0.8},
-  {key:"NSE_EQ|INE918I01026",s:"BAJAJFINSV",n:"Bajaj Finserv",       sec:"NBFC",      beta:1.2},
-  {key:"NSE_EQ|INE019A01038",s:"JSWSTEEL",  n:"JSW Steel",           sec:"Metals",    beta:1.45},
-  {key:"NSE_EQ|INE038A01020",s:"HINDALCO",  n:"Hindalco Industries", sec:"Metals",    beta:1.4},
-  {key:"NSE_EQ|INE059A01026",s:"CIPLA",     n:"Cipla",               sec:"Pharma",    beta:0.85},
-  {key:"NSE_EQ|INE089A01023",s:"DRREDDY",   n:"Dr Reddy's Labs",     sec:"Pharma",    beta:0.9},
-  {key:"NSE_EQ|INE213A01029",s:"ONGC",      n:"ONGC",                sec:"Energy",    beta:1.1},
-  {key:"NSE_EQ|INE522F01014",s:"COALINDIA", n:"Coal India",          sec:"Mining",    beta:0.9},
-  {key:"NSE_EQ|INE047A01021",s:"GRASIM",    n:"Grasim Industries",   sec:"Conglom",   beta:1.05},
-  {key:"NSE_EQ|INE066A01021",s:"EICHERMOT", n:"Eicher Motors",       sec:"Auto",      beta:1.0},
-  {key:"NSE_EQ|INE095A01012",s:"INDUSINDBK",n:"IndusInd Bank",       sec:"Banking",   beta:1.35},
-  {key:"NSE_EQ|INE437A01024",s:"APOLLOHOSP",n:"Apollo Hospitals",    sec:"Healthcare",beta:0.9},
-  {key:"NSE_EQ|INE742F01042",s:"ADANIPORTS",n:"Adani Ports",         sec:"Logistics", beta:1.25},
-  {key:"NSE_EQ|INE029A01011",s:"BPCL",      n:"BPCL",                sec:"Energy",    beta:1.15},
-  {key:"NSE_EQ|INE158A01026",s:"HEROMOTOCO",n:"Hero MotoCorp",       sec:"Auto",      beta:0.95},
-  {key:"NSE_EQ|INE192R01011",s:"TATACONSUM",n:"Tata Consumer",       sec:"FMCG",      beta:0.85},
-  {key:"NSE_EQ|INE216A01030",s:"BRITANNIA", n:"Britannia Industries",sec:"FMCG",      beta:0.7},
-  {key:"NSE_EQ|INE123W01016",s:"SBILIFE",   n:"SBI Life Insurance",  sec:"Insurance", beta:0.85},
-  {key:"NSE_EQ|INE795G01014",s:"HDFCLIFE",  n:"HDFC Life Insurance", sec:"Insurance", beta:0.8},
-  {key:"NSE_EQ|INE214T01019",s:"LTIM",      n:"LTIMindtree",         sec:"IT",        beta:1.0},
-  {key:"NSE_EQ|INE917I01010",s:"BAJAJ-AUTO",n:"Bajaj Auto",          sec:"Auto",      beta:1.0},
-  {key:"NSE_EQ|INE721I01017",s:"SHRIRAMFIN",n:"Shriram Finance",     sec:"NBFC",      beta:1.2},
-  {key:"NSE_EQ|INE481G01011",s:"ULTRACEMCO",n:"UltraTech Cement",    sec:"Cement",    beta:1.0},
+// ═══════════════════════════════════════════
+//  INSTRUMENT KEYS — NIFTY50
+// ═══════════════════════════════════════════
+const INST=[
+  {key:"NSE_EQ|INE002A01018",s:"RELIANCE",  n:"Reliance Industries", sec:"Energy",    b:1.1},
+  {key:"NSE_EQ|INE467B01029",s:"TCS",        n:"TCS",                 sec:"IT",        b:0.9},
+  {key:"NSE_EQ|INE040A01034",s:"HDFCBANK",  n:"HDFC Bank",           sec:"Banking",   b:1.2},
+  {key:"NSE_EQ|INE009A01021",s:"INFY",      n:"Infosys",             sec:"IT",        b:0.95},
+  {key:"NSE_EQ|INE090A01021",s:"ICICIBANK", n:"ICICI Bank",          sec:"Banking",   b:1.25},
+  {key:"NSE_EQ|INE030A01027",s:"HINDUNILVR",n:"Hindustan Unilever",  sec:"FMCG",      b:0.7},
+  {key:"NSE_EQ|INE154A01025",s:"ITC",       n:"ITC",                 sec:"FMCG",      b:0.8},
+  {key:"NSE_EQ|INE062A01020",s:"SBIN",      n:"State Bank of India", sec:"Banking",   b:1.3},
+  {key:"NSE_EQ|INE397D01024",s:"BHARTIARTL",n:"Bharti Airtel",       sec:"Telecom",   b:0.85},
+  {key:"NSE_EQ|INE237A01028",s:"KOTAKBANK", n:"Kotak Mahindra Bank", sec:"Banking",   b:1.1},
+  {key:"NSE_EQ|INE018A01030",s:"LT",        n:"Larsen & Toubro",     sec:"Infra",     b:1.15},
+  {key:"NSE_EQ|INE238A01034",s:"AXISBANK",  n:"Axis Bank",           sec:"Banking",   b:1.3},
+  {key:"NSE_EQ|INE021A01026",s:"ASIANPAINT",n:"Asian Paints",        sec:"Consumer",  b:0.75},
+  {key:"NSE_EQ|INE860A01027",s:"HCLTECH",   n:"HCL Technologies",    sec:"IT",        b:0.9},
+  {key:"NSE_EQ|INE585B01010",s:"MARUTI",    n:"Maruti Suzuki",       sec:"Auto",      b:1.05},
+  {key:"NSE_EQ|INE044A01036",s:"SUNPHARMA", n:"Sun Pharma",          sec:"Pharma",    b:0.85},
+  {key:"NSE_EQ|INE280A01028",s:"TITAN",     n:"Titan Company",       sec:"Consumer",  b:1.0},
+  {key:"NSE_EQ|INE296A01024",s:"BAJFINANCE",n:"Bajaj Finance",       sec:"NBFC",      b:1.4},
+  {key:"NSE_EQ|INE075A01022",s:"WIPRO",     n:"Wipro",               sec:"IT",        b:0.9},
+  {key:"NSE_EQ|INE239A01016",s:"NESTLEIND", n:"Nestle India",        sec:"FMCG",      b:0.65},
+  {key:"NSE_EQ|INE669C01036",s:"TECHM",     n:"Tech Mahindra",       sec:"IT",        b:1.0},
+  {key:"NSE_EQ|INE101A01026",s:"M&M",       n:"Mahindra & Mahindra", sec:"Auto",      b:1.1},
+  {key:"NSE_EQ|INE752E01010",s:"POWERGRID", n:"Power Grid Corp",     sec:"Power",     b:0.7},
+  {key:"NSE_EQ|INE733E01010",s:"NTPC",      n:"NTPC",                sec:"Power",     b:0.75},
+  {key:"NSE_EQ|INE028A01039",s:"TATAMOTORS",n:"Tata Motors",         sec:"Auto",      b:1.35},
+  {key:"NSE_EQ|INE081A01020",s:"TATASTEEL", n:"Tata Steel",          sec:"Metals",    b:1.5},
+  {key:"NSE_EQ|INE423A01024",s:"ADANIENT",  n:"Adani Enterprises",   sec:"Conglom",   b:1.6},
+  {key:"NSE_EQ|INE361B01024",s:"DIVISLAB",  n:"Divi's Laboratories", sec:"Pharma",    b:0.8},
+  {key:"NSE_EQ|INE918I01026",s:"BAJAJFINSV",n:"Bajaj Finserv",       sec:"NBFC",      b:1.2},
+  {key:"NSE_EQ|INE019A01038",s:"JSWSTEEL",  n:"JSW Steel",           sec:"Metals",    b:1.45},
+  {key:"NSE_EQ|INE038A01020",s:"HINDALCO",  n:"Hindalco Industries", sec:"Metals",    b:1.4},
+  {key:"NSE_EQ|INE059A01026",s:"CIPLA",     n:"Cipla",               sec:"Pharma",    b:0.85},
+  {key:"NSE_EQ|INE089A01023",s:"DRREDDY",   n:"Dr Reddy's Labs",     sec:"Pharma",    b:0.9},
+  {key:"NSE_EQ|INE213A01029",s:"ONGC",      n:"ONGC",                sec:"Energy",    b:1.1},
+  {key:"NSE_EQ|INE522F01014",s:"COALINDIA", n:"Coal India",          sec:"Mining",    b:0.9},
+  {key:"NSE_EQ|INE047A01021",s:"GRASIM",    n:"Grasim Industries",   sec:"Conglom",   b:1.05},
+  {key:"NSE_EQ|INE066A01021",s:"EICHERMOT", n:"Eicher Motors",       sec:"Auto",      b:1.0},
+  {key:"NSE_EQ|INE095A01012",s:"INDUSINDBK",n:"IndusInd Bank",       sec:"Banking",   b:1.35},
+  {key:"NSE_EQ|INE437A01024",s:"APOLLOHOSP",n:"Apollo Hospitals",    sec:"Healthcare",b:0.9},
+  {key:"NSE_EQ|INE742F01042",s:"ADANIPORTS",n:"Adani Ports",         sec:"Logistics", b:1.25},
+  {key:"NSE_EQ|INE029A01011",s:"BPCL",      n:"BPCL",                sec:"Energy",    b:1.15},
+  {key:"NSE_EQ|INE158A01026",s:"HEROMOTOCO",n:"Hero MotoCorp",       sec:"Auto",      b:0.95},
+  {key:"NSE_EQ|INE192R01011",s:"TATACONSUM",n:"Tata Consumer",       sec:"FMCG",      b:0.85},
+  {key:"NSE_EQ|INE216A01030",s:"BRITANNIA", n:"Britannia Industries",sec:"FMCG",      b:0.7},
+  {key:"NSE_EQ|INE123W01016",s:"SBILIFE",   n:"SBI Life Insurance",  sec:"Insurance", b:0.85},
+  {key:"NSE_EQ|INE795G01014",s:"HDFCLIFE",  n:"HDFC Life Insurance", sec:"Insurance", b:0.8},
+  {key:"NSE_EQ|INE214T01019",s:"LTIM",      n:"LTIMindtree",         sec:"IT",        b:1.0},
+  {key:"NSE_EQ|INE917I01010",s:"BAJAJ-AUTO",n:"Bajaj Auto",          sec:"Auto",      b:1.0},
+  {key:"NSE_EQ|INE721I01017",s:"SHRIRAMFIN",n:"Shriram Finance",     sec:"NBFC",      b:1.2},
+  {key:"NSE_EQ|INE481G01011",s:"ULTRACEMCO",n:"UltraTech Cement",    sec:"Cement",    b:1.0},
 ];
-const INST_MAP = {}; INST.forEach(i=>INST_MAP[i.key]=i);
-const IDX_KEYS = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank";
+const INST_MAP={}; INST.forEach(i=>INST_MAP[i.key]=i);
+const IDX="NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX";
+const OPT_UNDERLYINGS=[
+  {key:"NSE_INDEX|Nifty 50",     name:"NIFTY",     step:50},
+  {key:"NSE_INDEX|Nifty Bank",   name:"BANKNIFTY",  step:100},
+  {key:"NSE_INDEX|Nifty Fin Service",name:"FINNIFTY",step:50},
+];
 
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 //  STATE
-// ════════════════════════════════════════════
-let token = localStorage.getItem("friday_token")||"";
-let CRIT = JSON.parse(localStorage.getItem("friday_crit")||"{}");
-CRIT = {rsiOB:CRIT.rsiOB||70,rsiOS:CRIT.rsiOS||30,volMult:CRIT.volMult||2.0,ivAlert:CRIT.ivAlert||20,deltaAlert:CRIT.deltaAlert||0.6,notify:CRIT.notify!==false};
+// ═══════════════════════════════════════════
+let token=localStorage.getItem("friday_token")||"";
+let THRESH=JSON.parse(localStorage.getItem("friday_thresh")||"{}");
+THRESH={conf:THRESH.conf||65,pot:THRESH.pot||8,risk:THRESH.risk||50,rr:THRESH.rr||1.5,vol:THRESH.vol||1.2,delta:THRESH.delta||0.5};
 
-let scanning=false, ticking=false;
-let scanTimer, tickTimer, cdTimer;
-let scanSecs=300, tickSecs=10;
-let lastPrices={}, rsiCache={};
-let alertLog=[], firedKeys=new Set();
-let portfolio=JSON.parse(localStorage.getItem("friday_portfolio")||"[]");
+let scanning=false,optLoading=false,portLoading=false;
+let scanTimer,tickTimer,cdTimer,scanSecs=300;
+let lastPrices={},rsiCache={};
 let activeTab="stocks";
 
-// ════════════════════════════════════════════
-//  TOKEN + BOOT
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════
 function startWithToken(){
   const v=document.getElementById("token-input").value.trim();
   if(!v||v.length<20){document.getElementById("t-err").style.display="block";return;}
   token=v; localStorage.setItem("friday_token",v);
-  CRIT={
-    rsiOB:  +document.getElementById("c-rsi-ob").value||70,
-    rsiOS:  +document.getElementById("c-rsi-os").value||30,
-    volMult:+document.getElementById("c-vol").value||2.0,
-    ivAlert:+document.getElementById("c-iv").value||20,
-    deltaAlert:+document.getElementById("c-delta").value||0.6,
-    notify: document.getElementById("c-notify").checked
+  THRESH={
+    conf: +document.getElementById("c-conf").value||65,
+    pot:  +document.getElementById("c-pot").value||8,
+    risk: +document.getElementById("c-risk").value||50,
+    rr:   +document.getElementById("c-rr").value||1.5,
+    vol:  +document.getElementById("c-vol").value||1.2,
+    delta:+document.getElementById("c-delta").value||0.5,
   };
-  localStorage.setItem("friday_crit",JSON.stringify(CRIT));
-  if(CRIT.notify) Notification.requestPermission();
-  document.getElementById("t-err").style.display="none";
+  localStorage.setItem("friday_thresh",JSON.stringify(THRESH));
   boot();
 }
-function resetToken(){
-  clearInterval(scanTimer);clearInterval(tickTimer);clearInterval(cdTimer);
-  localStorage.removeItem("friday_token"); token="";
-  document.getElementById("app").style.display="none";
-  document.getElementById("hdr-ctrl").style.display="none";
-  document.getElementById("token-gate").style.display="flex";
-}
+function resetToken(){clearTimers();localStorage.removeItem("friday_token");token="";document.getElementById("app").style.display="none";document.getElementById("hdr-ctrl").style.display="none";document.getElementById("token-gate").style.display="flex";}
 function boot(){
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
   document.getElementById("hdr-ctrl").style.display="flex";
-  renderCriteriaPanel();
-  renderPortfolio();
   startTimers();
   triggerScan();
+  loadPortfolio();
 }
 window.onload=()=>{
-  if(token&&token.length>20){
-    document.getElementById("token-input").value=token;
-    document.getElementById("token-gate").style.display="none";
-    document.getElementById("app").style.display="block";
-    document.getElementById("hdr-ctrl").style.display="flex";
-    if(CRIT.notify) Notification.requestPermission();
-    renderCriteriaPanel();
-    renderPortfolio();
-    startTimers();
-    triggerScan();
-  }
+  if(token&&token.length>20){document.getElementById("token-input").value=token;document.getElementById("token-gate").style.display="none";document.getElementById("app").style.display="block";document.getElementById("hdr-ctrl").style.display="flex";startTimers();triggerScan();loadPortfolio();}
 };
 
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 //  TABS
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 function switchTab(t){
   activeTab=t;
-  document.querySelectorAll(".tab").forEach((el,i)=>{
-    el.classList.toggle("active",["stocks","options","alerts","portfolio"][i]===t);
-  });
+  document.querySelectorAll(".tab").forEach((el,i)=>el.classList.toggle("active",["stocks","options","portfolio"][i]===t));
   document.querySelectorAll(".pane").forEach(el=>el.classList.remove("active"));
   document.getElementById("pane-"+t).classList.add("active");
+  if(t==="options"&&document.getElementById("dash-options").style.display==="none"&&!optLoading) loadOptions();
 }
 
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 //  TIMERS
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
+function clearTimers(){clearInterval(scanTimer);clearInterval(tickTimer);clearInterval(cdTimer);}
 function startTimers(){
-  scanSecs=300; tickSecs=10;
-  scanTimer=setInterval(()=>{firedKeys.clear();triggerScan();},5*60*1000);
+  clearTimers(); scanSecs=300;
+  scanTimer=setInterval(()=>triggerScan(),5*60*1000);
   tickTimer=setInterval(tickPrices,10*1000);
   cdTimer=setInterval(()=>{
     scanSecs=Math.max(0,scanSecs-1);
-    tickSecs=tickSecs<=1?10:tickSecs-1;
     const m=Math.floor(scanSecs/60),s=String(scanSecs%60).padStart(2,"0");
     const el=document.getElementById("cdown");
     el.textContent=m+":"+s; el.className="cdown-v"+(scanSecs<30?" urg":"");
-    document.getElementById("tick-cd").textContent=tickSecs+"s";
   },1000);
 }
 
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 //  API
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 async function apiGet(url){
   const full="https://api.upstox.com"+url;
   const hdrs={"Authorization":"Bearer "+token,"Accept":"application/json"};
@@ -550,653 +445,787 @@ async function apiGet(url){
       const txt=await res.text();
       let parsed=JSON.parse(txt);
       if(parsed.contents){try{parsed=JSON.parse(parsed.contents);}catch(e){}}
-      lg(p.n+" ✓","o"); return parsed;
+      return parsed;
     }catch(e){
       if(e.message==="TOKEN_EXPIRED") throw new Error("Token expired — click ⚙ to update.");
-      lg(p.n+" ✗ "+e.message,"e");
+      lg(p.n+" ✗ "+e.message,"w");
     }
   }
   throw new Error("All proxies failed. Open via http://localhost:8080 not file://");
 }
-
-async function fetchQuotes(keys){
-  const d=await apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(keys));
-  return d?.data||{};
-}
-async function fetchOHLC(keys,interval="1day"){
-  const d=await apiGet("/v2/market-quote/ohlc?instrument_key="+encodeURIComponent(keys)+"&interval="+interval);
-  return d?.data||{};
-}
-async function fetchCandles(key,interval,fromDate,toDate){
-  // /v2/historical-candle/{instrument_key}/{interval}/{to_date}/{from_date}
-  const d=await apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/"+interval+"/"+toDate+"/"+fromDate);
+async function fetchQ(keys){const d=await apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(keys));return d?.data||{};}
+async function fetchCandles(key,from,to){
+  const d=await apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/day/"+to+"/"+from);
   return d?.data?.candles||[];
 }
-async function fetchOptionsChain(key,expiry){
-  const d=await apiGet("/v2/option/chain?instrument_key="+encodeURIComponent(key)+"&expiry_date="+expiry);
-  return d?.data||[];
-}
-async function fetchOptionExpiries(key){
-  const d=await apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key));
-  return d?.data||[];
+async function fetchOptions(key,expiry){const d=await apiGet("/v2/option/chain?instrument_key="+encodeURIComponent(key)+"&expiry_date="+expiry);return d?.data||[];}
+async function fetchExpiries(key){const d=await apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key));return(d?.data||[]).map(e=>e.expiry||e).filter(Boolean).sort();}
+
+// ═══════════════════════════════════════════
+//  TECHNICAL CALCULATIONS (from PRO_*.cs)
+// ═══════════════════════════════════════════
+
+// RSI(14) — oldest first input
+function calcRSI(closes,p=14){
+  if(closes.length<p+1) return null;
+  let g=0,l=0;
+  for(let i=1;i<=p;i++){const d=closes[i]-closes[i-1];if(d>0)g+=d;else l+=Math.abs(d);}
+  let ag=g/p,al=l/p;
+  for(let i=p+1;i<closes.length;i++){const d=closes[i]-closes[i-1];ag=(ag*(p-1)+(d>0?d:0))/p;al=(al*(p-1)+(d<0?Math.abs(d):0))/p;}
+  return al===0?100:+(100-100/(1+ag/al)).toFixed(2);
 }
 
-// ════════════════════════════════════════════
-//  RSI CALCULATION (14-period)
-// ════════════════════════════════════════════
-function calcRSI(candles,period=14){
-  // candles: [[ts,o,h,l,close,vol],...] newest first — reverse to oldest first
-  const closes=candles.slice().reverse().map(c=>parseFloat(c[4]));
-  if(closes.length<period+1) return null;
-  let gains=0,losses=0;
-  for(let i=1;i<=period;i++){
-    const d=closes[i]-closes[i-1];
-    if(d>0) gains+=d; else losses+=Math.abs(d);
+// EMA
+function calcEMA(closes,p){
+  const k=2/(p+1);
+  let ema=closes.slice(0,p).reduce((a,b)=>a+b,0)/p;
+  for(let i=p;i<closes.length;i++) ema=closes[i]*k+ema*(1-k);
+  return ema;
+}
+
+// MACD — is histogram positive? (MACD > Signal)
+function calcMACD(closes){
+  if(closes.length<35) return null;
+  // Need 26 periods for EMA26 + 9 for signal = 35 minimum
+  const ema12=calcEMA(closes,12), ema26=calcEMA(closes,26);
+  const macdLine=ema12-ema26;
+  // Signal = 9-period EMA of MACD (approximate with last 9 MACD values)
+  // Simplified: use macd > 0 as bullish (crossover approximation)
+  return macdLine;
+}
+
+// ATR (Average True Range over last 14 periods)
+function calcATR(candles){
+  // candles: [ts,o,h,l,c,v] newest first
+  if(candles.length<15) return null;
+  const trs=[];
+  for(let i=0;i<14;i++){
+    const [,o,h,l,c]=candles[i].map(Number);
+    const prevC=candles[i+1]?Number(candles[i+1][4]):c;
+    trs.push(Math.max(h-l,Math.abs(h-prevC),Math.abs(l-prevC)));
   }
-  let avgGain=gains/period, avgLoss=losses/period;
-  for(let i=period+1;i<closes.length;i++){
-    const d=closes[i]-closes[i-1];
-    avgGain=(avgGain*(period-1)+(d>0?d:0))/period;
-    avgLoss=(avgLoss*(period-1)+(d<0?Math.abs(d):0))/period;
+  return trs.reduce((a,b)=>a+b,0)/14;
+}
+
+// MA check
+function isAboveMA(closes,period){
+  if(closes.length<period) return null;
+  const ma=closes.slice(-period).reduce((a,b)=>a+b,0)/period;
+  return closes[closes.length-1]>ma;
+}
+
+// Candle Patterns (PRO_CandlePatternRecognizer.cs)
+// candles: [ts,o,h,l,c,v] newest first → index 0=latest
+function detectPatterns(candles){
+  const p={bullishEngulfing:false,bearishEngulfing:false,hammer:false,shootingStar:false,doji:false,morningStar:false,eveningStar:false};
+  if(candles.length<3) return p;
+  const get=(i)=>{const[,o,h,l,c]=candles[i].map(Number);return{o,h,l,c,body:Math.abs(c-o),range:h-l,bullish:c>o};};
+  const c0=get(0),c1=get(1),c2=get(2);
+
+  // Bullish Engulfing: c1 bearish, c0 bullish, c0 body engulfs c1
+  if(!c1.bullish&&c0.bullish&&c0.o<c1.c&&c0.c>c1.o) p.bullishEngulfing=true;
+  // Bearish Engulfing
+  if(c1.bullish&&!c0.bullish&&c0.o>c1.c&&c0.c<c1.o) p.bearishEngulfing=true;
+  // Hammer: small body at top, lower shadow ≥2× body, upper shadow ≤0.1× range
+  if(c0.range>0){
+    const lowerShadow=Math.min(c0.o,c0.c)-c0.l;
+    const upperShadow=c0.h-Math.max(c0.o,c0.c);
+    if(lowerShadow>=2*c0.body&&upperShadow<=0.1*c0.range&&c0.body>0) p.hammer=true;
+    // Shooting Star: small body at bottom, upper shadow ≥2× body
+    if(upperShadow>=2*c0.body&&lowerShadow<=0.1*c0.range&&c0.body>0) p.shootingStar=true;
+    // Doji: body < 5% of range
+    if(c0.body/c0.range<0.05) p.doji=true;
   }
-  if(avgLoss===0) return 100;
-  const rs=avgGain/avgLoss;
-  return +(100-(100/(1+rs))).toFixed(2);
+  // Morning Star: c2 bearish large, c1 small body (doji-like), c0 bullish large
+  if(!c2.bullish&&c2.body>c2.range*0.4&&c1.body<c1.range*0.2&&c0.bullish&&c0.body>c0.range*0.4) p.morningStar=true;
+  // Evening Star
+  if(c2.bullish&&c2.body>c2.range*0.4&&c1.body<c1.range*0.2&&!c0.bullish&&c0.body>c0.range*0.4) p.eveningStar=true;
+
+  return p;
 }
 
-// ════════════════════════════════════════════
-//  SIGNAL ENGINE — STOCKS
-// ════════════════════════════════════════════
-function classifyStock(ltp,prev,high,low,vol,avgVol,rsi){
-  const chgPct=prev?((ltp-prev)/prev)*100:0;
-  const volSpike=avgVol>0&&vol>=avgVol*CRIT.volMult;
-  const signals=[];
+// ═══════════════════════════════════════════
+//  PRO_MarketDataService logic
+// ═══════════════════════════════════════════
+function interpVIX(v){if(v>25)return{txt:"Panic",score:20};if(v>20)return{txt:"High",score:40};if(v>15)return{txt:"Normal",score:70};return{txt:"Low",score:90};}
+function interpPCR(p){if(p>1.2)return{txt:"Very Bullish",score:90};if(p>0.8)return{txt:"Bullish",score:70};if(p>0.6)return{txt:"Neutral",score:50};return{txt:"Bearish",score:30};}
 
-  // RSI signals
-  if(rsi!==null){
-    if(rsi<=CRIT.rsiOS) signals.push({type:"RSI_BUY",  label:"RSI "+rsi+" (Oversold)",  score:3, action:"BUY"});
-    if(rsi>=CRIT.rsiOB) signals.push({type:"RSI_SELL", label:"RSI "+rsi+" (Overbought)", score:3, action:"SELL"});
+// ═══════════════════════════════════════════
+//  PRO_ConfidenceCalculator
+//  Confidence = Signal×35% + Market×25% + Volume×20% + PriceAction×20%
+// ═══════════════════════════════════════════
+function calcConfidence(inds, vixScore, pcrScore, niftyBullish, sectorScore, vol, avgVol, patterns){
+  // Signal: 7 indicators, 5+ = 90pts
+  const numInds=inds.filter(Boolean).length;
+  const sigScore=Math.min(100,numInds/5*90);
+
+  // Market context
+  const niftyScore=niftyBullish?80:40;
+  const mktScore=(vixScore+pcrScore+niftyScore+sectorScore)/4;
+
+  // Volume profile
+  const volRatio=avgVol>0?vol/avgVol:1;
+  const volScore=Math.min(100,volRatio*50);
+
+  // Price action (candle patterns)
+  const hasBullish=patterns.bullishEngulfing||patterns.hammer||patterns.morningStar;
+  const hasBearish=patterns.bearishEngulfing||patterns.shootingStar||patterns.eveningStar;
+  const paScore=hasBullish?80:hasBearish?30:45;
+
+  return +(sigScore*0.35 + mktScore*0.25 + volScore*0.20 + paScore*0.20).toFixed(1);
+}
+
+// ═══════════════════════════════════════════
+//  PRO_RiskCalculator
+//  Risk = Volatility×30% + Position×25% + Market×25% + Time×20%
+// ═══════════════════════════════════════════
+function calcRisk(ltp,sl,atr,vix){
+  // Volatility (ATR based): ATR/LTP * 1000, clamped 15-70
+  const atrRatio=atr?Math.min(70,Math.max(15,atr/ltp*1000)):35;
+  // Position (SL distance): 1-50% of entry, mapped 10-70
+  const slDist=ltp>0?((ltp-sl)/ltp)*100:2;
+  const posScore=Math.min(70,Math.max(10,slDist*7));
+  // Market (VIX): <15:10, 15-20:30, 20-25:50, >25:80
+  const mktScore=vix>25?80:vix>20?50:vix>15?30:10;
+  // Time: neutral for stocks = 20
+  return +(atrRatio*0.30+posScore*0.25+mktScore*0.25+20*0.20).toFixed(1);
+}
+
+// ═══════════════════════════════════════════
+//  PRO_PotentialCalculator
+// ═══════════════════════════════════════════
+function calcPotential(ltp,target,sl,numInds){
+  const base=(target-ltp)/ltp*100;
+  const rr=(target-ltp)/(ltp-sl||1);
+  const rrCapped=Math.min(3.0,rr);
+  // WinRate heuristic: 35% + (numInds/7)*40%
+  const winRate=0.35+(numInds/7)*0.40;
+  const adjusted=base*winRate*rrCapped;
+  // Expected Value: (winRate×base%) - ((1-winRate)×SL%)
+  const slDist=Math.abs((ltp-sl)/ltp*100);
+  const ev=winRate*base-(1-winRate)*slDist;
+  // Targets
+  const cons=ltp+(target-ltp)*0.6;
+  const mod=target;
+  const agg=ltp+(target-ltp)*1.5;
+  return {base:+base.toFixed(2),rr:+rr.toFixed(2),winRate:+(winRate*100).toFixed(0),adjusted:+adjusted.toFixed(2),ev:+ev.toFixed(2),cons,mod,agg};
+}
+
+// ═══════════════════════════════════════════
+//  PRO_AnalysisService — GetRecommendation
+// ═══════════════════════════════════════════
+function getRecommendation(conf,pot,risk,rr){
+  if(conf>=80&&pot>=12&&risk<30&&rr>=2.5) return "STRONG BUY";
+  if(conf>=70&&pot>=8 &&risk<40&&rr>=1.5) return "BUY";
+  if(conf>=65&&pot>=5 &&risk<50&&rr>=1.5) return "MODERATE";
+  if(conf>=50&&pot>=0) return "WATCH";
+  return "AVOID";
+}
+
+// ═══════════════════════════════════════════
+//  AUTO TARGETS from RSI + ATR
+// ═══════════════════════════════════════════
+function autoTargets(ltp,high,low,atr,rsi,chgPct){
+  const atrV=atr||ltp*0.015;
+  let target,sl;
+  if(chgPct>=0){
+    target=+(ltp+atrV*2).toFixed(2);
+    sl=+(Math.max(low,ltp-atrV*1.5)).toFixed(2);
+  } else {
+    target=+(ltp-atrV*2).toFixed(2);
+    sl=+(Math.min(high,ltp+atrV*1.5)).toFixed(2);
   }
-  // Volume spike
-  if(volSpike){
-    const a=chgPct>=0?"BUY":"SELL";
-    signals.push({type:"VOL_SPIKE",label:"Vol ×"+((vol/avgVol).toFixed(1))+" avg",score:2,action:a});
-  }
-  // Near H/L
-  const nearHigh=high?((high-ltp)/high)*100:999;
-  const nearLow =low ?((ltp-low)/low)*100 :999;
-  if(nearHigh<0.5&&chgPct>0) signals.push({type:"NEAR_HIGH",label:"Near Day High",score:1,action:"BUY"});
-  if(nearLow <0.5&&chgPct<0) signals.push({type:"NEAR_LOW", label:"Near Day Low", score:1,action:"SELL"});
-
-  if(!signals.length) return null;
-  // Pick highest score signal
-  signals.sort((a,b)=>b.score-a.score);
-  const top=signals[0];
-  return {action:top.action, signals, chgPct, volSpike, rsi, nearHigh, nearLow};
+  return{target,sl};
 }
 
-function stockReason(cls,sym){
-  const parts=[];
-  if(cls.rsi!==null){
-    if(cls.rsi<=CRIT.rsiOS) parts.push("RSI "+cls.rsi+" — oversold, potential reversal.");
-    else if(cls.rsi>=CRIT.rsiOB) parts.push("RSI "+cls.rsi+" — overbought, watch for pullback.");
-    else parts.push("RSI "+cls.rsi+" — neutral zone.");
-  }
-  if(cls.volSpike) parts.push("Volume spike detected — strong participation.");
-  if(cls.nearHigh<1) parts.push("Trading near day high — breakout momentum.");
-  if(cls.nearLow<1)  parts.push("Near day low — support test zone.");
-  return parts.join(" ") || "Monitoring for signal confirmation.";
+// ═══════════════════════════════════════════
+//  SECTOR STRENGTH
+// ═══════════════════════════════════════════
+function sectorScore(stocks){
+  const m={};
+  stocks.forEach(s=>{
+    if(!m[s.sec]) m[s.sec]={gains:0,count:0};
+    if(s.chgPct>0) m[s.sec].gains++;
+    m[s.sec].count++;
+  });
+  // Return map of sector → score (0-100)
+  const out={};
+  Object.entries(m).forEach(([sec,{gains,count}])=>out[sec]=Math.round(gains/count*100));
+  return out;
 }
 
-// ════════════════════════════════════════════
-//  SIGNAL ENGINE — OPTIONS
-// ════════════════════════════════════════════
-function classifyOption(strike,optType,ltp,iv,delta,theta,oi,prevOI){
-  const signals=[];
-  const absD=Math.abs(delta||0);
-  const oiChg=prevOI>0?((oi-prevOI)/prevOI)*100:0;
-
-  if(absD>=CRIT.deltaAlert) signals.push({label:"Delta "+delta?.toFixed(2)+" — strong directional", score:3});
-  if(iv>=CRIT.ivAlert)       signals.push({label:"IV "+iv?.toFixed(1)+"% — elevated volatility",    score:2});
-  if(oiChg>20)               signals.push({label:"OI +"+oiChg.toFixed(0)+"% — buildup",             score:2});
-  if(oiChg<-20)              signals.push({label:"OI "+oiChg.toFixed(0)+"% — unwinding",            score:1});
-  if(theta&&theta<-0.5)      signals.push({label:"Theta "+theta?.toFixed(2)+" — rapid decay",        score:1});
-
-  if(!signals.length) return null;
-  signals.sort((a,b)=>b.score-a.score);
-
-  // Action: for calls — high delta+OI = BUY CE (bullish). For puts — high delta+OI = BUY PE (bearish)
-  let action="WATCH";
-  if(absD>=CRIT.deltaAlert && oiChg>10) action = optType==="CE"?"BUY":"SELL";
-  else if(iv>=CRIT.ivAlert && oiChg<-10) action="SELL";
-
-  return {action, signals, iv, delta, theta, oi, oiChg, ltp};
-}
-
-// ════════════════════════════════════════════
-//  ALERTS
-// ════════════════════════════════════════════
-function fireAlert(sym,action,why,ltp,type="stock"){
-  const key=sym+action+type;
-  if(firedKeys.has(key)) return;
-  firedKeys.add(key);
-  const emoji=action==="BUY"?"📈":action==="SELL"?"📉":"👀";
-  alertLog.unshift({sym,action,why,ltp,type,time:ist(),emoji});
-  if(alertLog.length>50) alertLog.pop();
-  updateAlertBadge();
-  if(CRIT.notify&&Notification.permission==="granted"){
-    new Notification("FRIDAY: "+sym+" "+action,{
-      body:why+" · ₹"+fmt(ltp),
-      icon:"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2316a34a'/><text x='16' y='22' text-anchor='middle' font-size='18' fill='white' font-weight='900'>F</text></svg>"
-    });
-  }
-  if(activeTab==="alerts") renderAlerts();
-}
-function clearAlerts(){alertLog=[];firedKeys.clear();updateAlertBadge();renderAlerts();}
-function updateAlertBadge(){
-  const b=document.getElementById("alert-badge");
-  if(alertLog.length){b.textContent=alertLog.length;b.style.display="inline";}
-  else b.style.display="none";
-}
-
-// ════════════════════════════════════════════
-//  TICK — price refresh every 10s
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  TICK — live price updates every 10s
+// ═══════════════════════════════════════════
 async function tickPrices(){
-  if(ticking||scanning) return;
-  ticking=true;
+  if(scanning) return;
   try{
-    const idxData=await fetchQuotes(IDX_KEYS);
-    const nQ=idxData["NSE_INDEX:Nifty 50"], bQ=idxData["NSE_INDEX:Nifty Bank"];
-    if(nQ) tickStatCard("nifty-val","nifty-sub",nQ.last_price,nQ.ohlc?.close);
-    if(bQ) tickStatCard("bn-val","bn-sub",bQ.last_price,bQ.ohlc?.close);
-
-    // Tick card LTPs
+    const idxD=await fetchQ(IDX);
+    const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"];
+    if(nQ) tickStat("nifty-val","nifty-sub",nQ.last_price,nQ.ohlc?.close);
+    if(bQ) tickStat("bn-val","bn-sub",bQ.last_price,bQ.ohlc?.close);
+    // Tick LTPs in cards
     const ltpKeys=INST.slice(0,25).map(i=>i.key).join(",");
-    const sd=await fetchQuotes(ltpKeys);
-    document.querySelectorAll(".ltp-cell").forEach(el=>{
+    const sd=await fetchQ(ltpKeys);
+    document.querySelectorAll(".ltp-live").forEach(el=>{
       const sym=el.dataset.sym;
       const inst=INST.find(i=>i.s===sym); if(!inst) return;
       const q=sd[inst.key]; if(!q) return;
-      const ltp=q.last_price, prev=lastPrices[sym]||ltp;
-      if(Math.abs(ltp-prev)>0.01){
+      const ltp=q.last_price,old=lastPrices[sym]||ltp;
+      if(Math.abs(ltp-old)>0.01){
         el.textContent="₹"+fmt(ltp);
-        const up=ltp>prev;
-        el.className="cb-v ltp-cell "+(up?"up flash-up":"dn flash-dn");
-        setTimeout(()=>{el.className="cb-v ltp-cell "+(up?"up":"dn");},750);
+        const up=ltp>old;
+        el.className="cb-v ltp-live "+(up?"up flash-up":"dn flash-dn");
+        setTimeout(()=>{el.className="cb-v ltp-live "+(up?"up":"dn");},750);
+        lastPrices[sym]=ltp;
       }
-      lastPrices[sym]=ltp;
     });
-    // Update ticker
+    // Ticker update
     if(nQ&&bQ){
-      const nc=nQ.ohlc?.close?((nQ.last_price-nQ.ohlc.close)/nQ.ohlc.close)*100:0;
-      const bc=bQ.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close)*100:0;
-      document.getElementById("ticker").textContent=(
-        "  NIFTY ₹"+fmt(nQ.last_price,0)+" "+fmtC(nc)+
-        "  ●  BANKNIFTY ₹"+fmt(bQ.last_price,0)+" "+fmtC(bc)+
-        "  ●  TICK "+ist()+"  ●  ").repeat(7);
+      const nc=nQ.ohlc?.close?((nQ.last_price-nQ.ohlc.close)/nQ.ohlc.close*100):0;
+      const bc=bQ.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0;
+      document.getElementById("ticker").textContent=
+        ("  NIFTY ₹"+fmt(nQ.last_price,0)+" "+fmtC(nc)+"  ●  BANKNIFTY ₹"+fmt(bQ.last_price,0)+" "+fmtC(bc)+"  ●  "+ist()+"  ●  ").repeat(7);
     }
   }catch(e){lg("Tick: "+e.message,"w");}
-  finally{ticking=false;}
 }
-function tickStatCard(valId,subId,ltp,prev){
-  const ve=document.getElementById(valId),se=document.getElementById(subId);
-  if(!ve) return;
-  const old=parseFloat(ve.dataset.prev||ltp);
-  const chg=prev?((ltp-prev)/prev)*100:0;
+function tickStat(vid,sid,ltp,prev){
+  const ve=document.getElementById(vid),se=document.getElementById(sid); if(!ve) return;
+  const old=parseFloat(ve.dataset.prev||ltp),chg=prev?((ltp-prev)/prev*100):0;
   ve.textContent="₹"+fmt(ltp,0);
   ve.className="sc-val "+(chg>=0?"up":"dn")+(ltp>old?" flash-up":ltp<old?" flash-dn":"");
   ve.dataset.prev=ltp;
   if(se){se.textContent=fmtC(chg);se.className="sc-sub "+(chg>=0?"up":"dn");}
 }
 
-// ════════════════════════════════════════════
-//  FULL SCAN
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
+//  MAIN SCAN
+// ═══════════════════════════════════════════
 async function triggerScan(){
   if(scanning) return;
   scanning=true;
   const btn=document.getElementById("scan-btn");
   btn.disabled=true; btn.textContent="⏳";
-  document.getElementById("sdot").className="dot warn";
-  document.getElementById("stxt").textContent="Scanning...";
+  setStatus("scan","Scanning...");
   document.getElementById("err-stocks").style.display="none";
   document.getElementById("loading-stocks").style.display="block";
   document.getElementById("dash-stocks").style.display="none";
-  lg("=== Scan started ===");
+  lg("=== Professional scan started ===");
 
   try{
-    // 1. Indices
-    lg("Indices...");
-    const idxD=await fetchQuotes(IDX_KEYS);
-    const nQ=idxD["NSE_INDEX:Nifty 50"], bQ=idxD["NSE_INDEX:Nifty Bank"];
-    const parseIdx=q=>q?{ltp:q.last_price,chgPct:q.ohlc?.close?((q.last_price-q.ohlc.close)/q.ohlc.close)*100:0}:null;
-    const nifty=parseIdx(nQ), bn=parseIdx(bQ);
+    // 1. INDICES + VIX
+    lg("Fetching indices + VIX...");
+    const idxD=await fetchQ(IDX);
+    const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"],vQ=idxD["NSE_INDEX:India VIX"];
+    const vix=vQ?.last_price||15;
+    const niftyLtp=nQ?.last_price||0,niftyOpen=nQ?.ohlc?.open||niftyLtp;
+    const niftyBullish=niftyLtp>=niftyOpen;
+    const niftyChgPct=nQ?.ohlc?.close?((niftyLtp-nQ.ohlc.close)/nQ.ohlc.close*100):0;
+    const {txt:vixTxt,score:vixScore}=interpVIX(vix);
+    lg(`Nifty ${fmt(niftyLtp,0)} ${fmtC(niftyChgPct)} | VIX ${vix} (${vixTxt})`);
 
-    // 2. Stock quotes
+    // 2. PCR from Nifty options chain (quick fetch nearest expiry)
+    let pcr=1.0,pcrTxt="Neutral";
+    try{
+      const expiries=await fetchExpiries("NSE_INDEX|Nifty 50");
+      if(expiries.length){
+        const chain=await fetchOptions("NSE_INDEX|Nifty 50",expiries[0]);
+        const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
+        const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
+        pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
+        pcrTxt=interpPCR(pcr).txt;
+        lg(`PCR: ${pcr} (${pcrTxt})`);
+      }
+    }catch(e){lg("PCR fetch skipped: "+e.message,"w");}
+    const {score:pcrScore}=interpPCR(pcr);
+
+    // 3. STOCK QUOTES (2 batches)
     lg("Stocks batch 1...");
-    const d1=await fetchQuotes(INST.slice(0,25).map(i=>i.key).join(","));
+    const d1=await fetchQ(INST.slice(0,25).map(i=>i.key).join(","));
     lg("Stocks batch 2...");
-    const d2=await fetchQuotes(INST.slice(25).map(i=>i.key).join(","));
+    const d2=await fetchQ(INST.slice(25).map(i=>i.key).join(","));
     const allQ={...d1,...d2};
-    lg(Object.keys(allQ).length+" quotes");
+    lg(Object.keys(allQ).length+" quotes received");
 
-    // 3. OHLC for avg volume
-    lg("OHLC...");
-    const ohlcKeys=INST.slice(0,25).map(i=>i.key).join(",");
-    const ohlcD=await fetchOHLC(ohlcKeys,"1day");
-
-    // 4. RSI via historical candles for top stocks by volume
-    // Get RSI for top 10 by volume to save API calls
+    // 4. HISTORICAL CANDLES for key technical indicators (top 15 by volume)
     const today=new Date().toISOString().split("T")[0];
-    const from30=new Date(Date.now()-30*24*60*60*1000).toISOString().split("T")[0];
+    const from200=new Date(Date.now()-210*864e5).toISOString().split("T")[0];
+    const from30=new Date(Date.now()-35*864e5).toISOString().split("T")[0];
 
-    lg("RSI for key stocks...");
-    const rsiStocks=INST.slice(0,10); // top 10 for RSI (API rate limit friendly)
-    for(const inst of rsiStocks){
+    // Sort by volume, pick top 15 for deep analysis
+    const byVol=[...INST].sort((a,b)=>{
+      const va=allQ[a.key]?.volume||0,vb=allQ[b.key]?.volume||0;
+      return vb-va;
+    }).slice(0,15);
+
+    const techCache={};
+    for(const inst of byVol){
       try{
-        const candles=await fetchCandles(inst.key,"day",from30,today);
-        if(candles.length>=15) rsiCache[inst.s]=calcRSI(candles);
-        lg("RSI "+inst.s+": "+(rsiCache[inst.s]??"-"));
-      }catch(e){lg("RSI "+inst.s+" skip: "+e.message,"w");}
+        const candles=await fetchCandles(inst.key,from200,today);
+        if(candles.length>=15){
+          // candles are newest first
+          const closes=candles.map(c=>parseFloat(c[4])).reverse(); // oldest first for calculations
+          const rsi=calcRSI(closes);
+          const macdVal=calcMACD(closes);
+          const above50=isAboveMA(closes,50);
+          const above200=isAboveMA(closes,200);
+          const atr=calcATR(candles);
+          const patterns=detectPatterns(candles);
+          techCache[inst.s]={rsi,macdBullish:macdVal>0,above50,above200,atr,patterns,candles};
+          lg(`${inst.s}: RSI=${rsi} MACD=${macdVal?.toFixed(1)} ATR=${atr?.toFixed(2)}`);
+        }
+      }catch(e){lg("Candles "+inst.s+": "+e.message,"w");}
     }
 
-    // 5. Build stock list
+    // 5. BUILD STOCK ANALYSIS
     const stocks=[];
+    const secMap={};
     for(const [k,q] of Object.entries(allQ)){
       const inst=INST_MAP[k]; if(!inst||!q.last_price) continue;
       const ltp=q.last_price, prev=q.ohlc?.close||ltp;
       const high=q.ohlc?.high||ltp, low=q.ohlc?.low||ltp;
-      const vol=q.volume||0;
-      // Avg volume from OHLC data or fallback
-      const ohlcQ=ohlcD[k];
-      const avgVol=ohlcQ?.volume||vol||0;
-      const rsi=rsiCache[inst.s]||null;
-      const chgPct=prev?((ltp-prev)/prev)*100:0;
+      const vol=q.volume||0, avgVol=vol; // approximate avg with current (real avg needs OHLC history)
+      const chgPct=prev?((ltp-prev)/prev*100):0;
       lastPrices[inst.s]=ltp;
-      const cls=classifyStock(ltp,prev,high,low,vol,avgVol,rsi);
-      if(cls) fireAlert(inst.s,cls.action,cls.signals[0]?.label||"Signal",ltp,"stock");
-      stocks.push({...inst,ltp,prev,high,low,vol,avgVol,rsi,chgPct,cls});
+
+      const tech=techCache[inst.s]||{};
+      const rsi=tech.rsi||null;
+      const macdBullish=tech.macdBullish||false;
+      const above50=tech.above50||null;
+      const above200=tech.above200||null;
+      const atr=tech.atr||ltp*0.015;
+      const patterns=tech.patterns||{};
+
+      // 7 Confirming Indicators (from PRO_ConfidenceCalculator.cs)
+      const nearSupport=((ltp-low)/ltp*100)<2;
+      const bullishPattern=patterns.bullishEngulfing||patterns.hammer||patterns.morningStar;
+      const inds=[
+        rsi!==null&&rsi>=40&&rsi<=70,  // RSI 40-70
+        macdBullish,                    // MACD bullish
+        above50===true,                 // Above 50MA
+        above200===true,                // Above 200MA
+        vol>=avgVol*THRESH.vol,         // Volume spike
+        nearSupport,                    // Near support
+        bullishPattern,                 // Bullish pattern
+      ];
+      const numInds=inds.filter(Boolean).length;
+
+      // Sector
+      if(!secMap[inst.sec]) secMap[inst.sec]={gains:0,count:0};
+      if(chgPct>0) secMap[inst.sec].gains++;
+      secMap[inst.sec].count++;
+
+      // VIX-based sector score (simplified: use nifty trend + sector chg)
+      const secStr=secMap[inst.sec]?Math.round(secMap[inst.sec].gains/secMap[inst.sec].count*100):50;
+
+      // Confidence
+      const conf=calcConfidence(inds,vixScore,pcrScore,niftyBullish,secStr,vol,avgVol,patterns);
+
+      // Targets
+      const {target,sl}=autoTargets(ltp,high,low,atr,rsi,chgPct);
+
+      // Risk
+      const risk=calcRisk(ltp,sl,atr,vix);
+
+      // Potential
+      const pot=calcPotential(ltp,target,sl,numInds);
+
+      // Recommendation
+      const rec=getRecommendation(conf,pot.adjusted,risk,pot.rr);
+
+      // Filter: only show if meets thresholds (or is a sell with decent confidence)
+      const passes=(conf>=THRESH.conf&&pot.adjusted>=THRESH.pot&&risk<THRESH.risk&&pot.rr>=THRESH.rr)
+        ||(chgPct<=-1&&conf>=60&&pot.rr>=1.2);
+
+      stocks.push({
+        ...inst,ltp,prev,high,low,vol,avgVol,chgPct,rsi,macdBullish,above50,above200,
+        atr,patterns,inds,numInds,nearSupport,bullishPattern,
+        conf,risk,pot,rec,secStr,passes,
+        direction:chgPct>=0?"buy":"sell"
+      });
     }
 
-    // Sort: signalled first (by score), then by |chgPct|
-    stocks.sort((a,b)=>{
-      const sa=a.cls?a.cls.signals.reduce((s,x)=>s+x.score,0):0;
-      const sb=b.cls?b.cls.signals.reduce((s,x)=>s+x.score,0):0;
-      return sb-sa||Math.abs(b.chgPct)-Math.abs(a.chgPct);
-    });
+    // Filter & sort by Expected Value (ApplyProfessionalFilters)
+    const picks=stocks.filter(s=>s.passes).sort((a,b)=>b.pot.ev-a.pot.ev).slice(0,12);
+    lg(`${picks.length} picks pass professional filters`);
 
-    // Build picks
-    const picks=stocks.slice(0,12).map(s=>{
-      const action=s.cls?.action||"WATCH";
-      const tgtPct=(0.010+Math.abs(s.chgPct)*0.006)*(action==="SELL"?-1:1);
-      const slPct =(0.006+Math.abs(s.chgPct)*0.003)*(action==="SELL"?1:-1);
-      return{
-        ...s, action,
-        target:+(s.ltp*(1+tgtPct)).toFixed(2),
-        stopLoss:+(s.ltp*(1+slPct)).toFixed(2),
-        strength:Math.min(5,Math.max(1,Math.round((s.cls?.signals||[]).reduce((a,x)=>a+x.score,0)+1))),
-        reason: s.cls?stockReason(s.cls,s.s):"Monitoring — no active signal yet.",
-        timeframe:Math.abs(s.chgPct)>1.2?"Intraday":"Swing"
-      };
-    });
+    // Sector leaderboard
+    const topSec=Object.entries(secMap).sort((a,b)=>{
+      const sa=a[1].gains/a[1].count,sb=b[1].gains/b[1].count;
+      return sb-sa;
+    })[0]?.[0]||"Mixed";
 
-    // 6. Sentiment
-    const nChg=nifty?.chgPct||0;
-    const sent=nChg>0.5?"BULLISH":nChg<-0.5?"BEARISH":"NEUTRAL";
-    const sentScore=Math.round(Math.min(Math.max((nChg+3)/6*10,1),10));
-    const secCnt={};
-    picks.filter(p=>p.action==="BUY").forEach(p=>{secCnt[p.sec]=(secCnt[p.sec]||0)+1;});
-    const topSec=Object.entries(secCnt).sort((a,b)=>b[1]-a[1])[0]?.[0]||"Mixed";
-
+    const sent=niftyChgPct>0.5?"BULLISH":niftyChgPct<-0.5?"BEARISH":"NEUTRAL";
+    const sentScore=Math.round(Math.min(Math.max((niftyChgPct+3)/6*10,1),10));
     const scannedAt=ist();
     document.getElementById("scan-time").textContent=scannedAt;
     document.getElementById("mkt-closed").style.display=isOpen()?"none":"block";
 
-    renderStatsStocks(nifty,bn,sent,sentScore,topSec,scannedAt);
+    renderStatsStocks({ltp:niftyLtp,chgPct:niftyChgPct},{ltp:bQ?.last_price||0,chgPct:bQ?.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0},
+      vix,vixTxt,pcr,pcrTxt,sent,sentScore,topSec,scannedAt,picks.length);
     renderStockCards(picks);
-    updateTicker(nifty,bn,sent,sentScore,topSec);
-    renderAlerts();
-    await refreshPortfolio();
+    updateTicker(niftyLtp,niftyChgPct,bQ?.last_price||0,bQ?.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0,sent,sentScore,topSec,vix,pcr,vixTxt,pcrTxt);
 
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("dash-stocks").style.display="block";
-    document.getElementById("sdot").className="dot";
-    document.getElementById("stxt").textContent="Live";
-    scanSecs=300;
-    lg("✅ "+picks.length+" picks | "+sent+" "+sentScore+"/10 | "+alertLog.length+" alerts","o");
+    setStatus("live","Live"); scanSecs=300;
+    lg(`✅ Scan done: ${picks.length} picks | ${sent} | VIX ${vix} (${vixTxt}) | PCR ${pcr} (${pcrTxt})`,"o");
 
   }catch(e){
     lg("❌ "+e.message,"e");
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("err-stocks-msg").textContent=e.message;
     document.getElementById("err-stocks").style.display="block";
-    document.getElementById("sdot").className="dot err";
-    document.getElementById("stxt").textContent="Error";
+    setStatus("err","Error");
     document.getElementById("log-drawer").style.display="block";
   }finally{
-    scanning=false; btn.disabled=false; btn.textContent="▶ Scan";
+    scanning=false; const btn=document.getElementById("scan-btn");
+    btn.disabled=false; btn.textContent="▶ Scan";
   }
 }
 
-// ════════════════════════════════════════════
-//  OPTIONS CHAIN LOAD
-// ════════════════════════════════════════════
-async function loadOptionsChain(){
-  const underlying=document.getElementById("opt-underlying").value;
-  let expiry=document.getElementById("opt-expiry").value;
-  const strikesAround=+document.getElementById("opt-strikes").value||10;
-
+// ═══════════════════════════════════════════
+//  OPTIONS CHAIN AUTO-SCAN
+// ═══════════════════════════════════════════
+async function loadOptions(){
+  if(optLoading) return;
+  optLoading=true;
   document.getElementById("err-options").style.display="none";
   document.getElementById("loading-options").style.display="block";
   document.getElementById("dash-options").style.display="none";
-  lg("Loading options chain for "+underlying);
+  lg("=== Options scan started ===");
 
   try{
-    // Load expiries if not already
-    if(!expiry||expiry==="Loading..."){
-      const expiries=await fetchOptionExpiries(underlying);
-      const dates=(expiries||[]).map(e=>e.expiry||e).filter(Boolean).sort();
-      const sel=document.getElementById("opt-expiry");
-      sel.innerHTML=dates.map(d=>`<option value="${d}">${d}</option>`).join("");
-      expiry=dates[0];
-    }
-    if(!expiry) throw new Error("No expiry dates available.");
+    // Fetch spot prices for all underlyings
+    const spotKeys=OPT_UNDERLYINGS.map(u=>u.key).join(",");
+    const spotData=await fetchQ(spotKeys);
 
-    // Fetch option chain
-    lg("Fetching chain: "+underlying+" exp:"+expiry);
-    const chain=await fetchOptionsChain(underlying,expiry);
-    if(!chain||!chain.length) throw new Error("Empty options chain returned.");
-    lg(chain.length+" strikes loaded");
+    const allOptPicks=[];
+    const summaryByIndex=[];
 
-    // Get ATM from index price
-    const idxQ=await fetchQuotes(underlying);
-    const spotKey=Object.keys(idxQ)[0];
-    const spot=idxQ[spotKey]?.last_price||0;
-    lg("Spot: ₹"+fmt(spot,0));
+    for(const und of OPT_UNDERLYINGS){
+      try{
+        const spotQ=spotData[und.key.replace("|",":")];
+        const spot=spotQ?.last_price||0;
+        const spotChgPct=spotQ?.ohlc?.close?((spot-spotQ.ohlc.close)/spotQ.ohlc.close*100):0;
+        lg(`${und.name}: spot ₹${fmt(spot,0)} ${fmtC(spotChgPct)}`);
 
-    // Filter strikes around ATM
-    const atmStrike=Math.round(spot/50)*50; // round to nearest 50
-    const filteredChain=chain.filter(s=>{
-      const diff=Math.abs((s.strike_price||0)-atmStrike);
-      return diff<=strikesAround*50;
-    });
-    lg(filteredChain.length+" strikes in range (ATM: "+atmStrike+")");
+        // Get expiries, take nearest 2
+        const expiries=await fetchExpiries(und.key);
+        if(!expiries.length) continue;
 
-    // Classify each CE/PE
-    const optPicks=[];
-    for(const strike of filteredChain){
-      const sp=strike.strike_price;
-      for(const side of["call_options","put_options"]){
-        const opt=strike[side]; if(!opt) continue;
-        const md=opt.market_data, gr=opt.option_greeks;
-        if(!md?.ltp) continue;
-        const optType=side==="call_options"?"CE":"PE";
-        const cls=classifyOption(sp,optType,md.ltp,gr?.iv,gr?.delta,gr?.theta,md?.oi,md?.prev_oi||md?.oi);
-        if(cls){
-          fireAlert(sp+optType,cls.action,cls.signals[0]?.label||"Option signal",md.ltp,"option");
-          optPicks.push({
-            strike:sp, type:optType, ltp:md.ltp,
-            iv:gr?.iv, delta:gr?.delta, theta:gr?.theta,
-            oi:md?.oi, oiChg:cls.oiChg,
-            action:cls.action, signals:cls.signals,
-            strength:Math.min(5,Math.max(1,cls.signals.length+1)),
-            atm:sp===atmStrike
-          });
+        const expiry=expiries[0];
+        const chain=await fetchOptions(und.key,expiry);
+        lg(`${und.name} chain: ${chain.length} strikes (expiry ${expiry})`);
+
+        // PCR
+        const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
+        const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
+        const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
+        const pcrInfo=interpPCR(pcr);
+
+        summaryByIndex.push({name:und.name,spot,chgPct:spotChgPct,pcr,pcrTxt:pcrInfo.txt,expiry,strikes:chain.length});
+
+        // ATM strike
+        const atm=Math.round(spot/und.step)*und.step;
+
+        // Scan strikes within ±10% of spot
+        for(const row of chain){
+          const sp=row.strike_price;
+          if(Math.abs(sp-atm)>spot*0.10) continue;
+
+          for(const [side,optType] of [["call_options","CE"],["put_options","PE"]]){
+            const opt=row[side]; if(!opt) continue;
+            const md=opt.market_data,gr=opt.option_greeks;
+            if(!md?.ltp||md.ltp<0.5) continue;
+
+            const delta=gr?.delta||0, iv=gr?.iv||0, theta=gr?.theta||0, oi=md?.oi||0;
+            const prevOI=md?.prev_oi||oi;
+            const oiChg=prevOI>0?((oi-prevOI)/prevOI*100):0;
+            const absD=Math.abs(delta);
+
+            // Signal conditions
+            const signals=[];
+            if(absD>=THRESH.delta) signals.push({l:`Delta ${delta?.toFixed(2)}`,s:3});
+            if(iv>=20)            signals.push({l:`IV ${iv?.toFixed(1)}%`,s:2});
+            if(oiChg>20)          signals.push({l:`OI +${oiChg.toFixed(0)}%`,s:2});
+            if(oiChg<-15)         signals.push({l:`OI ${oiChg.toFixed(0)}% Unwinding`,s:1});
+            if(theta<-0.5)        signals.push({l:`Theta ${theta?.toFixed(2)}`,s:1});
+            if(sp===atm)          signals.push({l:"ATM",s:1});
+
+            if(!signals.length) continue;
+            const score=signals.reduce((a,x)=>a+x.s,0);
+
+            // Action
+            let action="WATCH";
+            if(absD>=THRESH.delta&&oiChg>10) action=optType==="CE"?"BUY":"SELL";
+            else if(iv>=25&&oiChg<-10) action="SELL";
+            else if(absD>=THRESH.delta) action="BUY";
+
+            allOptPicks.push({und:und.name,strike:sp,type:optType,ltp:md.ltp,iv,delta,theta,oi,oiChg,pcr,action,signals,score,atm:sp===atm,spot,expiry});
+          }
         }
-      }
+      }catch(e){lg(`${und.name} options error: ${e.message}`,"w");}
     }
-    optPicks.sort((a,b)=>{
-      const sa=a.signals.reduce((s,x)=>s+x.score,0);
-      const sb=b.signals.reduce((s,x)=>s+x.score,0);
-      return sb-sa;
-    });
 
-    // PCR
-    const totalCEOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
-    const totalPEOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
-    const pcr=totalCEOI>0?(totalPEOI/totalCEOI).toFixed(2):"—";
+    // Sort by score
+    allOptPicks.sort((a,b)=>b.score-a.score);
 
-    renderStatsOptions(spot,expiry,pcr,filteredChain.length,optPicks.length);
-    renderOptionCards(optPicks.slice(0,12));
+    renderStatsOptions(summaryByIndex);
+    renderOptionCards(allOptPicks.slice(0,16));
     document.getElementById("loading-options").style.display="none";
     document.getElementById("dash-options").style.display="block";
-    lg("✅ "+optPicks.length+" option signals | PCR "+pcr,"o");
+    lg(`✅ Options: ${allOptPicks.length} signals found`,"o");
 
   }catch(e){
-    lg("Options err: "+e.message,"e");
+    lg("Options ❌ "+e.message,"e");
     document.getElementById("loading-options").style.display="none";
     document.getElementById("err-options-msg").textContent=e.message;
     document.getElementById("err-options").style.display="block";
-  }
+  }finally{optLoading=false;}
 }
 
-// Load expiries on underlying change
-document.getElementById("opt-underlying").addEventListener("change",async function(){
-  const sel=document.getElementById("opt-expiry");
-  sel.innerHTML="<option>Loading...</option>";
+// ═══════════════════════════════════════════
+//  PORTFOLIO — from Upstox account
+// ═══════════════════════════════════════════
+async function loadPortfolio(){
+  if(portLoading||!token) return;
+  portLoading=true;
+  document.getElementById("err-port").style.display="none";
+  lg("Loading portfolio...");
   try{
-    const expiries=await fetchOptionExpiries(this.value);
-    const dates=(expiries||[]).map(e=>e.expiry||e).filter(Boolean).sort();
-    sel.innerHTML=dates.map(d=>`<option value="${d}">${d}</option>`).join("");
-  }catch(e){sel.innerHTML="<option>Error</option>";}
-});
+    // Fetch positions + holdings
+    const [posData,holdData]=await Promise.allSettled([
+      apiGet("/v2/portfolio/short-term-positions"),
+      apiGet("/v2/portfolio/long-term-holdings")
+    ]);
 
-// ════════════════════════════════════════════
-//  PORTFOLIO
-// ════════════════════════════════════════════
-function togglePortForm(){
-  const f=document.getElementById("port-form");
-  f.style.display=f.style.display==="none"?"block":"none";
-}
-function addPosition(){
-  const sym=document.getElementById("pf-sym").value.trim().toUpperCase();
-  const type=document.getElementById("pf-type").value;
-  const qty=+document.getElementById("pf-qty").value;
-  const price=+document.getElementById("pf-price").value;
-  const strike=+document.getElementById("pf-strike").value||null;
-  const expiry=document.getElementById("pf-expiry").value||null;
-  if(!sym||!qty||!price){alert("Symbol, Qty and Avg Price are required.");return;}
-  portfolio.push({sym,type,qty,price,strike,expiry,ltp:null,pnl:null});
-  localStorage.setItem("friday_portfolio",JSON.stringify(portfolio));
-  togglePortForm();
-  ["pf-sym","pf-qty","pf-price","pf-strike","pf-expiry"].forEach(id=>document.getElementById(id).value="");
-  renderPortfolio();
-  refreshPortfolio();
-}
-function removePosition(idx){
-  portfolio.splice(idx,1);
-  localStorage.setItem("friday_portfolio",JSON.stringify(portfolio));
-  renderPortfolio();
-}
-async function refreshPortfolio(){
-  if(!portfolio.length||!token) return;
-  // Fetch LTPs for unique stock symbols
-  const syms=[...new Set(portfolio.filter(p=>p.type==="stock").map(p=>p.sym))];
-  if(!syms.length){renderPortfolio();return;}
-  try{
-    const keys=syms.map(s=>{const i=INST.find(x=>x.s===s);return i?i.key:null;}).filter(Boolean).join(",");
-    if(!keys){renderPortfolio();return;}
-    const qd=await fetchQuotes(keys);
-    portfolio.forEach(pos=>{
-      if(pos.type!=="stock") return;
-      const inst=INST.find(i=>i.s===pos.sym); if(!inst) return;
-      const q=qd[inst.key]; if(!q) return;
-      pos.ltp=q.last_price;
-      pos.pnl=(q.last_price-pos.price)*pos.qty;
-    });
-    localStorage.setItem("friday_portfolio",JSON.stringify(portfolio));
-    renderPortfolio();
-  }catch(e){lg("Portfolio refresh: "+e.message,"w");}
-}
-function renderPortfolio(){
-  const totalCost=portfolio.reduce((s,p)=>s+(p.price*p.qty),0);
-  const totalPnl =portfolio.reduce((s,p)=>s+(p.pnl||0),0);
-  const totalVal =totalCost+totalPnl;
-  const pnlPct   =totalCost?((totalPnl/totalCost)*100).toFixed(2):0;
+    const positions=(posData.status==="fulfilled"?posData.value?.data:[]);
+    const holdings=(holdData.status==="fulfilled"?holdData.value?.data:[]);
+    lg(`Portfolio: ${positions?.length||0} positions, ${holdings?.length||0} holdings`);
 
-  document.getElementById("port-summary").innerHTML=portfolio.length?`
-    <div class="sc"><div class="sc-lbl">INVESTED</div><div class="sc-val bl">₹${fmt(totalCost)}</div></div>
-    <div class="sc"><div class="sc-lbl">CURRENT VALUE</div><div class="sc-val bl">₹${fmt(totalVal)}</div></div>
-    <div class="sc"><div class="sc-lbl">TOTAL P&L</div><div class="sc-val ${totalPnl>=0?"up":"dn"}">₹${fmt(totalPnl)}</div><div class="sc-sub ${totalPnl>=0?"up":"dn"}">${totalPnl>=0?"+":""}${pnlPct}%</div></div>
-    <div class="sc"><div class="sc-lbl">POSITIONS</div><div class="sc-val bl">${portfolio.length}</div></div>`:"";
+    const all=[
+      ...(positions||[]).map(p=>({
+        sym:p.trading_symbol||p.instrument_token||"—",
+        type:p.product||"INTRADAY",
+        qty:p.quantity||0,
+        avg:p.average_price||0,
+        ltp:p.last_price||0,
+        pnl:p.pnl||((p.last_price-p.average_price)*p.quantity)||0,
+        source:"position"
+      })),
+      ...(holdings||[]).map(h=>({
+        sym:h.trading_symbol||h.instrument_token||"—",
+        type:"LONG-TERM",
+        qty:h.quantity||0,
+        avg:h.average_price||0,
+        ltp:h.last_price||0,
+        pnl:h.pnl||((h.last_price-h.average_price)*h.quantity)||0,
+        source:"holding"
+      }))
+    ];
 
-  if(!portfolio.length){
-    document.getElementById("port-empty").style.display="block";
-    document.getElementById("port-table-wrap").style.display="none";
-    return;
-  }
-  document.getElementById("port-empty").style.display="none";
-  document.getElementById("port-table-wrap").style.display="block";
-  document.getElementById("port-rows").innerHTML=portfolio.map((p,i)=>{
-    const pnlC=p.pnl===null?"—":((p.pnl>=0?"<span class='up'>+":"<span class='dn'>")+fmt(p.pnl)+"</span>");
-    const ltpTxt=p.ltp?"₹"+fmt(p.ltp):"—";
-    return`<div class="pt-row">
-      <span class="pt-sym">${p.sym}<br><span style="font-size:9px;color:#94a3b8;font-weight:400">${p.type}${p.strike?" "+p.strike:""}${p.expiry?" "+p.expiry:""}</span></span>
-      <span style="color:#6b7280;font-size:10px">${p.type}</span>
-      <span>${p.qty}</span>
-      <span>₹${fmt(p.price)}</span>
-      <span>${ltpTxt}</span>
-      <span>${pnlC}</span>
-      <span class="pt-del" onclick="removePosition(${i})">✕</span>
-    </div>`;
-  }).join("");
+    if(!all.length){
+      document.getElementById("port-empty").textContent="No positions or holdings found in your Upstox account.";
+      document.getElementById("port-empty").style.display="block";
+      document.getElementById("port-content").style.display="none";
+    } else {
+      renderPortfolio(all);
+    }
+  }catch(e){
+    lg("Portfolio ❌ "+e.message,"e");
+    document.getElementById("err-port-msg").textContent=e.message;
+    document.getElementById("err-port").style.display="block";
+    document.getElementById("port-empty").style.display="none";
+  }finally{portLoading=false;}
 }
 
-// ════════════════════════════════════════════
+// ═══════════════════════════════════════════
 //  RENDER — STOCKS
-// ════════════════════════════════════════════
-function renderStatsStocks(n,b,sent,score,topSec,at){
+// ═══════════════════════════════════════════
+function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentScore,topSec,at,cnt){
   const sc={BULLISH:"#16a34a",BEARISH:"#dc2626",NEUTRAL:"#d97706"}[sent];
+  const vixC=vix>25?"dn":vix>20?"am":"up";
+  const pcrC=pcr>1?"up":pcr>0.7?"am":"dn";
   document.getElementById("stats-stocks").innerHTML=`
-    <div class="sc"><div class="sc-lbl">NIFTY 50 · LIVE</div><div class="sc-val ${clr(n?.chgPct||0)}" id="nifty-val" data-prev="${n?.ltp||0}">₹${fmt(n?.ltp||0,0)}</div><div class="sc-sub ${clr(n?.chgPct||0)}" id="nifty-sub">${fmtC(n?.chgPct||0)}</div><div class="sc-note">↻ ticks every 10s</div></div>
-    <div class="sc"><div class="sc-lbl">BANK NIFTY · LIVE</div><div class="sc-val ${clr(b?.chgPct||0)}" id="bn-val" data-prev="${b?.ltp||0}">₹${fmt(b?.ltp||0,0)}</div><div class="sc-sub ${clr(b?.chgPct||0)}" id="bn-sub">${fmtC(b?.chgPct||0)}</div><div class="sc-note">↻ ticks every 10s</div></div>
-    <div class="sc"><div class="sc-lbl">LEADING SECTOR</div><div class="sc-val bl">${topSec}</div><div class="sc-sub" style="color:#6b7280">${at}</div></div>
-    <div class="sc" style="border-color:${sc}22"><div class="sc-lbl">SENTIMENT</div><div class="sc-val" style="color:${sc}">${sent}</div><div style="display:flex;gap:2px;margin-top:5px">${Array(10).fill(0).map((_,i)=>`<div style="flex:1;height:4px;border-radius:2px;background:${i<score?sc:"#e2e8f0"}"></div>`).join("")}</div></div>`;
-}
-function renderStockCards(picks){
-  document.getElementById("stocks-title").textContent="Nifty50 — "+picks.length+" Signals";
-  const vc={BUY:"#15803d",SELL:"#b91c1c",WATCH:"#b45309",neutral:"#6b7280"};
-  const bc=a=>a==="BUY"?"#16a34a":a==="SELL"?"#dc2626":"#d97706";
-  document.getElementById("cards-stocks").innerHTML=picks.map((p,i)=>{
-    const ac=p.action.toLowerCase();
-    const up=(p.action==="SELL"?"-":"+")+Math.abs(((p.target-p.ltp)/p.ltp)*100).toFixed(1)+"%";
-    const rsiTag=p.rsi!==null?`<span class="tag ${ac}">RSI ${p.rsi}</span>`:"";
-    const volTag=p.volSpike?`<span class="tag ${ac}">Vol Spike</span>`:"";
-    return`<div class="card ${ac}" style="animation:fadeIn .3s ease ${i*.035}s both">
-      <div class="card-rank">${i+1}</div>
-      <span class="card-act ${ac}">${p.action}</span>
-      <div class="card-head"><div class="card-sym">${p.s}</div><div class="card-co">${p.n}</div></div>
-      <div class="card-row card-row-3" style="gap:1px">
-        <div class="cbox ${ac}"><div class="cb-l">LTP</div><div class="cb-v ltp-cell ${clr(p.chgPct)}" data-sym="${p.s}">₹${fmt(p.ltp)}</div><div class="cb-s ${clr(p.chgPct)}">${p.chgPct>=0?"▲":"▼"}${Math.abs(p.chgPct).toFixed(2)}%</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">TARGET</div><div class="cb-v" style="color:${vc[p.action]}">₹${fmt(p.target)}</div><div class="cb-s" style="color:${vc[p.action]}">${up}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">STOP LOSS</div><div class="cb-v dn">₹${fmt(p.stopLoss)}</div><div class="cb-s" style="color:#6b7280">${p.timeframe}</div></div>
-      </div>
-      <div class="card-row card-row-2" style="gap:1px;margin-bottom:9px">
-        <div class="cbox ${ac}"><div class="cb-l">VOLUME</div><div class="cb-v" style="color:#374151;font-size:12px">${fmtVol(p.vol)}</div><div class="cb-s" style="color:#6b7280">Avg ${fmtVol(p.avgVol)}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">RSI (14)</div><div class="cb-v ${p.rsi<=CRIT.rsiOS?"up":p.rsi>=CRIT.rsiOB?"dn":"am"}" style="font-size:14px">${p.rsi??"-"}</div><div class="cb-s" style="color:#6b7280">${p.rsi?p.rsi<=CRIT.rsiOS?"Oversold":p.rsi>=CRIT.rsiOB?"Overbought":"Neutral":""}</div></div>
-      </div>
-      <div class="card-tags"><span class="tag ${ac}">${p.sec}</span><span class="tag ${ac}">${p.timeframe}</span>${rsiTag}${volTag}</div>
-      <div class="str-r">${Array(5).fill(0).map((_,j)=>`<div class="str-s" style="background:${j<p.strength?bc(p.action):"#e2e8f0"}"></div>`).join("")}<span class="str-l">Signal strength</span></div>
-      <div class="card-why ${ac}">${p.reason}</div>
-    </div>`;
-  }).join("");
+    <div class="sc"><div class="sc-lbl">NIFTY 50 · LIVE</div><div class="sc-val ${clr(n.chgPct)}" id="nifty-val" data-prev="${n.ltp}">₹${fmt(n.ltp,0)}</div><div class="sc-sub ${clr(n.chgPct)}" id="nifty-sub">${fmtC(n.chgPct)}</div><div class="sc-note">↻ 10s tick</div></div>
+    <div class="sc"><div class="sc-lbl">BANK NIFTY · LIVE</div><div class="sc-val ${clr(b.chgPct)}" id="bn-val" data-prev="${b.ltp}">₹${fmt(b.ltp,0)}</div><div class="sc-sub ${clr(b.chgPct)}" id="bn-sub">${fmtC(b.chgPct)}</div><div class="sc-note">↻ 10s tick</div></div>
+    <div class="sc"><div class="sc-lbl">INDIA VIX</div><div class="sc-val ${vixC}">${vix?.toFixed(2)}</div><div class="sc-sub ${vixC}">${vixTxt}</div></div>
+    <div class="sc"><div class="sc-lbl">PCR (Nifty)</div><div class="sc-val ${pcrC}">${pcr}</div><div class="sc-sub ${pcrC}">${pcrTxt}</div></div>
+    <div class="sc"><div class="sc-lbl">SENTIMENT</div><div class="sc-val" style="color:${sc}">${sent}</div><div style="display:flex;gap:2px;margin-top:5px">${Array(10).fill(0).map((_,i)=>`<div style="flex:1;height:4px;border-radius:2px;background:${i<sentScore?sc:"#e2e8f0"}"></div>`).join("")}</div></div>
+    <div class="sc"><div class="sc-lbl">PICKS FOUND</div><div class="sc-val bl">${cnt}</div><div class="sc-sub" style="color:#64748b">${at}</div></div>`;
 }
 
-// ════════════════════════════════════════════
+function renderStockCards(picks){
+  const RC={
+    "STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid","SELL":"sell"
+  };
+  document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signals`;
+  document.getElementById("cards-stocks").innerHTML=picks.length?picks.map((p,i)=>{
+    const rc=RC[p.rec]||"watch",d=p.direction;
+    const indLabels=["RSI 40-70","MACD↑","50MA↑","200MA↑","Vol >"+THRESH.vol+"x","Near Supp","Pattern"];
+    const tgt=p.pot;
+    return`<div class="card ${rc}" style="animation-delay:${i*.04}s">
+      <div class="c-rank">${i+1}</div>
+      <span class="c-rec ${rc}">${p.rec}</span>
+      <div class="c-head"><div class="c-sym">${p.s} <span style="font-size:9px;color:#94a3b8;font-weight:400">${p.sec}</span></div><div class="c-name">${p.n}</div></div>
+      <!-- Price metrics -->
+      <div class="c-metrics cm3" style="gap:1px;margin-bottom:7px">
+        <div class="cbox ${d}"><div class="cb-l">LTP</div><div class="cb-v ltp-live ${clr(p.chgPct)}" data-sym="${p.s}">₹${fmt(p.ltp)}</div><div class="cb-s ${clr(p.chgPct)}">${p.chgPct>=0?"▲":"▼"}${Math.abs(p.chgPct).toFixed(2)}%</div></div>
+        <div class="cbox ${d}"><div class="cb-l">TARGET</div><div class="cb-v ${d==="buy"?"up":"dn"}">₹${fmt(p.pot.mod)}</div><div class="cb-s ${d==="buy"?"up":"dn"}">+${tgt.base.toFixed(1)}% base</div></div>
+        <div class="cbox ${d}"><div class="cb-l">STOP LOSS</div><div class="cb-v dn">₹${fmt(p.direction==="buy"?p.low*0.99:p.high*1.01)}</div><div class="cb-s" style="color:#64748b">R:R ${tgt.rr.toFixed(1)}:1</div></div>
+      </div>
+      <!-- Key analytics -->
+      <div class="c-metrics cm4" style="gap:1px;margin-bottom:7px">
+        <div class="cbox neutral"><div class="cb-l">CONFIDENCE</div><div class="cb-v ${p.conf>=70?"up":p.conf>=60?"am":"dn"}">${p.conf}%</div></div>
+        <div class="cbox neutral"><div class="cb-l">POTENTIAL</div><div class="cb-v ${p.pot.adjusted>=12?"up":p.pot.adjusted>=8?"am":"dn"}">${tgt.adjusted.toFixed(1)}%</div></div>
+        <div class="cbox neutral"><div class="cb-l">RISK</div><div class="cb-v ${p.risk<30?"up":p.risk<50?"am":"dn"}">${p.risk}%</div></div>
+        <div class="cbox neutral"><div class="cb-l">EXP. VALUE</div><div class="cb-v ${tgt.ev>=0?"up":"dn"}">${tgt.ev>=0?"+":""}${tgt.ev.toFixed(2)}%</div></div>
+      </div>
+      <!-- Technical metrics -->
+      <div class="c-metrics cm3" style="gap:1px;margin-bottom:7px">
+        <div class="cbox neutral"><div class="cb-l">RSI(14)</div><div class="cb-v ${p.rsi<=30?"up":p.rsi>=70?"dn":"am"}" style="font-size:14px">${p.rsi??"-"}</div><div class="cb-s" style="color:#64748b">${p.rsi?p.rsi<=30?"Oversold":p.rsi>=70?"Overbought":"Neutral":""}</div></div>
+        <div class="cbox neutral"><div class="cb-l">WIN RATE</div><div class="cb-v am">${tgt.winRate}%</div><div class="cb-s" style="color:#64748b">heuristic</div></div>
+        <div class="cbox neutral"><div class="cb-l">INDICATORS</div><div class="cb-v ${p.numInds>=5?"up":p.numInds>=3?"am":"dn"}">${p.numInds}/7</div><div class="cb-s" style="color:#64748b">confirming</div></div>
+      </div>
+      <!-- Confidence & risk bars -->
+      <div class="c-bars">
+        ${[["Confidence",p.conf,p.conf>=70?"#16a34a":p.conf>=60?"#d97706":"#dc2626"],["Risk",p.risk,p.risk<30?"#16a34a":p.risk<50?"#d97706":"#dc2626"],["Potential",Math.min(100,tgt.adjusted*5),"#1d4ed8"]].map(([l,v,c])=>`
+        <div class="bar-row">
+          <span class="bar-lbl">${l}</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100,v)}%;background:${c}"></div></div>
+          <span class="bar-val" style="color:${c}">${v}%</span>
+        </div>`).join("")}
+      </div>
+      <!-- 3 Targets -->
+      <div class="c-targets">
+        <div class="tgt cons"><div class="tgt-l">Conservative</div><div class="tgt-v up">₹${fmt(tgt.cons,0)}</div></div>
+        <div class="tgt mod"><div class="tgt-l">Moderate</div><div class="tgt-v bl">₹${fmt(tgt.mod,0)}</div></div>
+        <div class="tgt agg"><div class="tgt-l">Aggressive</div><div class="tgt-v pu">₹${fmt(tgt.agg,0)}</div></div>
+      </div>
+      <!-- 7 Indicators -->
+      <div class="c-inds">
+        ${indLabels.map((l,j)=>`<span class="ind ${p.inds[j]===true?"ok":p.inds[j]===false?"no":"na"}">${l}</span>`).join("")}
+      </div>
+      <!-- Candle patterns -->
+      ${Object.entries(p.patterns||{}).filter(([,v])=>v).map(([k])=>`<span class="ind ok" style="font-size:8px">📊 ${k.replace(/([A-Z])/g,' $1').trim()}</span>`).join("")}
+      <!-- Why -->
+      <div class="c-why ${rc}">
+        ${p.rec==="STRONG BUY"?"🔥 Strong momentum with "+p.numInds+"/7 indicators confirming.":
+          p.rec==="BUY"?"✅ "+p.numInds+"/7 indicators bullish.":
+          p.rec==="MODERATE"?"⚡ Moderate setup — "+p.numInds+"/7 indicators.":
+          p.rec==="WATCH"?"👀 Monitoring — awaiting confirmation.":
+          "⛔ Avoid — risk/reward unfavorable."}
+        ${p.rsi?" RSI "+p.rsi+(p.rsi<=30?" (oversold)":" ("+p.rsi>=70?"overbought":"neutral"+").")+"":" "}
+        ${p.macdBullish?" MACD bullish.":""} ${p.above50===true?" Above 50MA.":""} ${p.above200===true?" Above 200MA.":""}
+        VIX context in play. Win rate ~${tgt.winRate}%, R:R ${tgt.rr.toFixed(1)}:1, EV ${tgt.ev>=0?"+":""}${tgt.ev.toFixed(2)}%.
+      </div>
+    </div>`;
+  }).join(""):`<div class="empty-state">No picks pass the professional filters (Conf≥${THRESH.conf}%, Pot≥${THRESH.pot}%, Risk&lt;${THRESH.risk}%, R:R≥${THRESH.rr}).<br>Try relaxing thresholds in the settings.</div>`;
+}
+
+// ═══════════════════════════════════════════
 //  RENDER — OPTIONS
-// ════════════════════════════════════════════
-function renderStatsOptions(spot,expiry,pcr,strikes,signals){
-  const pcrC=pcr>1.2?"up":pcr<0.8?"dn":"am";
-  document.getElementById("stats-options").innerHTML=`
-    <div class="sc"><div class="sc-lbl">SPOT PRICE</div><div class="sc-val bl">₹${fmt(spot,0)}</div></div>
-    <div class="sc"><div class="sc-lbl">EXPIRY</div><div class="sc-val bl" style="font-size:13px">${expiry}</div></div>
-    <div class="sc"><div class="sc-lbl">PCR (PE/CE OI)</div><div class="sc-val ${pcrC}">${pcr}</div><div class="sc-sub" style="color:#6b7280">${pcr>1.2?"Bullish":pcr<0.8?"Bearish":"Neutral"}</div></div>
-    <div class="sc"><div class="sc-lbl">SIGNALS FOUND</div><div class="sc-val up">${signals}</div><div class="sc-sub" style="color:#6b7280">of ${strikes} strikes</div></div>`;
+// ═══════════════════════════════════════════
+function renderStatsOptions(summary){
+  document.getElementById("stats-options").innerHTML=summary.map(s=>{
+    const pcrC=s.pcr>1?"up":s.pcr>0.7?"am":"dn";
+    return`<div class="sc">
+      <div class="sc-lbl">${s.name} SPOT</div>
+      <div class="sc-val ${clr(s.chgPct)}">₹${fmt(s.spot,0)}</div>
+      <div class="sc-sub ${clr(s.chgPct)}">${fmtC(s.chgPct)}</div>
+      <div class="sc-note">PCR <span class="${pcrC}" style="font-weight:700">${s.pcr}</span> (${s.pcrTxt}) · ${s.expiry}</div>
+    </div>`;
+  }).join("");
 }
 function renderOptionCards(picks){
-  document.getElementById("opt-title").textContent="Options Signals — "+picks.length+" contracts";
-  const vc={BUY:"#15803d",SELL:"#b91c1c",WATCH:"#b45309"};
-  const bc=a=>a==="BUY"?"#16a34a":a==="SELL"?"#dc2626":"#d97706";
+  const RC={BUY:"buy",SELL:"sell",WATCH:"watch"};
+  document.getElementById("opt-title").textContent=`Options Signals · ${picks.length} contracts`;
   document.getElementById("cards-options").innerHTML=picks.map((p,i)=>{
-    const ac=p.action.toLowerCase();
-    const dColor=p.delta>=0?"up":"dn";
-    const ivColor=p.iv>=CRIT.ivAlert?"am":"bl";
-    return`<div class="card ${ac}" style="animation:fadeIn .3s ease ${i*.035}s both">
-      <div class="card-rank">${i+1}</div>
-      <span class="card-act ${ac}">${p.action}</span>
+    const rc=RC[p.action]||"watch";
+    const dC=p.delta>=0?"up":"dn";
+    const ivC=p.iv>=30?"dn":p.iv>=20?"am":"up";
+    return`<div class="card ${rc}" style="animation-delay:${i*.04}s">
+      <span class="c-rec ${rc}">${p.action}</span>
       ${p.atm?`<span style="position:absolute;top:11px;right:72px;background:#eff6ff;color:#1d4ed8;font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px">ATM</span>`:""}
-      <div class="card-head">
-        <div class="card-sym">${p.strike} ${p.type}</div>
-        <div class="card-co">${p.type==="CE"?"Call Option":"Put Option"} · Strike ₹${fmt(p.strike,0)}</div>
+      <div class="c-head">
+        <div class="c-sym">${p.und} · ${p.strike} ${p.type}</div>
+        <div class="c-name">${p.type==="CE"?"Call":"Put"} Option · Spot ₹${fmt(p.spot,0)} · Exp ${p.expiry}</div>
       </div>
-      <div class="card-row card-row-4" style="gap:1px">
-        <div class="cbox ${ac}"><div class="cb-l">PREMIUM</div><div class="cb-v bl">₹${fmt(p.ltp)}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">DELTA</div><div class="cb-v ${dColor}" style="font-size:13px">${p.delta?.toFixed(3)??"—"}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">IV %</div><div class="cb-v ${ivColor}" style="font-size:13px">${p.iv?.toFixed(1)??"—"}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">THETA</div><div class="cb-v dn" style="font-size:13px">${p.theta?.toFixed(3)??"—"}</div></div>
+      <div class="c-metrics cm4" style="gap:1px;margin-bottom:7px">
+        <div class="cbox ${rc}"><div class="cb-l">PREMIUM</div><div class="cb-v bl">₹${fmt(p.ltp)}</div></div>
+        <div class="cbox ${rc}"><div class="cb-l">DELTA Δ</div><div class="cb-v ${dC}" style="font-size:13px">${p.delta?.toFixed(3)??"—"}</div></div>
+        <div class="cbox ${rc}"><div class="cb-l">IV %</div><div class="cb-v ${ivC}" style="font-size:13px">${p.iv?.toFixed(1)??"—"}</div></div>
+        <div class="cbox ${rc}"><div class="cb-l">THETA Θ</div><div class="cb-v dn" style="font-size:13px">${p.theta?.toFixed(3)??"—"}</div></div>
       </div>
-      <div class="card-row card-row-2" style="gap:1px;margin-bottom:9px">
-        <div class="cbox ${ac}"><div class="cb-l">OPEN INTEREST</div><div class="cb-v" style="color:#374151;font-size:12px">${fmtVol(p.oi)}</div></div>
-        <div class="cbox ${ac}"><div class="cb-l">OI CHANGE</div><div class="cb-v ${p.oiChg>=0?"up":"dn"}" style="font-size:13px">${p.oiChg?.toFixed(1)??"—"}%</div></div>
+      <div class="c-metrics cm2" style="gap:1px;margin-bottom:7px">
+        <div class="cbox neutral"><div class="cb-l">OPEN INTEREST</div><div class="cb-v" style="color:#374151;font-size:12px">${fmtVol(p.oi)}</div></div>
+        <div class="cbox neutral"><div class="cb-l">OI CHANGE</div><div class="cb-v ${p.oiChg>=0?"up":"dn"}" style="font-size:13px">${p.oiChg?.toFixed(1)??"—"}%</div><div class="cb-s" style="color:#64748b">${p.oiChg>10?"Buildup":p.oiChg<-10?"Unwinding":"Stable"}</div></div>
       </div>
-      <div class="card-tags">${p.signals.map(s=>`<span class="tag ${ac}">${s.label}</span>`).join("")}</div>
-      <div class="str-r">${Array(5).fill(0).map((_,j)=>`<div class="str-s" style="background:${j<p.strength?bc(p.action):"#e2e8f0"}"></div>`).join("")}<span class="str-l">Signal strength</span></div>
-      <div class="card-why ${ac}">${p.signals.map(s=>s.label).join(" · ")}</div>
+      <div class="c-inds">${p.signals.map(s=>`<span class="ind ok">${s.l}</span>`).join("")}</div>
+      <div class="c-why ${rc}">
+        ${p.type==="CE"?"Call option":"Put option"} — ${p.signals.map(s=>s.l).join(" · ")}.
+        ${Math.abs(p.delta)>=THRESH.delta?"Strong directional bias (Delta "+p.delta?.toFixed(2)+").":""}
+        ${p.iv>=25?"Elevated IV suggests high volatility expectation.":""}
+      </div>
+    </div>`;
+  }).join("")||`<div class="empty-state">No option signals found. Options may not be trading or API limit reached.</div>`;
+}
+
+// ═══════════════════════════════════════════
+//  RENDER — PORTFOLIO
+// ═══════════════════════════════════════════
+function renderPortfolio(all){
+  const totalInv=all.reduce((s,p)=>s+p.avg*p.qty,0);
+  const totalPnl=all.reduce((s,p)=>s+(p.pnl||0),0);
+  const totalVal=totalInv+totalPnl;
+  const pnlPct=totalInv?((totalPnl/totalInv)*100).toFixed(2):0;
+
+  document.getElementById("port-summary").innerHTML=`
+    <div class="sc"><div class="sc-lbl">INVESTED</div><div class="sc-val bl">₹${fmt(totalInv)}</div></div>
+    <div class="sc"><div class="sc-lbl">CURRENT VALUE</div><div class="sc-val bl">₹${fmt(totalVal)}</div></div>
+    <div class="sc"><div class="sc-lbl">TOTAL P&L</div><div class="sc-val ${totalPnl>=0?"up":"dn"}">₹${fmt(totalPnl)}</div><div class="sc-sub ${totalPnl>=0?"up":"dn"}">${totalPnl>=0?"+":""}${pnlPct}%</div></div>
+    <div class="sc"><div class="sc-lbl">POSITIONS</div><div class="sc-val bl">${all.length}</div></div>`;
+
+  document.getElementById("port-empty").style.display="none";
+  document.getElementById("port-content").style.display="block";
+
+  document.getElementById("port-rows").innerHTML=all.map(p=>{
+    const pnlPctR=p.avg>0?((p.pnl/(p.avg*p.qty))*100).toFixed(2):0;
+    const pnlC=p.pnl>=0?"up":"dn";
+    return`<div class="ptbl-r">
+      <div>
+        <div style="font-weight:800;color:#0f172a">${p.sym}</div>
+        <div style="font-size:9px;color:#94a3b8">${p.type}</div>
+      </div>
+      <span style="color:#64748b;font-size:10px">${p.type}</span>
+      <span>${p.qty}</span>
+      <span>₹${fmt(p.avg)}</span>
+      <span>${p.ltp?"₹"+fmt(p.ltp):"—"}</span>
+      <span class="${pnlC}" style="font-weight:700">${p.pnl>=0?"+":""}₹${fmt(p.pnl)}</span>
+      <span class="${pnlC}" style="font-size:10px">${p.pnl>=0?"+":""}${pnlPctR}%</span>
     </div>`;
   }).join("");
 }
 
-// ════════════════════════════════════════════
-//  RENDER — ALERTS
-// ════════════════════════════════════════════
-function renderCriteriaPanel(){
-  document.getElementById("criteria-display").innerHTML=`
-    <div class="sc"><div class="sc-lbl">RSI OVERSOLD</div><div class="sc-val up">&lt; ${CRIT.rsiOS}</div><div class="sc-sub up">→ BUY signal</div></div>
-    <div class="sc"><div class="sc-lbl">RSI OVERBOUGHT</div><div class="sc-val dn">&gt; ${CRIT.rsiOB}</div><div class="sc-sub dn">→ SELL signal</div></div>
-    <div class="sc"><div class="sc-lbl">VOLUME SPIKE</div><div class="sc-val am">&gt; ${CRIT.volMult}× avg</div><div class="sc-sub am">→ momentum signal</div></div>
-    <div class="sc"><div class="sc-lbl">IV ALERT</div><div class="sc-val am">&gt; ${CRIT.ivAlert}%</div><div class="sc-sub am">→ options signal</div></div>
-    <div class="sc"><div class="sc-lbl">DELTA ALERT</div><div class="sc-val bl">|Δ| ≥ ${CRIT.deltaAlert}</div><div class="sc-sub bl">→ directional signal</div></div>
-    <div class="sc"><div class="sc-lbl">NOTIFICATIONS</div><div class="sc-val ${CRIT.notify?"up":"am"}">${CRIT.notify?"ON":"OFF"}</div></div>`;
-}
-function renderAlerts(){
-  if(!alertLog.length){
-    document.getElementById("alerts-empty").style.display="block";
-    document.getElementById("alerts-list").style.display="none";
-    return;
-  }
-  document.getElementById("alerts-empty").style.display="none";
-  document.getElementById("alerts-list").style.display="block";
-  const bc=a=>a==="BUY"?"#16a34a":a==="SELL"?"#dc2626":"#d97706";
-  document.getElementById("alerts-cards").innerHTML=alertLog.slice(0,20).map((a,i)=>`
-    <div class="card ${a.action.toLowerCase()}" style="animation:fadeIn .2s ease ${i*.02}s both">
-      <span class="card-act ${a.action.toLowerCase()}">${a.action}</span>
-      <div class="card-head">
-        <div class="card-sym">${a.emoji} ${a.sym}</div>
-        <div class="card-co">${a.type==="option"?"Options":"Stock"} · ${a.time}</div>
-      </div>
-      <div class="cbox ${a.action.toLowerCase()}" style="margin-bottom:8px"><div class="cb-l">LTP AT ALERT</div><div class="cb-v" style="color:${bc(a.action)}">₹${fmt(a.ltp)}</div></div>
-      <div class="card-why ${a.action.toLowerCase()}">${a.why}</div>
-    </div>`).join("");
-}
-
-// ════════════════════════════════════════════
-//  TICKER + UTILS
-// ════════════════════════════════════════════
-function updateTicker(n,b,sent,score,topSec){
-  const t="  NIFTY ₹"+fmt(n?.ltp||0,0)+" "+fmtC(n?.chgPct||0)+"  ●  BANKNIFTY ₹"+fmt(b?.ltp||0,0)+" "+fmtC(b?.chgPct||0)+"  ●  "+sent+" "+score+"/10  ●  "+topSec+"  ●  RSI<"+CRIT.rsiOS+"/RSI>"+CRIT.rsiOB+"  ●  VOL×"+CRIT.volMult+"  ●  ";
+// ═══════════════════════════════════════════
+//  TICKER & UTILS
+// ═══════════════════════════════════════════
+function updateTicker(nLtp,nChg,bLtp,bChg,sent,score,topSec,vix,pcr,vixTxt,pcrTxt){
+  const t=`  NIFTY ₹${fmt(nLtp,0)} ${fmtC(nChg)}  ●  BANKNIFTY ₹${fmt(bLtp,0)} ${fmtC(bChg)}  ●  VIX ${vix?.toFixed(1)} (${vixTxt})  ●  PCR ${pcr} (${pcrTxt})  ●  ${sent} ${score}/10  ●  SECTOR: ${topSec}  ●  `;
   document.getElementById("ticker").textContent=t.repeat(7);
 }
 function toggleLog(){const el=document.getElementById("log-drawer");el.style.display=el.style.display==="none"?"block":"none";}
+function setStatus(type,txt){document.getElementById("sdot").className="dot "+type;document.getElementById("stxt").textContent=txt;}
 function lg(msg,t=""){
   const b=document.getElementById("log-body"),d=document.createElement("div");
   d.className="ll"+(t==="e"?" e":t==="o"?" o":t==="w"?" w":"");
   d.textContent="["+new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+"] "+msg;
-  b.appendChild(d); b.scrollTop=b.scrollHeight;
+  b.appendChild(d);b.scrollTop=b.scrollHeight;
 }
 function fmt(n,d=2){return Number(n).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d});}
 function fmtC(n){return(n>=0?"+":"")+n.toFixed(2)+"%";}
-function fmtVol(n){if(!n||n===0)return"—";if(n>=1e7)return(n/1e7).toFixed(2)+"Cr";if(n>=1e5)return(n/1e5).toFixed(2)+"L";if(n>=1000)return(n/1000).toFixed(1)+"K";return n.toString();}
+function fmtVol(n){if(!n)return"—";if(n>=1e7)return(n/1e7).toFixed(2)+"Cr";if(n>=1e5)return(n/1e5).toFixed(2)+"L";if(n>=1000)return(n/1000).toFixed(1)+"K";return n.toString();}
 function clr(n){return n>=0?"up":"dn";}
 function ist(){return new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+" IST";}
 function isOpen(){const n=new Date(),h=+n.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}),m=+n.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});return(h>9||(h===9&&m>=15))&&(h<15||(h===15&&m<=30));}

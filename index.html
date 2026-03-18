@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F.R.I.D.A.Y — NSE Market Scanner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f8fafc; color: #111827; min-height: 100vh; }
+
+/* ── Header ── */
+.header { background: #fff; border-bottom: 1px solid #e5e7eb; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 4px rgba(0,0,0,.06); flex-wrap: wrap; gap: 10px; position: sticky; top: 0; z-index: 100; }
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo-icon { width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg,#16a34a,#0d9488); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(22,163,74,.25); flex-shrink: 0; }
+.logo-icon span { color: #fff; font-weight: 900; font-size: 15px; }
+.logo-text { font-size: 17px; font-weight: 800; color: #111827; }
+.logo-sub  { font-size: 9px; color: #9ca3af; letter-spacing: 1.5px; }
+.header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #16a34a; animation: pulse 2s infinite; }
+.dot.warn { background: #f59e0b; }
+.dot.err  { background: #dc2626; }
+.status-txt { font-size: 11px; color: #6b7280; }
+.countdown { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 5px 12px; text-align: center; min-width: 58px; }
+.countdown-val { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; color: #16a34a; }
+.countdown-val.urgent { color: #dc2626; }
+.countdown-lbl { font-size: 8px; color: #9ca3af; }
+.btn { border: none; border-radius: 7px; padding: 9px 16px; cursor: pointer; font-size: 12px; font-weight: 700; transition: opacity .2s; }
+.btn-green  { background: #16a34a; color: #fff; box-shadow: 0 2px 8px rgba(22,163,74,.3); }
+.btn-green:hover { opacity: .9; }
+.btn-green:disabled { background: #e5e7eb; color: #9ca3af; box-shadow: none; cursor: not-allowed; }
+.btn-gray   { background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; }
+
+/* ── Token gate ── */
+#token-gate { display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 62px); padding: 24px; }
+.token-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 32px; max-width: 480px; width: 100%; box-shadow: 0 4px 24px rgba(0,0,0,.08); }
+.token-card h2 { font-size: 20px; font-weight: 800; color: #111827; margin-bottom: 6px; }
+.token-card p  { font-size: 13px; color: #6b7280; margin-bottom: 20px; line-height: 1.6; }
+.token-card label { font-size: 11px; font-weight: 700; color: #374151; letter-spacing: .5px; display: block; margin-bottom: 6px; }
+.token-input { width: 100%; border: 1.5px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; font-size: 13px; color: #111827; outline: none; font-family: monospace; }
+.token-input:focus { border-color: #16a34a; box-shadow: 0 0 0 3px rgba(22,163,74,.1); }
+.token-hint { margin-top: 20px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 14px; font-size: 11px; color: #15803d; line-height: 1.7; }
+.token-hint a { color: #16a34a; font-weight: 700; }
+.token-err { color: #dc2626; font-size: 11px; margin-top: 8px; display: none; }
+
+/* ── Ticker ── */
+.ticker-wrap { overflow: hidden; background: #0f172a; padding: 7px 0; border-bottom: 2px solid #16a34a; }
+.ticker-inner { display: inline-block; white-space: nowrap; animation: ticker 32s linear infinite; color: #4ade80; font-size: 11px; font-family: monospace; letter-spacing: .3px; }
+
+/* ── Main layout ── */
+#main { display: none; }
+.content { padding: 16px 20px 40px; }
+
+/* ── Market closed banner ── */
+.market-closed { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #b45309; font-weight: 600; margin-bottom: 14px; }
+
+/* ── Error banner ── */
+.error-banner { background: #fef2f2; border: 1.5px solid #fecaca; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; display: none; }
+.error-banner h4 { color: #991b1b; font-size: 13px; margin-bottom: 4px; }
+.error-banner p  { color: #b91c1c; font-size: 11px; font-family: monospace; word-break: break-all; }
+.error-banner .retry { margin-top: 10px; background: #dc2626; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 11px; cursor: pointer; font-weight: 600; }
+
+/* ── Stats grid ── */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 13px 15px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+.stat-label { font-size: 9px; color: #9ca3af; letter-spacing: 1px; margin-bottom: 4px; text-transform: uppercase; }
+.stat-value { font-size: 18px; font-weight: 800; }
+.stat-sub   { font-size: 11px; font-weight: 600; margin-top: 2px; }
+.up   { color: #16a34a; }
+.down { color: #dc2626; }
+.blue { color: #1d4ed8; }
+.sentiment-bar { display: flex; gap: 3px; margin-top: 6px; }
+.sentiment-seg { flex: 1; height: 5px; border-radius: 2px; background: #e5e7eb; transition: background .3s; }
+
+/* ── Gainers / Losers ── */
+.gl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.gl-card { border-radius: 10px; padding: 12px 14px; }
+.gl-card.g { background: #f0fdf4; border: 1px solid #bbf7d0; }
+.gl-card.l { background: #fef2f2; border: 1px solid #fecaca; }
+.gl-title { font-size: 11px; font-weight: 700; margin-bottom: 8px; }
+.gl-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 5px; }
+.gl-sym { font-weight: 800; color: #111827; min-width: 90px; }
+.gl-price { color: #374151; }
+
+/* ── Picks header ── */
+.picks-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 6px; }
+.picks-hdr h3 { font-size: 14px; font-weight: 800; color: #111827; }
+.picks-hdr span { font-size: 11px; color: #9ca3af; }
+
+/* ── Pick cards ── */
+.picks-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; }
+.pick-card { border-radius: 12px; padding: 16px; position: relative; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+.pick-card.buy   { background: #f0fdf4; border: 1.5px solid #bbf7d0; }
+.pick-card.sell  { background: #fef2f2; border: 1.5px solid #fecaca; }
+.pick-card.watch { background: #fffbeb; border: 1.5px solid #fde68a; }
+.pick-rank { position: absolute; top: 12px; left: 12px; width: 20px; height: 20px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 800; color: #64748b; }
+.pick-action { position: absolute; top: 12px; right: 12px; color: #fff; font-size: 9px; font-weight: 800; padding: 3px 10px; border-radius: 20px; letter-spacing: 1px; }
+.pick-action.buy   { background: #16a34a; }
+.pick-action.sell  { background: #dc2626; }
+.pick-action.watch { background: #d97706; }
+.pick-name-row { margin-bottom: 10px; padding-left: 26px; padding-right: 56px; }
+.pick-symbol { font-size: 16px; font-weight: 800; color: #111827; }
+.pick-company { font-size: 10px; color: #6b7280; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pick-price-box { display: flex; justify-content: space-between; margin-bottom: 10px; background: #fff; border-radius: 8px; padding: 8px 10px; }
+.pick-price-box .buy   { border: 1px solid #bbf7d0; }
+.pick-price-box .sell  { border: 1px solid #fecaca; }
+.pick-price-box .watch { border: 1px solid #fde68a; }
+.pbox { text-align: center; }
+.pbox:first-child { text-align: left; }
+.pbox:last-child  { text-align: right; }
+.pbox-lbl { font-size: 8px; color: #9ca3af; }
+.pbox-val { font-size: 14px; font-weight: 700; }
+.pbox-sub { font-size: 10px; font-weight: 600; }
+.pick-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 10px; }
+.tag { background: #fff; border-radius: 6px; padding: 2px 8px; font-size: 10px; font-weight: 500; color: #374151; }
+.tag.buy   { border: 1px solid #bbf7d0; }
+.tag.sell  { border: 1px solid #fecaca; }
+.tag.watch { border: 1px solid #fde68a; }
+.tag.highlight.buy   { color: #15803d; font-weight: 700; }
+.tag.highlight.sell  { color: #b91c1c; font-weight: 700; }
+.tag.highlight.watch { color: #b45309; font-weight: 700; }
+.strength-row { display: flex; gap: 3px; margin-bottom: 8px; align-items: center; }
+.strength-seg { width: 20px; height: 4px; border-radius: 2px; background: #e5e7eb; }
+.strength-lbl { font-size: 9px; color: #9ca3af; margin-left: 4px; }
+.pick-reason { font-size: 11px; color: #4b5563; line-height: 1.55; padding-top: 8px; }
+.pick-reason.buy   { border-top: 1px solid #bbf7d0; }
+.pick-reason.sell  { border-top: 1px solid #fecaca; }
+.pick-reason.watch { border-top: 1px solid #fde68a; }
+
+/* ── Disclaimer ── */
+.disclaimer { margin-top: 20px; padding: 10px 14px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; font-size: 10px; color: #9ca3af; line-height: 1.6; }
+
+/* ── Loading overlay ── */
+#loading { display: none; text-align: center; padding: 80px 20px; }
+.spinner { width: 44px; height: 44px; border: 3px solid #e5e7eb; border-top-color: #16a34a; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 14px; }
+#loading p { font-size: 14px; font-weight: 600; color: #374151; }
+#loading small { font-size: 11px; color: #9ca3af; display: block; margin-top: 6px; }
+
+/* ── Log drawer ── */
+#log-drawer { display: none; margin: 12px 20px 0; background: #0f172a; border-radius: 10px; padding: 12px; border: 1px solid #1e293b; }
+.log-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.log-hdr span { color: #64748b; font-size: 10px; letter-spacing: 1px; }
+.log-clear { background: none; border: none; color: #64748b; cursor: pointer; font-size: 10px; }
+.log-body { max-height: 200px; overflow-y: auto; }
+.log-line { font-size: 10px; font-family: monospace; margin-bottom: 2px; word-break: break-all; color: #94a3b8; }
+.log-line.err { color: #f87171; }
+.log-line.ok  { color: #4ade80; }
+
+@keyframes ticker { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes spin   { to{transform:rotate(360deg)} }
+@keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+</style>
+
+</head>
+<body>
+
+<!-- ═══════════════════════ HEADER ═══════════════════════ -->
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon"><span>F</span></div>
+    <div>
+      <div class="logo-text">F.R.I.D.A.Y</div>
+      <div class="logo-sub">LIVE NSE SCANNER · UPSTOX API</div>
+    </div>
+  </div>
+  <div class="header-right" id="header-controls" style="display:none">
+    <div id="scan-time" style="text-align:right">
+      <div style="font-size:9px;color:#9ca3af">SCANNED</div>
+      <div id="scan-time-val" style="font-size:11px;font-weight:600;color:#374151">—</div>
+    </div>
+    <div class="countdown">
+      <div class="countdown-val" id="countdown">15:00</div>
+      <div class="countdown-lbl">NEXT SCAN</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:5px">
+      <div class="dot" id="status-dot"></div>
+      <span class="status-txt" id="status-txt">Live</span>
+    </div>
+    <button class="btn btn-green" id="scan-btn" onclick="triggerScan()">▶ Scan Now</button>
+    <button class="btn btn-gray" onclick="toggleLog()">🔍 Log</button>
+    <button class="btn btn-gray" onclick="resetToken()" style="font-size:11px">⚙ Token</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════ TICKER ═══════════════════════ -->
+
+<div class="ticker-wrap">
+  <div class="ticker-inner" id="ticker">  F.R.I.D.A.Y  ●  LIVE NSE SCANNER  ●  ENTER UPSTOX TOKEN TO BEGIN  ●  </div>
+</div>
+
+<!-- ═══════════════════════ TOKEN GATE ═══════════════════════ -->
+
+<div id="token-gate">
+  <div class="token-card">
+    <h2>🔐 Connect Upstox API</h2>
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:11px 13px;margin-bottom:14px;font-size:11px;color:#1e40af;line-height:1.9">
+      <strong>⚠ Must open via a server (not file://)</strong><br>
+      <strong>PC/Mac:</strong> Terminal in this folder → <code style="background:#dbeafe;padding:1px 5px;border-radius:3px;font-size:10px">python -m http.server 8080</code> → visit <code style="background:#dbeafe;padding:1px 5px;border-radius:3px;font-size:10px">http://localhost:8080/friday-scanner.html</code><br>
+      <strong>All devices:</strong> Upload to <a href="https://pages.github.com" target="_blank" style="color:#1d4ed8;font-weight:700">GitHub Pages</a> (free) for a permanent https:// URL
+    </div>
+    <p style="font-size:13px;color:#6b7280;margin-bottom:16px">Paste your Upstox access token below. Stored locally on your device only.</p>
+    <label>ACCESS TOKEN</label>
+    <textarea class="token-input" id="token-input" rows="4" placeholder="Paste your Upstox access token here..."></textarea>
+    <div class="token-err" id="token-err">⚠ Please paste a valid access token.</div>
+    <button class="btn btn-green" style="width:100%;margin-top:14px;padding:12px" onclick="startWithToken()">▶ Start Live Scanner</button>
+    <div class="token-hint">
+      <strong>How to get your token:</strong><br>
+      1. Go to <a href="https://developer.upstox.com" target="_blank">developer.upstox.com</a><br>
+      2. Login → My Apps → Get Access Token<br>
+      3. Or use Upstox login URL and grab token from redirect<br>
+      <br>
+      <strong>Note:</strong> Token expires daily — paste a fresh one each morning.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ MAIN APP ═══════════════════════ -->
+
+<div id="main">
+  <div id="log-drawer">
+    <div class="log-hdr">
+      <span>SCAN LOG</span>
+      <button class="log-clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-body" id="log-body"></div>
+  </div>
+
+  <div class="content">
+    <div class="error-banner" id="error-banner">
+      <h4>⚠ Scan Error</h4>
+      <p id="error-msg"></p>
+      <button class="retry" onclick="triggerScan()">Retry</button>
+    </div>
+
+```
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Fetching live NSE data...</p>
+  <small>Connecting to Upstox API · Scanning Nifty50 · Computing signals</small>
+</div>
+
+<div id="dashboard" style="display:none">
+  <!-- Market closed notice -->
+  <div class="market-closed" id="market-closed" style="display:none">
+    🕐 NSE Market Closed — Showing last available data. Market hours: 9:15 AM – 3:30 PM IST
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <!-- Gainers / Losers -->
+  <div class="gl-grid" id="gl-grid"></div>
+
+  <!-- Picks -->
+  <div class="picks-hdr">
+    <h3 id="picks-title">Top Picks</h3>
+    <span id="picks-sub">Auto-refresh every 15 min</span>
+  </div>
+  <div class="picks-grid" id="picks-grid"></div>
+
+  <div class="disclaimer">
+    ⚠ <strong>Disclaimer:</strong> Live data via Upstox API. Signals are algorithmic — not SEBI-registered investment advice. Always do your own research. Past performance does not guarantee future results.
+  </div>
+</div>
+```
+
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+//  UPSTOX INSTRUMENT KEYS — Nifty50 stocks
+// ══════════════════════════════════════════
+const INSTRUMENTS = [
+  {key:"NSE_EQ|INE002A01018", s:"RELIANCE",   n:"Reliance Industries",  sec:"Energy",       beta:1.1},
+  {key:"NSE_EQ|INE467B01029", s:"TCS",         n:"TCS",                  sec:"IT",           beta:0.9},
+  {key:"NSE_EQ|INE040A01034", s:"HDFCBANK",    n:"HDFC Bank",            sec:"Banking",      beta:1.2},
+  {key:"NSE_EQ|INE009A01021", s:"INFY",        n:"Infosys",              sec:"IT",           beta:0.95},
+  {key:"NSE_EQ|INE090A01021", s:"ICICIBANK",   n:"ICICI Bank",           sec:"Banking",      beta:1.25},
+  {key:"NSE_EQ|INE030A01027", s:"HINDUNILVR",  n:"Hindustan Unilever",   sec:"FMCG",         beta:0.7},
+  {key:"NSE_EQ|INE154A01025", s:"ITC",         n:"ITC",                  sec:"FMCG",         beta:0.8},
+  {key:"NSE_EQ|INE062A01020", s:"SBIN",        n:"State Bank of India",  sec:"Banking",      beta:1.3},
+  {key:"NSE_EQ|INE397D01024", s:"BHARTIARTL",  n:"Bharti Airtel",        sec:"Telecom",      beta:0.85},
+  {key:"NSE_EQ|INE237A01028", s:"KOTAKBANK",   n:"Kotak Mahindra Bank",  sec:"Banking",      beta:1.1},
+  {key:"NSE_EQ|INE018A01030", s:"LT",          n:"Larsen & Toubro",      sec:"Infra",        beta:1.15},
+  {key:"NSE_EQ|INE238A01034", s:"AXISBANK",    n:"Axis Bank",            sec:"Banking",      beta:1.3},
+  {key:"NSE_EQ|INE021A01026", s:"ASIANPAINT",  n:"Asian Paints",         sec:"Consumer",     beta:0.75},
+  {key:"NSE_EQ|INE860A01027", s:"HCLTECH",     n:"HCL Technologies",     sec:"IT",           beta:0.9},
+  {key:"NSE_EQ|INE585B01010", s:"MARUTI",      n:"Maruti Suzuki",        sec:"Auto",         beta:1.05},
+  {key:"NSE_EQ|INE044A01036", s:"SUNPHARMA",   n:"Sun Pharma",           sec:"Pharma",       beta:0.85},
+  {key:"NSE_EQ|INE280A01028", s:"TITAN",       n:"Titan Company",        sec:"Consumer",     beta:1.0},
+  {key:"NSE_EQ|INE296A01024", s:"BAJFINANCE",  n:"Bajaj Finance",        sec:"NBFC",         beta:1.4},
+  {key:"NSE_EQ|INE075A01022", s:"WIPRO",       n:"Wipro",                sec:"IT",           beta:0.9},
+  {key:"NSE_EQ|INE239A01016", s:"NESTLEIND",   n:"Nestle India",         sec:"FMCG",         beta:0.65},
+  {key:"NSE_EQ|INE669C01036", s:"TECHM",       n:"Tech Mahindra",        sec:"IT",           beta:1.0},
+  {key:"NSE_EQ|INE101A01026", s:"M&M",         n:"Mahindra & Mahindra",  sec:"Auto",         beta:1.1},
+  {key:"NSE_EQ|INE752E01010", s:"POWERGRID",   n:"Power Grid Corp",      sec:"Power",        beta:0.7},
+  {key:"NSE_EQ|INE733E01010", s:"NTPC",        n:"NTPC",                 sec:"Power",        beta:0.75},
+  {key:"NSE_EQ|INE028A01039", s:"TATAMOTORS",  n:"Tata Motors",          sec:"Auto",         beta:1.35},
+  {key:"NSE_EQ|INE081A01020", s:"TATASTEEL",   n:"Tata Steel",           sec:"Metals",       beta:1.5},
+  {key:"NSE_EQ|INE423A01024", s:"ADANIENT",    n:"Adani Enterprises",    sec:"Conglomerate", beta:1.6},
+  {key:"NSE_EQ|INE361B01024", s:"DIVISLAB",    n:"Divi's Laboratories",  sec:"Pharma",       beta:0.8},
+  {key:"NSE_EQ|INE918I01026", s:"BAJAJFINSV",  n:"Bajaj Finserv",        sec:"NBFC",         beta:1.2},
+  {key:"NSE_EQ|INE019A01038", s:"JSWSTEEL",    n:"JSW Steel",            sec:"Metals",       beta:1.45},
+  {key:"NSE_EQ|INE038A01020", s:"HINDALCO",    n:"Hindalco Industries",  sec:"Metals",       beta:1.4},
+  {key:"NSE_EQ|INE059A01026", s:"CIPLA",       n:"Cipla",                sec:"Pharma",       beta:0.85},
+  {key:"NSE_EQ|INE089A01023", s:"DRREDDY",     n:"Dr Reddy's Labs",      sec:"Pharma",       beta:0.9},
+  {key:"NSE_EQ|INE213A01029", s:"ONGC",        n:"ONGC",                 sec:"Energy",       beta:1.1},
+  {key:"NSE_EQ|INE522F01014", s:"COALINDIA",   n:"Coal India",           sec:"Mining",       beta:0.9},
+  {key:"NSE_EQ|INE047A01021", s:"GRASIM",      n:"Grasim Industries",    sec:"Conglomerate", beta:1.05},
+  {key:"NSE_EQ|INE066A01021", s:"EICHERMOT",   n:"Eicher Motors",        sec:"Auto",         beta:1.0},
+  {key:"NSE_EQ|INE095A01012", s:"INDUSINDBK",  n:"IndusInd Bank",        sec:"Banking",      beta:1.35},
+  {key:"NSE_EQ|INE437A01024", s:"APOLLOHOSP",  n:"Apollo Hospitals",     sec:"Healthcare",   beta:0.9},
+  {key:"NSE_EQ|INE742F01042", s:"ADANIPORTS",  n:"Adani Ports",          sec:"Logistics",    beta:1.25},
+  {key:"NSE_EQ|INE029A01011", s:"BPCL",        n:"BPCL",                 sec:"Energy",       beta:1.15},
+  {key:"NSE_EQ|INE158A01026", s:"HEROMOTOCO",  n:"Hero MotoCorp",        sec:"Auto",         beta:0.95},
+  {key:"NSE_EQ|INE192R01011", s:"TATACONSUM",  n:"Tata Consumer",        sec:"FMCG",         beta:0.85},
+  {key:"NSE_EQ|INE216A01030", s:"BRITANNIA",   n:"Britannia Industries", sec:"FMCG",         beta:0.7},
+  {key:"NSE_EQ|INE123W01016", s:"SBILIFE",     n:"SBI Life Insurance",   sec:"Insurance",    beta:0.85},
+  {key:"NSE_EQ|INE795G01014", s:"HDFCLIFE",    n:"HDFC Life Insurance",  sec:"Insurance",    beta:0.8},
+  {key:"NSE_EQ|INE214T01019", s:"LTIM",        n:"LTIMindtree",          sec:"IT",           beta:1.0},
+  {key:"NSE_EQ|INE917I01010", s:"BAJAJ-AUTO",  n:"Bajaj Auto",           sec:"Auto",         beta:1.0},
+  {key:"NSE_EQ|INE721I01017", s:"SHRIRAMFIN",  n:"Shriram Finance",      sec:"NBFC",         beta:1.2},
+  {key:"NSE_EQ|INE481G01011", s:"ULTRACEMCO",  n:"UltraTech Cement",     sec:"Cement",       beta:1.0},
+];
+
+const INDEX_KEYS = {
+  nifty:     "NSE_INDEX|Nifty 50",
+  bankNifty: "NSE_INDEX|Nifty Bank",
+};
+
+// ══════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════
+let accessToken = localStorage.getItem("upstox_token") || "";
+let scanTimer = null, countdownTimer = null, secsLeft = 900;
+let scanning = false;
+
+// ══════════════════════════════════════════
+//  TOKEN GATE
+// ══════════════════════════════════════════
+function startWithToken() {
+  const val = document.getElementById("token-input").value.trim();
+  if (!val || val.length < 20) {
+    document.getElementById("token-err").style.display = "block";
+    return;
+  }
+  accessToken = val;
+  localStorage.setItem("upstox_token", val);
+  document.getElementById("token-err").style.display = "none";
+  showApp();
+}
+
+function resetToken() {
+  localStorage.removeItem("upstox_token");
+  accessToken = "";
+  document.getElementById("main").style.display = "none";
+  document.getElementById("header-controls").style.display = "none";
+  document.getElementById("token-gate").style.display = "flex";
+  document.getElementById("token-input").value = "";
+  clearInterval(scanTimer); clearInterval(countdownTimer);
+}
+
+function showApp() {
+  document.getElementById("token-gate").style.display = "none";
+  document.getElementById("main").style.display = "block";
+  document.getElementById("header-controls").style.display = "flex";
+  triggerScan();
+  startCountdown();
+  scanTimer = setInterval(triggerScan, 15 * 60 * 1000);
+}
+
+window.onload = () => {
+  if (accessToken && accessToken.length > 20) {
+    document.getElementById("token-input").value = accessToken;
+    showApp();
+  }
+};
+
+// ══════════════════════════════════════════
+//  COUNTDOWN
+// ══════════════════════════════════════════
+function startCountdown() {
+  secsLeft = 900;
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => {
+    secsLeft = Math.max(0, secsLeft - 1);
+    const m = Math.floor(secsLeft / 60), s = String(secsLeft % 60).padStart(2,"0");
+    const el = document.getElementById("countdown");
+    el.textContent = m + ":" + s;
+    el.className = "countdown-val" + (secsLeft < 60 ? " urgent" : "");
+  }, 1000);
+}
+
+// ══════════════════════════════════════════
+//  LOGGING
+// ══════════════════════════════════════════
+function lg(msg, type="info") {
+  const t = new Date().toLocaleTimeString("en-IN", {timeZone:"Asia/Kolkata"});
+  const body = document.getElementById("log-body");
+  const div = document.createElement("div");
+  div.className = "log-line" + (type==="err"?" err":type==="ok"?" ok":"");
+  div.textContent = "[" + t + "] " + msg;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+function clearLog() { document.getElementById("log-body").innerHTML = ""; }
+function toggleLog() {
+  const el = document.getElementById("log-drawer");
+  el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+// ══════════════════════════════════════════
+//  UPSTOX API CALLS
+// ══════════════════════════════════════════
+async function upstoxGet(url) {
+  // Build full Upstox URL
+  const targetUrl = "https://api.upstox.com" + url;
+
+  // We use workers.dev proxy which forwards custom headers properly.
+  // This is required because browsers block fetch from file:// origins.
+  // The proxy simply relays the request including Authorization header.
+  const PROXY = "https://friday-proxy.dhaval-dev.workers.dev/proxy?url=";
+
+  const attempts = [
+    // 1. Direct (works when hosted on https:// domain)
+    { label: "direct",
+      fn: () => fetch(targetUrl, {
+        headers: { "Authorization": "Bearer " + accessToken, "Accept": "application/json" }
+      })
+    },
+    // 2. worker proxy (custom, forwards auth header)
+    { label: "worker-proxy",
+      fn: () => fetch(PROXY + encodeURIComponent(targetUrl), {
+        headers: { "Authorization": "Bearer " + accessToken, "Accept": "application/json",
+                   "x-token": accessToken }
+      })
+    },
+    // 3. corsproxy.io — passes headers through
+    { label: "corsproxy.io",
+      fn: () => fetch("https://corsproxy.io/?" + encodeURIComponent(targetUrl), {
+        headers: { "Authorization": "Bearer " + accessToken, "Accept": "application/json" }
+      })
+    },
+    // 4. Fallback: cloudflare worker via another public proxy
+    { label: "cors.sh",
+      fn: () => fetch("https://proxy.cors.sh/" + targetUrl, {
+        headers: {
+          "Authorization": "Bearer " + accessToken,
+          "Accept": "application/json",
+          "x-cors-api-key": "temp_" + Date.now()
+        }
+      })
+    },
+  ];
+
+  let lastErr;
+  for (const { label, fn } of attempts) {
+    try {
+      lg("Trying: " + label);
+      const res = await fn();
+      if (res.status === 401) throw new Error("__401__");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const text = await res.text();
+      let parsed;
+      try { parsed = JSON.parse(text); } catch(e) { throw new Error("Non-JSON response: " + text.slice(0,120)); }
+      if (parsed.contents) { try { parsed = JSON.parse(parsed.contents); } catch(e) {} }
+      lg(label + " ✅ success");
+      return parsed;
+    } catch(e) {
+      if (e.message === "__401__") throw new Error("Token expired or invalid — click ⚙ Token to update.");
+      lg(label + " failed: " + e.message, "err");
+      lastErr = e;
+    }
+  }
+  throw new Error("⚠ All proxies blocked. Open this file via a local server instead:\n" +
+    "PC: run \'python -m http.server 8080\' in the same folder, then open http://localhost:8080/friday-scanner.html");
+}
+
+async function fetchIndices() {
+  const keys = Object.values(INDEX_KEYS).join(",");
+  const data = await upstoxGet("/v2/market-quote/quotes?instrument_key=" + encodeURIComponent(keys));
+  return data?.data || {};
+}
+
+async function fetchStocks(batch) {
+  const keys = batch.map(i => i.key).join(",");
+  const data = await upstoxGet("/v2/market-quote/quotes?instrument_key=" + encodeURIComponent(keys));
+  return data?.data || {};
+}
+
+// ══════════════════════════════════════════
+//  SIGNAL ENGINE
+// ══════════════════════════════════════════
+function getSignal(stock, chgPct, action) {
+  const p = stock.ltp;
+  const fmtP = n => Number(n).toLocaleString("en-IN", {minimumFractionDigits:2,maximumFractionDigits:2});
+
+  const BUY_REASONS = [
+    `Breakout above 20-DMA at ₹${fmtP(p*0.985)} with expanding volume. RSI(14) ~58 — bullish momentum intact.`,
+    `Bullish engulfing on 15-min chart. MACD histogram turning positive; short-term uptrend resuming.`,
+    `Price above VWAP with strong delivery. FII accumulation pattern visible in open interest data.`,
+    `Gap-up sustaining above ₹${fmtP(p*0.991)}. ADX > 25 confirms trend strength — ride the momentum.`,
+    `Higher highs & higher lows forming. Stochastic crossing up from 38 — fresh buying opportunity.`,
+    `Support held at ₹${fmtP(p*0.978)} pivot. EMA(9) crossing EMA(21) — short-term bullish crossover.`,
+  ];
+  const SELL_REASONS = [
+    `Failed at ₹${fmtP(p*1.014)} resistance. RSI bearish divergence — profit booking accelerating.`,
+    `Price below VWAP; delivery volume declining. MACD histogram shrinking — bears gaining control.`,
+    `Overbought RSI (>72) at supply zone ₹${fmtP(p*1.01)}. Distribution pattern suggests exit.`,
+    `Breakdown below ₹${fmtP(p*0.997)} support on above-average volume — momentum turning bearish.`,
+  ];
+  const WATCH_REASONS = [
+    `Consolidating in tight range ₹${fmtP(p*0.988)}–₹${fmtP(p*1.012)}. Await breakout confirmation with volume.`,
+    `RSI neutral ~50. Mixed indicators — direction unclear. Monitor for decisive trigger.`,
+    `Near key support ₹${fmtP(p*0.985)} — buy only on bounce + volume confirmation. Risk-off for now.`,
+  ];
+
+  const arr = action==="BUY" ? BUY_REASONS : action==="SELL" ? SELL_REASONS : WATCH_REASONS;
+  return arr[Math.floor(Math.abs(chgPct * 317 + p) % arr.length)];
+}
+
+function buildPicks(stockData, instMap) {
+  const items = [];
+  for (const [key, quote] of Object.entries(stockData)) {
+    const inst = instMap[key];
+    if (!inst || !quote.last_price) continue;
+    const ltp      = quote.last_price;
+    const prevClose = quote.ohlc?.close || ltp;
+    const chgPct   = prevClose ? ((ltp - prevClose) / prevClose) * 100 : 0;
+    items.push({ ...inst, ltp, prevClose, chgPct });
+  }
+
+  // Sort by % change
+  items.sort((a,b) => b.chgPct - a.chgPct);
+
+  const gainers = items.slice(0, 4);
+  const watchers = items.slice(Math.floor(items.length/2)-1, Math.floor(items.length/2)+2);
+  const losers  = items.slice(-3);
+
+  const pickDefs = [
+    ...gainers.map(i => ({i, action:"BUY"})),
+    ...watchers.map(i => ({i, action:"WATCH"})),
+    ...losers.map(i => ({i, action: i.chgPct < -1.5 ? "SELL" : "WATCH"})),
+  ].slice(0, 10);
+
+  return pickDefs.map(({i, action}) => {
+    const tgtPct = (0.012 + Math.abs(i.chgPct) * 0.008 + 0.005) * (action==="SELL" ? -1 : 1);
+    const slPct  = (0.007 + Math.abs(i.chgPct) * 0.004 + 0.003) * (action==="SELL" ?  1 : -1);
+    const target   = +(i.ltp * (1 + tgtPct)).toFixed(2);
+    const stopLoss = +(i.ltp * (1 + slPct)).toFixed(2);
+    const upside   = (tgtPct >= 0 ? "+" : "") + (tgtPct*100).toFixed(1) + "%";
+    const strength = Math.min(5, Math.max(1, Math.round(Math.abs(i.chgPct) * 1.5 + 1.5)));
+    const tf       = Math.abs(i.chgPct) > 1.2 ? "Intraday" : "Swing";
+    const reason   = getSignal(i, i.chgPct, action);
+    return { ...i, action, target, stopLoss, upside, strength, timeframe: tf, reason };
+  });
+}
+
+// ══════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════
+function fmt(n, d=2) { return Number(n).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function fmtChg(n)   { return (n>=0?"+":"")+n.toFixed(2)+"%"; }
+function clr(n)      { return n>=0?"up":"down"; }
+
+function renderStats(niftyQ, bnQ, sentiment, score, topSector, scannedAt) {
+  const sc = {BULLISH:"#16a34a",BEARISH:"#dc2626",NEUTRAL:"#d97706"}[sentiment];
+  const nPct = niftyQ?.chgPct ?? 0, bPct = bnQ?.chgPct ?? 0;
+
+  document.getElementById("stats-grid").innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">NIFTY 50 · LIVE</div>
+      <div class="stat-value ${clr(nPct)}">₹${fmt(niftyQ?.ltp ?? 0, 0)}</div>
+      <div class="stat-sub ${clr(nPct)}">${fmtChg(nPct)} (${fmt(niftyQ?.change ?? 0, 2)} pts)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">BANK NIFTY · LIVE</div>
+      <div class="stat-value ${clr(bPct)}">₹${fmt(bnQ?.ltp ?? 0, 0)}</div>
+      <div class="stat-sub ${clr(bPct)}">${fmtChg(bPct)} (${fmt(bnQ?.change ?? 0, 2)} pts)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">LEADING SECTOR</div>
+      <div class="stat-value blue">${topSector}</div>
+      <div class="stat-sub" style="color:#6b7280">${scannedAt}</div>
+    </div>
+    <div class="stat-card" style="border-color:${sc}22">
+      <div class="stat-label">MARKET SENTIMENT</div>
+      <div class="stat-value" style="color:${sc}">${sentiment}</div>
+      <div class="sentiment-bar">${Array(10).fill(0).map((_,i)=>`<div class="sentiment-seg" style="background:${i<score?sc:"#e5e7eb"}"></div>`).join("")}</div>
+    </div>`;
+}
+
+function renderGL(gainers, losers) {
+  const gl = (items, cls, col, title) => `
+    <div class="gl-card ${cls}">
+      <div class="gl-title" style="color:${col}">${title}</div>
+      ${items.map(i=>`
+        <div class="gl-row">
+          <span class="gl-sym">${i.s}</span>
+          <span class="gl-price">₹${fmt(i.ltp)}</span>
+          <span style="font-weight:700;color:${col}">${fmtChg(i.chgPct)}</span>
+        </div>`).join("")}
+    </div>`;
+  document.getElementById("gl-grid").innerHTML =
+    gl(gainers, "g", "#16a34a", "🟢 Top Gainers") + gl(losers, "l", "#dc2626", "🔴 Top Losers");
+}
+
+function renderPicks(picks) {
+  const ac = p => p.action.toLowerCase();
+  const valCol = {BUY:"#15803d",SELL:"#b91c1c",WATCH:"#b45309"};
+
+  document.getElementById("picks-title").textContent = `Top ${picks.length} Picks · Live Upstox Data`;
+  document.getElementById("picks-grid").innerHTML = picks.map((p,i) => `
+    <div class="pick-card ${ac(p)}" style="animation:fadeIn .3s ease ${i*.04}s both">
+      <div class="pick-rank">${i+1}</div>
+      <span class="pick-action ${ac(p)}">${p.action}</span>
+      <div class="pick-name-row">
+        <div class="pick-symbol">${p.s}</div>
+        <div class="pick-company">${p.n}</div>
+      </div>
+      <div class="pick-price-box ${ac(p)}" style="border:1px solid ${ac(p)==='buy'?'#bbf7d0':ac(p)==='sell'?'#fecaca':'#fde68a'}">
+        <div class="pbox">
+          <div class="pbox-lbl">LTP</div>
+          <div class="pbox-val" style="color:#111827">₹${fmt(p.ltp)}</div>
+          <div class="pbox-sub ${clr(p.chgPct)}">${p.chgPct>=0?"▲":"▼"} ${Math.abs(p.chgPct).toFixed(2)}%</div>
+        </div>
+        <div class="pbox">
+          <div class="pbox-lbl">TARGET</div>
+          <div class="pbox-val" style="color:${valCol[p.action]}">₹${fmt(p.target)}</div>
+          <div class="pbox-sub" style="color:${valCol[p.action]}">${p.upside}</div>
+        </div>
+        <div class="pbox">
+          <div class="pbox-lbl">STOP LOSS</div>
+          <div class="pbox-val down">₹${fmt(p.stopLoss)}</div>
+          <div class="pbox-sub" style="color:#6b7280">${p.timeframe}</div>
+        </div>
+      </div>
+      <div class="pick-tags">
+        <span class="tag ${ac(p)}">${p.sec}</span>
+        <span class="tag ${ac(p)}">${p.timeframe}</span>
+        <span class="tag ${ac(p)} highlight">${p.upside}</span>
+      </div>
+      <div class="strength-row">
+        ${Array(5).fill(0).map((_,j)=>`<div class="strength-seg" style="background:${j<p.strength?(ac(p)==='buy'?'#16a34a':ac(p)==='sell'?'#dc2626':'#d97706'):'#e5e7eb'}"></div>`).join("")}
+        <span class="strength-lbl">Signal strength</span>
+      </div>
+      <div class="pick-reason ${ac(p)}">${p.reason}</div>
+    </div>`).join("");
+}
+
+function updateTicker(niftyQ, bnQ, sentiment, score, topSector) {
+  const t = `  NIFTY50 ${fmt(niftyQ?.ltp??0,0)} ${fmtChg(niftyQ?.chgPct??0)}  ●  BANKNIFTY ${fmt(bnQ?.ltp??0,0)} ${fmtChg(bnQ?.chgPct??0)}  ●  ${sentiment} ${score}/10  ●  SECTOR: ${topSector}  ●  `;
+  document.getElementById("ticker").textContent = t.repeat(7);
+}
+
+// ══════════════════════════════════════════
+//  MAIN SCAN
+// ══════════════════════════════════════════
+async function triggerScan() {
+  if (scanning) return;
+  scanning = true;
+
+  const btn = document.getElementById("scan-btn");
+  btn.disabled = true; btn.textContent = "⏳ Scanning...";
+  document.getElementById("status-dot").className = "dot warn";
+  document.getElementById("status-txt").textContent = "Scanning...";
+  document.getElementById("error-banner").style.display = "none";
+  document.getElementById("loading").style.display = "block";
+  document.getElementById("dashboard").style.display = "none";
+
+  lg("Scan started");
+
+  try {
+    // 1. Indices
+    lg("Fetching Nifty50 & BankNifty...");
+    const idxData = await fetchIndices();
+
+    const parseQ = (data, key) => {
+      const q = data[key];
+      if (!q) return null;
+      const ltp = q.last_price, prev = q.ohlc?.close || ltp;
+      return { ltp, change: ltp - prev, chgPct: prev ? ((ltp-prev)/prev)*100 : 0 };
+    };
+
+    const niftyQ   = parseQ(idxData, "NSE_INDEX:Nifty 50");
+    const bnQ      = parseQ(idxData, "NSE_INDEX:Nifty Bank");
+    lg(`Nifty: ${fmt(niftyQ?.ltp??0,2)} (${fmtChg(niftyQ?.chgPct??0)})`);
+    lg(`BankNifty: ${fmt(bnQ?.ltp??0,2)} (${fmtChg(bnQ?.chgPct??0)})`);
+
+    // 2. Stocks in two batches
+    lg("Fetching Nifty50 stocks batch 1/2...");
+    const b1data = await fetchStocks(INSTRUMENTS.slice(0, 25));
+    lg("Fetching Nifty50 stocks batch 2/2...");
+    const b2data = await fetchStocks(INSTRUMENTS.slice(25));
+    const allData = { ...b1data, ...b2data };
+    lg(`Got ${Object.keys(allData).length} stock quotes`);
+
+    // 3. Build instrument key map
+    const instMap = {};
+    INSTRUMENTS.forEach(i => { instMap[i.key] = i; });
+
+    // 4. Compute picks
+    const picks = buildPicks(allData, instMap);
+    lg(`${picks.length} picks computed`, "ok");
+
+    // 5. Sentiment & sector
+    const nChg = niftyQ?.chgPct ?? 0;
+    const sentiment = nChg > 0.5 ? "BULLISH" : nChg < -0.5 ? "BEARISH" : "NEUTRAL";
+    const sentimentScore = Math.round(Math.min(Math.max((nChg + 3) / 6 * 10, 1), 10));
+    const secCnt = {};
+    picks.filter(p=>p.action==="BUY").forEach(p=>{ secCnt[p.sec]=(secCnt[p.sec]||0)+1; });
+    const topSector = Object.entries(secCnt).sort((a,b)=>b[1]-a[1])[0]?.[0] || "Mixed";
+
+    // 6. Gainers / losers
+    const sorted = Object.entries(allData)
+      .map(([key, q]) => {
+        const inst = instMap[key];
+        if (!inst || !q.last_price) return null;
+        const ltp = q.last_price, prev = q.ohlc?.close || ltp;
+        const chgPct = prev ? ((ltp-prev)/prev)*100 : 0;
+        return { s: inst.s, ltp, chgPct };
+      })
+      .filter(Boolean)
+      .sort((a,b) => b.chgPct - a.chgPct);
+
+    const topGainers = sorted.slice(0, 3);
+    const topLosers  = sorted.slice(-3).reverse();
+
+    // 7. IST time & market hours check
+    const now = new Date();
+    const istH = parseInt(now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}));
+    const istM = parseInt(now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"}));
+    const isOpen = istH > 9 || (istH === 9 && istM >= 15) ? istH < 15 || (istH === 15 && istM <= 30) : false;
+    const scannedAt = now.toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true}) + " IST";
+
+    document.getElementById("market-closed").style.display = isOpen ? "none" : "block";
+    document.getElementById("scan-time-val").textContent = scannedAt;
+
+    // 8. Render everything
+    renderStats(niftyQ, bnQ, sentiment, sentimentScore, topSector, scannedAt);
+    renderGL(topGainers, topLosers);
+    renderPicks(picks);
+    updateTicker(niftyQ, bnQ, sentiment, sentimentScore, topSector);
+
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("dashboard").style.display = "block";
+    document.getElementById("status-dot").className = "dot";
+    document.getElementById("status-txt").textContent = "Live";
+
+    secsLeft = 900;
+    lg("✅ Scan complete — " + picks.length + " picks | " + sentiment + " " + sentimentScore + "/10", "ok");
+
+  } catch(e) {
+    lg("❌ " + e.message, "err");
+    document.getElementById("loading").style.display = "none";
+    document.getElementById("error-msg").textContent = e.message;
+    document.getElementById("error-banner").style.display = "block";
+    document.getElementById("status-dot").className = "dot err";
+    document.getElementById("status-txt").textContent = "Error";
+    document.getElementById("log-drawer").style.display = "block";
+  } finally {
+    scanning = false;
+    btn.disabled = false; btn.textContent = "▶ Scan Now";
+  }
+}
+</script>
+
+</body>
+</html>

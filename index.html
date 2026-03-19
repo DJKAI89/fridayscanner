@@ -920,21 +920,51 @@ function calcATR(candles){
   return trs.reduce((a,b)=>a+b,0)/14;
 }
 function isAboveMA(closes,p){if(closes.length<p)return null;return closes[closes.length-1]>closes.slice(-p).reduce((a,b)=>a+b,0)/p;}
+// PRO_CandlePatternRecognizer.cs — EXACT PORT
+// candles: Upstox format [timestamp,open,high,low,close,volume], newest first
 function detectPatterns(candles){
   const p={bullishEngulfing:false,bearishEngulfing:false,hammer:false,shootingStar:false,doji:false,morningStar:false,eveningStar:false};
-  if(candles.length<3) return p;
-  const g=(i)=>{const[,o,h,l,c]=candles[i].map(Number);return{o,h,l,c,body:Math.abs(c-o),range:h-l,bull:c>o};};
-  const c0=g(0),c1=g(1),c2=g(2);
-  if(!c1.bull&&c0.bull&&c0.o<c1.c&&c0.c>c1.o) p.bullishEngulfing=true;
-  if(c1.bull&&!c0.bull&&c0.o>c1.c&&c0.c<c1.o) p.bearishEngulfing=true;
-  if(c0.range>0){
-    const ls=Math.min(c0.o,c0.c)-c0.l, us=c0.h-Math.max(c0.o,c0.c);
-    if(ls>=2*c0.body&&us<=0.1*c0.range&&c0.body>0) p.hammer=true;
-    if(us>=2*c0.body&&ls<=0.1*c0.range&&c0.body>0) p.shootingStar=true;
-    if(c0.body/c0.range<0.05) p.doji=true;
+  if(!candles||candles.length<3) return p;
+  // Candles newest-first: index 0=latest, 1=previous, 2=before previous
+  // C# uses: current=last, previous=secondLast, beforePrevious=thirdLast
+  // Map: curr=candles[0], prev=candles[1], beforePrev=candles[2]
+  const mk=(i)=>{const[,o,h,l,c]=candles[i].map(Number);const body=Math.abs(c-o);return{o,h,l,c,body,range:h-l,bull:c>o};};
+  const curr=mk(0), prev=mk(1), bprev=mk(2);
+
+  // IsBullishEngulfing: prev bearish, curr bullish, curr engulfs prev, currBody > prevBody×1.2
+  if(!prev.bull && curr.bull && curr.o<=prev.c && curr.c>=prev.o && curr.body>prev.body*1.2)
+    p.bullishEngulfing=true;
+
+  // IsBearishEngulfing: prev bullish, curr bearish, curr engulfs prev, currBody > prevBody×1.2
+  if(prev.bull && !curr.bull && curr.o>=prev.c && curr.c<=prev.o && curr.body>prev.body*1.2)
+    p.bearishEngulfing=true;
+
+  // IsHammer: longLowerShadow(≥2×body), smallUpperShadow(≤body×0.3), bodyAtTop(≤range×0.3)
+  if(curr.range>0 && curr.body>0){
+    const ls=Math.min(curr.o,curr.c)-curr.l;
+    const us=curr.h-Math.max(curr.o,curr.c);
+    if(ls>=curr.body*2.0 && us<=curr.body*0.3 && curr.body<=curr.range*0.3) p.hammer=true;
+    // IsShootingStar: longUpperShadow(≥2×body), smallLowerShadow(≤body×0.3), bodyAtBottom(≤range×0.3)
+    if(us>=curr.body*2.0 && ls<=curr.body*0.3 && curr.body<=curr.range*0.3) p.shootingStar=true;
   }
-  if(!c2.bull&&c2.body>c2.range*0.4&&c1.body<c1.range*0.2&&c0.bull&&c0.body>c0.range*0.4) p.morningStar=true;
-  if(c2.bull&&c2.body>c2.range*0.4&&c1.body<c1.range*0.2&&!c0.bull&&c0.body>c0.range*0.4) p.eveningStar=true;
+
+  // IsDoji: body < 10% of range (C# uses 10%, not 5%)
+  if(curr.range>0 && curr.body<=curr.range*0.10) p.doji=true;
+
+  // IsMorningStar: bprev bearish, prev small(body<bprev.body×0.5), curr bullish, curr.c>bprev midpoint
+  {
+    const midBprev=(bprev.o+bprev.c)/2;
+    if(!bprev.bull && prev.body<bprev.body*0.5 && curr.bull && curr.c>midBprev)
+      p.morningStar=true;
+  }
+
+  // IsEveningStar: bprev bullish, prev small, curr bearish, curr.c < bprev midpoint
+  {
+    const midBprev=(bprev.o+bprev.c)/2;
+    if(bprev.bull && prev.body<bprev.body*0.5 && !curr.bull && curr.c<midBprev)
+      p.eveningStar=true;
+  }
+
   return p;
 }
 
@@ -942,126 +972,187 @@ function detectPatterns(candles){
 function interpVIX(v){return v>25?{txt:"Panic",sc:20}:v>20?{txt:"High",sc:40}:v>15?{txt:"Normal",sc:70}:{txt:"Low",sc:90};}
 function interpPCR(p){return p>1.2?{txt:"Very Bullish",sc:90}:p>0.8?{txt:"Bullish",sc:70}:p>0.6?{txt:"Neutral",sc:50}:{txt:"Bearish",sc:30};}
 
-// ─────────────────────────────────────────────────────────────
-//  PRO_ConfidenceCalculator.cs — EXACT FORMULA FROM PDF
-//  Confidence = (Signal×35%) + (Market×25%) + (Volume×20%) + (PriceAction×20%)
-// ─────────────────────────────────────────────────────────────
-function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patterns) {
-  const numInds = inds.filter(Boolean).length;
+// ═══════════════════════════════════════════════════════════════════════
+// PRO_ConfidenceCalculator.cs — EXACT PORT FROM C# SOURCE
+// Confidence = (Signal×35%) + (Market×25%) + (Volume×20%) + (PriceAction×20%)
+// ═══════════════════════════════════════════════════════════════════════
+function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patterns, rec, numIndsOverride) {
+  // numIndsOverride: if provided, use directly (from countIndicators); else count from inds array
+  // rec = "STRONG BUY" | "BUY" | "MODERATE" | "WATCH" | "AVOID"
+  const numInds = (numIndsOverride !== undefined && numIndsOverride !== null) ? numIndsOverride : (inds ? inds.filter(Boolean).length : 0);
 
-  // 1. Signal Strength (35%) — 7 indicators, 5+ = 90pts
-  //    Scale: 0→0, 1→15, 2→30, 3→50, 4→70, 5→90, 6→95, 7→100
-  const sigMap = [0, 15, 30, 50, 70, 90, 95, 100];
-  const sigScore = sigMap[Math.min(7, numInds)];
+  // ── Component 1: Signal Strength (35%) ──
+  // C# CalculateSignalStrength: 5+→90, 4→75, 3→60, 2→45, <2→30, ±10 for rec
+  let sigScore = numInds >= 5 ? 90 : numInds === 4 ? 75 : numInds === 3 ? 60 : numInds === 2 ? 45 : 30;
+  if (rec === "STRONG BUY") sigScore = Math.min(100, sigScore + 10);
+  else if (rec === "BUY")   sigScore = Math.min(100, sigScore + 5);
+  else if (rec === "AVOID") sigScore = Math.max(0,   sigScore - 10);
 
-  // 2. Market Context (25%) — NIFTY trend + PCR + VIX + Sector
-  //    Average of four market signals, each 0-100
-  const niftyScore  = niftyBull ? 80 : 40;
-  const mktScore    = (vixSc + pcrSc + niftyScore + secSc) / 4;
+  // ── Component 2: Market Context (25%) ──
+  // C# CalculateMarketContext: niftyBullish?(60:25) + sectorStrength×0.4
+  const mktScore = Math.min(100, (niftyBull ? 60 : 25) + secSc * 0.4);
 
-  // 3. Volume Profile (20%) — current vs average
-  //    >2x avg = 100, 1.5x = 85, 1.2x = 70, 1x = 50, <1x = 30
+  // ── Component 3: Volume Profile (20%) ──
+  // C# CalculateVolumeProfile: ≥2.0→95, ≥1.5→85, ≥1.2→70, ≥0.8→50, <0.8→30
   const volRatio = avgVol > 0 ? vol / avgVol : 1;
-  const volScore = volRatio >= 2.0 ? 100 :
-                   volRatio >= 1.5 ? 85  :
-                   volRatio >= 1.2 ? 70  :
-                   volRatio >= 1.0 ? 50  : 30;
+  let volScore = volRatio >= 2.0 ? 95 : volRatio >= 1.5 ? 85 : volRatio >= 1.2 ? 70 : volRatio >= 0.8 ? 50 : 30;
 
-  // 4. Price Action (20%) — candle patterns
-  //    Bullish pattern = 80, Bearish pattern = 30, Doji = 50, None = 45
-  const hasBull = patterns.bullishEngulfing || patterns.hammer || patterns.morningStar;
-  const hasBear = patterns.bearishEngulfing || patterns.shootingStar || patterns.eveningStar;
-  const paScore = hasBull ? 80 : hasBear ? 30 : patterns.doji ? 50 : 45;
+  // ── Component 4: Price Action Quality (20%) ──
+  // C# CalculatePriceActionQuality: additive from base 50
+  let paScore = 50;
+  if (patterns.bullishEngulfing) paScore += 15;
+  if (patterns.hammer)           paScore += 10;
+  if (patterns.morningStar)      paScore += 15;
+  // For BUY direction, bearish patterns reduce confidence
+  if (rec === "BUY" || rec === "STRONG BUY") {
+    if (patterns.bearishEngulfing) paScore -= 15;
+    if (patterns.shootingStar)     paScore -= 10;
+    if (patterns.eveningStar)      paScore -= 15;
+  }
+  paScore = Math.min(100, Math.max(0, paScore));
 
-  const confidence = sigScore * 0.35 + mktScore * 0.25 + volScore * 0.20 + paScore * 0.20;
-  return +confidence.toFixed(1);
+  return +(sigScore * 0.35 + mktScore * 0.25 + volScore * 0.20 + paScore * 0.20).toFixed(1);
 }
 
-// ─────────────────────────────────────────────────────────────
-//  PRO_RiskCalculator.cs — EXACT FORMULA FROM PDF
-//  Risk = (Volatility×30%) + (Position×25%) + (Market×25%) + (Time×20%)
-// ─────────────────────────────────────────────────────────────
-function calcRisk(ltp, sl, atr, vix) {
-  // 1. Volatility (ATR based): 15-70 points
-  const atrPct   = atr ? (atr / ltp) * 100 : 1.5;  // ATR as % of price
-  const volScore = Math.min(70, Math.max(15, atrPct * 15)); // 1% ATR → 15, 4.5% → 67.5
-
-  // 2. Position (SL distance + R:R): 10-70 points
-  const slDist   = ltp > 0 ? Math.abs((ltp - sl) / ltp) * 100 : 2;
-  const posScore = Math.min(70, Math.max(10, slDist * 5));  // 2% SL → 10, 14% → 70
-
-  // 3. Market (India VIX): 10-80 points
-  //    VIX <12 → 10 (low risk), 12-15 → 20, 15-20 → 30, 20-25 → 50, >25 → 80
-  const mktScore = vix > 25 ? 80 : vix > 20 ? 50 : vix > 15 ? 30 : vix > 12 ? 20 : 10;
-
-  // 4. Time (options decay for stocks = neutral 20, options get penalized separately)
-  const timeScore = 20;
-
-  const risk = volScore * 0.30 + posScore * 0.25 + mktScore * 0.25 + timeScore * 0.20;
-  return +risk.toFixed(1);
+// ── CountConfirmingIndicators ──
+// C#: MACD/50MA/200MA/NearSupport only count when direction aligns with Buy/StrongBuy
+function countIndicators(rsi, macdBull, a50, a200, vol, avgVol, nearSupp, patterns, rec) {
+  const isBuy = rec === "BUY" || rec === "STRONG BUY" || rec === "MODERATE";
+  let count = 0;
+  if (rsi !== null && rsi >= 40 && rsi <= 70)                count++; // RSI 40-70
+  if (macdBull === true && isBuy)                             count++; // MACD bullish (direction-aware)
+  if (a50 === true && isBuy)                                  count++; // Above 50MA (direction-aware)
+  if (a200 === true && isBuy)                                 count++; // Above 200MA (direction-aware)
+  if (avgVol > 0 && vol >= avgVol * 1.2)                      count++; // Volume >1.2x avg
+  if (nearSupp && isBuy)                                      count++; // Near support (direction-aware)
+  if (patterns.bullishEngulfing||patterns.hammer||patterns.morningStar) count++; // Bullish pattern
+  return count;
 }
 
-// ─────────────────────────────────────────────────────────────
-//  PRO_PotentialCalculator.cs — EXACT FORMULA FROM PDF
-//  Adjusted Potential = Base × WinRate × R:R
-//  Expected Value = (Win% × AvgWin) - (Loss% × AvgLoss)
-// ─────────────────────────────────────────────────────────────
-function calcPotential(ltp, target, sl, numInds) {
+// ═══════════════════════════════════════════════════════════════════════
+// PRO_RiskCalculator.cs — EXACT PORT FROM C# SOURCE
+// Risk = (Volatility×30%) + (Position×25%) + (Market×25%) + (Time×20%)
+// ═══════════════════════════════════════════════════════════════════════
+function calcRisk(ltp, sl, target, atr, vix) {
+  // ── Component 1: Volatility Risk (30%) ──
+  // C# CalculateVolatilityRisk: stepped ATR bands
+  const atrPct = atr && ltp > 0 ? (atr / ltp) * 100 : 2;
+  const volRisk = atrPct < 1.5 ? 15 : atrPct < 3.0 ? 30 : atrPct < 5.0 ? 50 : 70;
+
+  // ── Component 2: Position Risk (25%) ──
+  // C# CalculatePositionRisk: SL distance bands × R:R multiplier
+  const slPct = ltp > 0 && sl > 0 ? Math.abs((ltp - sl) / ltp) * 100 : 4;
+  let posRisk = slPct < 2 ? 10 : slPct < 4 ? 20 : slPct < 6 ? 35 : slPct < 10 ? 50 : 70;
+  const rr = (sl > 0 && ltp > sl) ? (target - ltp) / (ltp - sl) : 1;
+  if (rr >= 3.0)      posRisk *= 0.70;  // Excellent R:R reduces risk
+  else if (rr >= 2.0) posRisk *= 0.85;  // Good R:R
+  else if (rr < 1.0)  posRisk *= 1.30;  // Poor R:R increases risk
+  posRisk = Math.min(100, posRisk);
+
+  // ── Component 3: Market Risk (25%) ──
+  // C# CalculateMarketRisk: granular VIX bands
+  const mktRisk = vix < 12 ? 10 : vix < 15 ? 20 : vix < 18 ? 30 : vix < 22 ? 45 : vix < 28 ? 60 : 80;
+
+  // ── Component 4: Time Risk (20%) ──
+  // C# CalculateTimeRisk: stocks = 15 (minimal time risk)
+  const timeRisk = 15;
+
+  return +(volRisk * 0.30 + posRisk * 0.25 + mktRisk * 0.25 + timeRisk * 0.20).toFixed(1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// PRO_PotentialCalculator.cs — EXACT PORT FROM C# SOURCE
+// ═══════════════════════════════════════════════════════════════════════
+function calcPotential(ltp, target, sl, numInds, rec) {
   // Base = (Target - Entry) / Entry × 100
-  const base   = (target - ltp) / ltp * 100;
+  const base = ltp > 0 ? (target - ltp) / ltp * 100 : 0;
 
   // R:R = (Target-Entry) / (Entry-StopLoss), capped at 3.0
-  const rr     = Math.min(3.0, Math.abs((target - ltp) / ((ltp - sl) || 1)));
+  const rr = Math.min(3.0, (ltp > sl && sl > 0) ? (target - ltp) / (ltp - sl) : 1);
 
-  // WinRate heuristic (35-75% based on signal count)
-  //   0 signals → 35%, 7 signals → 75%
-  const wr     = 0.35 + (numInds / 7) * 0.40;
+  // ── WinRate: C# GetWinRate ──
+  // Base from recommendation, then indicator adjustments, capped 35-75%
+  let wr = rec === "STRONG BUY" ? 68 : rec === "BUY" ? 62 : rec === "MODERATE" ? 55 : rec === "WATCH" ? 50 : 45;
+  if (numInds >= 5)      wr += 10;
+  else if (numInds >= 4) wr += 6;
+  else if (numInds >= 3) wr += 3;
+  else if (numInds <= 1) wr -= 8;
+  wr = Math.min(75, Math.max(35, wr));
 
-  // Adjusted Potential
-  const adj    = base * wr * rr;
+  // Adjusted Potential = Base × (WinRate/100) × R:R
+  const adj = base * (wr / 100) * rr;
 
   // Expected Value = (Win% × AvgWin) - (Loss% × AvgLoss)
-  const slDist = Math.abs((ltp - sl) / ltp * 100);
-  const ev     = (wr * base) - ((1 - wr) * slDist);
+  const slDist = ltp > 0 && sl > 0 ? Math.abs((ltp - sl) / ltp * 100) : base / 2;
+  const ev = (wr / 100) * base - (1 - wr / 100) * slDist;
 
-  // Sharpe Ratio = Return / Risk (simplified)
+  // ── Targets: C# CalculateMultipleTargets ──
+  // Conservative = entry + (entry-sl)×1.5  (risk-based)
+  // Moderate     = target
+  // Aggressive   = entry + (entry-sl)×4.0
+  const riskAmt = sl > 0 ? ltp - sl : ltp * 0.03;
+  const cons = +(ltp + riskAmt * 1.5).toFixed(2);
+  const mod  = +target.toFixed(2);
+  const agg  = +(ltp + riskAmt * 4.0).toFixed(2);
+
+  // Sharpe = return / risk
   const sharpe = slDist > 0 ? +(base / slDist).toFixed(2) : 0;
 
-  // Three targets: Conservative (60%), Moderate (100%), Aggressive (150%)
-  return {
-    base:   +base.toFixed(2),
-    rr:     +rr.toFixed(2),
-    wr:     +(wr * 100).toFixed(0),
-    adj:    +adj.toFixed(2),
-    ev:     +ev.toFixed(2),
-    sharpe,
-    cons:   +(ltp + (target - ltp) * 0.60).toFixed(2),
-    mod:    +target.toFixed(2),
-    agg:    +(ltp + (target - ltp) * 1.50).toFixed(2),
-  };
+  return { base: +base.toFixed(2), rr: +rr.toFixed(2), wr: +wr.toFixed(0),
+           adj: +adj.toFixed(2), ev: +ev.toFixed(2), sharpe, cons, mod, agg };
 }
 
-// ─────────────────────────────────────────────────────────────
-//  PRO_AnalysisService.cs — GetProfessionalRecommendation()
-// ─────────────────────────────────────────────────────────────
+// ── GetProfessionalRecommendation (PRO_AnalysisService) ──
 function getRec(conf, pot, risk, rr) {
-  if (conf >= 80 && pot >= 12 && risk < 30 && rr >= 2.5) return "STRONG BUY";
-  if (conf >= 70 && pot >=  8 && risk < 40 && rr >= 1.5) return "BUY";
-  if (conf >= 65 && pot >=  5 && risk < 50 && rr >= 1.5) return "MODERATE";
-  if (conf >= 50)                                         return "WATCH";
+  // C# GetProfessionalRecommendation (exact thresholds)
+  if (conf >= 80 && pot >= 15 && risk <= 30 && rr >= 2.5) return "STRONG BUY";
+  if (conf >= 70 && pot >= 10 && risk <= 40 && rr >= 2.0) return "BUY";
+  if (conf >= 60 && pot >=  8 && risk <= 50)               return "MODERATE";
+  if (conf >= 50 || pot >= 12)                             return "WATCH";
   return "AVOID";
 }
 
-// Auto compute SL / Target from ATR — aligned with PDF formula
-// PDF: Target gives ~8% upside, SL ~4% downside → R:R ~2.0
-// ATR-based: target = LTP + ATR×3 (swing high), SL = LTP - ATR×1.5 (below recent low)
-// For typical Nifty50 stock: ATR ~1.5-2% of price → target ~4.5-6%, SL ~2.3-3%
+// ── Sector mapping (PRO_MarketDataService.GetSectorForSymbol) ──
+function getSector(sym) {
+  const SECTORS = {
+    BANKING: ["HDFCBANK","ICICIBANK","SBIN","KOTAKBANK","AXISBANK","INDUSINDBK","IDFCFIRSTB","BANDHANBNK","RBLBANK","FEDERALBNK","INDIANB","BANKINDIA","BANKBARODA","CANBK","PNB","UNIONBANK"],
+    IT:      ["TCS","INFY","WIPRO","HCLTECH","TECHM","LTIM","MPHASIS","COFORGE","PERSISTENT","KPITTECH","TATAELXSI","OFSS"],
+    AUTO:    ["MARUTI","TATAMOTORS","M&M","EICHERMOT","HEROMOTOCO","BAJAJ-AUTO","TVSMOTOR","ASHOKLEY"],
+    PHARMA:  ["SUNPHARMA","DRREDDY","CIPLA","DIVISLAB","APOLLOHOSP","LUPIN","AUROPHARMA","ALKEM","MANKIND","LAURUSLABS"],
+    ENERGY:  ["RELIANCE","ONGC","BPCL","IOC","COALINDIA","NTPC","POWERGRID","GAIL","HINDPETRO","ADANIENT","ADANIENSOL","ADANIGREEN","TATAPOWER"],
+    FMCG:    ["HINDUNILVR","ITC","NESTLEIND","BRITANNIA","TATACONSUM","DABUR","MARICO","COLPAL"],
+    METAL:   ["TATASTEEL","JSWSTEEL","HINDALCO","VEDL","SAIL","NMDC","HINDZINC","NATIONALUM"],
+    NBFC:    ["BAJFINANCE","BAJAJFINSV","SHRIRAMFIN","CHOLAFIN","MUTHOOTFIN","MANAPPURAM","LTF"],
+    INFRA:   ["LT","DLF","GODREJPROP","LODHA","PRESTIGE","OBEROIRLTY","PHOENIXLTD"],
+    TELECOM: ["BHARTIARTL","INDUSTOWER"],
+  };
+  for (const [sec, syms] of Object.entries(SECTORS)) {
+    if (syms.includes(sym)) return sec;
+  }
+  return "OTHER";
+}
+
+// ── VIX & PCR interpretation (PRO_MarketDataService) ──
+function interpVIX(v) {
+  // C# InterpretVIX — more granular bands
+  return v > 28 ? {txt:"Panic",sc:10}   : v > 22 ? {txt:"High Fear",sc:25}
+       : v > 18 ? {txt:"Elevated",sc:45} : v > 15 ? {txt:"Normal",sc:70}
+       : v > 12 ? {txt:"Low Vol",sc:85}  : {txt:"Complacency",sc:90};
+}
+function interpPCR(p) {
+  // C# InterpretPCR
+  return p > 1.3 ? {txt:"Very Bullish",sc:90} : p > 1.1 ? {txt:"Bullish",sc:75}
+       : p >= 0.9 ? {txt:"Neutral",sc:50}      : p >= 0.7 ? {txt:"Bearish",sc:30}
+       : {txt:"Very Bearish",sc:15};
+}
+
+// ── SL/Target from ATR ──
 function autoSLTarget(ltp, high, low, atr) {
-  const v = atr || ltp * 0.02;  // fallback: 2% of price if no ATR
-  const target = +(ltp + v * 3.0).toFixed(2);       // ~4-6% upside
-  // SL = max of (day low - 0.5%) and (ltp - ATR×1.5) — whichever is more protective
-  const sl = +(Math.max(low * 0.995, ltp - v * 1.5)).toFixed(2);
-  return { target, sl };
+  const v = atr || ltp * 0.02;
+  return {
+    target: +(ltp + v * 3.0).toFixed(2),   // ~4-6% upside via ATR×3
+    sl:     +(Math.max(low * 0.995, ltp - v * 1.5)).toFixed(2),
+  };
 }
 
 // ══════════════════════════════════════
@@ -1377,13 +1468,12 @@ async function triggerScan(){
     }
     lg(`Technical data for ${Object.keys(tech).length} stocks`,"o");
 
-    // Pre-compute sector strength using ALL quotes (before individual analysis loop)
-    // This ensures every stock gets a fair sector score
+    // Pre-compute sector strength using ALL quotes (C# GetSectorForSymbol mapping)
     const secMap={};
     for(const {inst} of volRanked){
       const q=allQ[inst.key];
       if(!q?.last_price) continue;
-      const sec=inst.sec||"NSE";
+      const sec=(inst.sec&&inst.sec!=="NSE")?inst.sec:getSector(inst.s);
       const chg=getChgPct(q);
       if(!secMap[sec]) secMap[sec]={g:0,c:0};
       if(chg>0) secMap[sec].g++;
@@ -1400,31 +1490,29 @@ async function triggerScan(){
       const vol=q.volume||0,chgPct=getChgPct(q);
       lastPrices[inst.s]=ltp;
       const t=tech[inst.s]||{};
-      const nearSupp=((ltp-low)/ltp*100)<2;
-      const bullPat=t.patterns&&(t.patterns.bullishEngulfing||t.patterns.hammer||t.patterns.morningStar);
-      const avgVol=t.avgVol20||vol; // 20-day avg from candles, fallback to current
-      const inds=[
-        t.rsi!==null&&t.rsi>=CFG.rsiOS&&t.rsi<=CFG.rsiOB, // RSI in healthy range
-        t.macdBull===true,                                   // MACD bullish
-        t.a50===true,                                        // above 50MA
-        t.a200===true,                                       // above 200MA
-        avgVol>0&&vol>=avgVol*CFG.vol,                       // volume spike vs 20d avg
-        nearSupp,                                            // near day low (support)
-        !!bullPat                                            // bullish candle pattern
-      ];
-      const numInds=inds.filter(Boolean).length;
-      // secMap already pre-computed above
-      const sec=inst.sec||"NSE"; const secSc=secMap[sec]?Math.round(secMap[sec].g/secMap[sec].c*100):50;
-      const conf=calcConfidence(inds,vixSc,pcrSc,nBull,secSc,vol,avgVol,t.patterns||{});
-      const {target,sl}=autoSLTarget(ltp,high,low,t.atr);
-      const risk=calcRisk(ltp,sl,t.atr,vix);
-      const pot=calcPotential(ltp,target,sl,numInds);
-      const rec=getRec(conf,pot.adj,risk,pot.rr);
-      // passes: use pot.base (raw upside %) not pot.adj (already shrunk by winRate×R:R)
-      const passes=(conf>=CFG.minStockConf&&pot.base>=CFG.pot&&risk<CFG.risk&&pot.rr>=CFG.rr);
+      const nearSupp = ((ltp-low)/ltp*100) < 2;
+      const avgVol   = t.avgVol20 || vol;
+      const patterns = t.patterns || {};
+      // Sector from C# GetSectorForSymbol
+      const secName  = (inst.sec && inst.sec!=="NSE") ? inst.sec : getSector(inst.s);
+      const secSc    = secMap[secName] ? Math.round(secMap[secName].g/secMap[secName].c*100) : 50;
+      // SL / Target from ATR
+      const {target, sl} = autoSLTarget(ltp, high, low, t.atr);
+      // Preliminary R:R to seed direction-aware indicator count
+      const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 1;
+      const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
+      // Count confirming indicators (C# CountConfirmingIndicators — direction-aware)
+      const numInds = countIndicators(t.rsi, t.macdBull, t.a50, t.a200, vol, avgVol, nearSupp, patterns, preRec);
+      // Full confidence calculation (C# CalculateConfidence with numInds as signal input)
+      const conf   = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, avgVol, patterns, preRec, numInds);
+      // Risk, Potential, final Rec
+      const risk   = calcRisk(ltp, sl, target, t.atr, vix);
+      const pot    = calcPotential(ltp, target, sl, numInds, preRec);
+      const rec    = getRec(conf, pot.base, risk, pot.rr);
+      const passes = (conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr);
       const prev=q.ohlc?.close||ltp;
       stocks.push({...inst,ltp,prev,high,low,vol,chgPct,rsi:t.rsi,macdBull:t.macdBull,a50:t.a50,a200:t.a200,
-        atr:t.atr,patterns:t.patterns||{},inds,numInds,nearSupp,bullPat,conf,risk,pot,rec,target,sl,secSc,passes});
+        atr:t.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,target,sl,secSc,passes});
     }
 
     const picks=stocks.filter(s=>s.passes).sort((a,b)=>b.pot.ev-a.pot.ev).slice(0,12);
@@ -1737,6 +1825,7 @@ function renderStockCards(picks,totalScanned){
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
   document.getElementById("stocks-sub").textContent=`Confidence≥${CFG.minStockConf}% · Potential≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} (PDF defaults: 65/8/50/1.5)`;
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
+  // inds array reconstructed for display
   // picks already filtered by minStockConf in triggerScan
   const filteredPicks=picks; // all picks already pass conf>=minStockConf
   document.getElementById("stocks-title").textContent=`Professional Picks · ${filteredPicks.length} signals`;
@@ -1783,9 +1872,11 @@ function renderStockCards(picks,totalScanned){
         <div class="cbox neutral"><div class="cb-l">INDICATORS</div><div class="cb-v ${p.numInds>=5?"up":p.numInds>=3?"am":"dn"}">${p.numInds}/7</div><div class="cb-s" style="color:#64748b">confirming</div></div>
         <div class="cbox neutral"><div class="cb-l">DAY HIGH/LOW</div><div class="cb-v" style="color:#374151;font-size:11px">₹${fmt(p.high,0)} / ${fmt(p.low,0)}</div></div>
       </div>
-      <!-- 7 Indicators -->
-      <div class="c-inds">
-        ${indLbls.map((l,j)=>`<span class="ind ${p.inds[j]===true?"ok":p.inds[j]===false?"no":"na"}">${l}</span>`).join("")}
+      <!-- 7 Indicators (reconstructed from stored fields) -->
+      <div class="c-inds">${(()=>{
+        const di=[p.rsi!==null&&p.rsi>=CFG.rsiOS&&p.rsi<=CFG.rsiOB, p.macdBull===true, p.a50===true, p.a200===true, (p.vol||0)>0, ((p.ltp-p.low)/p.ltp*100)<2, !!(p.patterns?.bullishEngulfing||p.patterns?.hammer||p.patterns?.morningStar)];
+        return indLbls.map((l,j)=>`<span class="ind ${di[j]?'ok':'na'}">${l}</span>`).join("");
+      })()}
         ${Object.entries(p.patterns).filter(([,v])=>v).map(([k])=>`<span class="ind ok">📊${k.replace(/([A-Z])/g,' $1').trim()}</span>`).join("")}
       </div>
       <div class="c-why ${rc}">${p.rec==="STRONG BUY"?"🔥":p.rec==="BUY"?"✅":p.rec==="MODERATE"?"⚡":"👀"} ${p.numInds}/7 indicators. R:R ${p.pot.rr}:1, Win ~${p.pot.wr}%, EV ${p.pot.ev>=0?"+":""}${p.pot.ev.toFixed(2)}%. ${p.rsi?"RSI "+p.rsi+".":""} ${p.macdBull?"MACD bullish.":""}</div>

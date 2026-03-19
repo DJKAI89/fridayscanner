@@ -38,7 +38,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 .tab.active{color:#16a34a;border-bottom-color:#16a34a;font-weight:700}
 
 /* TOKEN GATE */
-#token-gate{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px);padding:20px}
+#token-gate{display:none;align-items:center;justify-content:center;min-height:calc(100vh - 56px);padding:20px}
 .tc{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:26px;max-width:440px;width:100%;box-shadow:0 4px 24px rgba(0,0,0,.08)}
 .tc h2{font-size:17px;font-weight:800;margin-bottom:12px}
 .info-box{border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:11px;line-height:1.8}
@@ -212,7 +212,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
 <!-- MAIN APP -->
 
-<div id="app">
+<div id="app" style="display:none">
   <div class="tabs">
     <button class="tab active" onclick="switchTab('stocks')">📈 Stocks</button>
     <button class="tab" onclick="switchTab('options')">⚡ F&amp;O Options</button>
@@ -672,10 +672,28 @@ let lastStockScan="—",lastOptScan="—",lastPortScan="—";
 // ══════════════════════════════════════
 function startWithToken(){
   const v=document.getElementById("token-input").value.trim();
-  if(!v||v.length<20){document.getElementById("t-err").style.display="block";return;}
-  TOKEN=v; localStorage.setItem("friday_token",v);
+  const errEl=document.getElementById("t-err");
+  const btn=document.querySelector("#token-gate .btn-g");
+  errEl.style.display="none";
+  if(!v||v.length<20){
+    errEl.textContent="⚠ Token too short — paste the full Upstox access token.";
+    errEl.style.display="block";
+    return;
+  }
+  // Show loading state on button
+  if(btn){btn.disabled=true;btn.textContent="⏳ Launching...";}
+  TOKEN=v;
+  localStorage.setItem("friday_token",v);
   localStorage.setItem("friday_token_date",new Date().toDateString());
-  boot();
+  try{
+    boot();
+  }catch(e){
+    // If boot fails, reset button and show error
+    if(btn){btn.disabled=false;btn.textContent="▶ Launch Scanner";}
+    errEl.textContent="⚠ Launch failed: "+e.message;
+    errEl.style.display="block";
+    TOKEN="";
+  }
 }
 function saveToken(){
   const v=document.getElementById("settings-token").value.trim();
@@ -724,9 +742,13 @@ function updateTokenInfo(){
   if(el) el.textContent="✅ Token saved on: "+date;
 }
 function boot(){
+  // Hide token gate, show app
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
   document.getElementById("hdr-ctrl").style.display="flex";
+  // Reset launch button in case it was in loading state
+  const launchBtn=document.querySelector("#token-gate .btn-g");
+  if(launchBtn){launchBtn.disabled=false;launchBtn.textContent="▶ Launch Scanner";}
   loadSettingsUI();
   updateTokenInfo();
   startTimers();
@@ -735,9 +757,16 @@ function boot(){
   loadPortfolio();
 }
 window.onload=()=>{
-  if(TOKEN&&TOKEN.length>20){
+  // Always start hidden — show the right screen
+  document.getElementById("app").style.display="none";
+  document.getElementById("hdr-ctrl").style.display="none";
+  document.getElementById("token-gate").style.display="none";
+
+  if(TOKEN && TOKEN.length > 20){
+    // Valid token saved — go straight to app
     boot();
   } else {
+    // No token — show login screen
     document.getElementById("token-gate").style.display="flex";
   }
 };
@@ -1209,8 +1238,7 @@ async function getNSEUniverse(){
     if(!csvText || csvText.length < 1000) throw new Error("CSV fetch failed");
 
     // Parse CSV — find header row
-    const lines = csvText.split("
-").filter(l=>l.trim());
+    const lines = csvText.split("\n").filter(l=>l.trim());
     const header = lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
     const keyIdx  = header.indexOf("instrument_key");
     const symIdx  = header.indexOf("tradingsymbol");

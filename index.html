@@ -292,10 +292,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
-    <div class="set-row"><div><div class="set-lbl">Min Confidence %</div><div class="set-sub">Weighted signal quality</div></div><input class="set-inp" id="s-conf" type="number" value="65" min="0" max="100"></div>
-    <div class="set-row"><div><div class="set-lbl">Min Upside % (Base)</div><div class="set-sub">Raw target vs entry (e.g. 2 = 2% upside)</div></div><input class="set-inp" id="s-pot" type="number" value="2" min="0" step="0.5"></div>
-    <div class="set-row"><div><div class="set-lbl">Max Risk %</div><div class="set-sub">Multi-factor risk score</div></div><input class="set-inp" id="s-risk" type="number" value="60" min="0"></div>
-    <div class="set-row"><div><div class="set-lbl">Min R:R Ratio</div><div class="set-sub">Risk-reward minimum</div></div><input class="set-inp" id="s-rr" type="number" value="1.2" step="0.1" min="0"></div>
+    <!-- s-conf removed: use Minimum Confidence Filters card instead -->
+    <div class="set-row"><div><div class="set-lbl">Min Upside % (Base)</div><div class="set-sub">Raw target vs entry (e.g. 2 = 2% upside)</div></div><input class="set-inp" id="s-pot" type="number" value="8" min="0" step="1"></div>
+    <div class="set-row"><div><div class="set-lbl">Max Risk %</div><div class="set-sub">Multi-factor risk score</div></div><input class="set-inp" id="s-risk" type="number" value="50" min="0"></div>
+    <div class="set-row"><div><div class="set-lbl">Min R:R Ratio</div><div class="set-sub">Risk-reward minimum</div></div><input class="set-inp" id="s-rr" type="number" value="1.5" step="0.1" min="0"></div>
     <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save</button>
   </div>
 
@@ -321,7 +321,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px">📈 Stocks Min Confidence</div>
         <div style="font-size:10px;color:#64748b;margin-bottom:8px">Stock picks below this % are hidden. Recommended: 50–70%</div>
         <div style="display:flex;align-items:center;gap:10px">
-          <input class="set-inp" id="s-min-stock-conf" type="number" value="50" min="0" max="100" style="width:70px" oninput="updateConfPreview()">
+          <input class="set-inp" id="s-min-stock-conf" type="number" value="65" min="0" max="100" style="width:70px" oninput="updateConfPreview()">
           <span style="font-size:10px;color:#94a3b8">%</span>
           <div style="flex:1;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden">
             <div id="conf-stock-bar" style="height:100%;background:#16a34a;border-radius:3px;width:50%;transition:width .3s"></div>
@@ -658,7 +658,7 @@ const FO_STOCK_LIST=[
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
 let CFG=JSON.parse(localStorage.getItem("friday_cfg")||"{}");
-const DEF={conf:65,pot:2,risk:60,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:5,tick:10,portRef:30,scanOpts:5,minStockConf:50,minOptConf:50};
+const DEF={minStockConf:65,pot:8,risk:50,rr:1.5,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:5,tick:10,portRef:30,scanOpts:5,minOptConf:50};
 CFG=Object.assign({},DEF,CFG);
 
 let scanning=false,optLoading=false,portLoading=false;
@@ -775,7 +775,7 @@ window.onload=()=>{
 // SETTINGS
 // ══════════════════════════════════════
 function loadSettingsUI(){
-  document.getElementById("s-conf").value=CFG.conf;
+  // Note: s-conf removed (merged into s-min-stock-conf)
   document.getElementById("s-pot").value=CFG.pot;
   document.getElementById("s-risk").value=CFG.risk;
   document.getElementById("s-rr").value=CFG.rr;
@@ -796,25 +796,26 @@ function loadSettingsUI(){
   updateTokenInfo();
 }
 function saveSettings(){
+  // Read all values — fallbacks match DEF (PDF defaults)
+  const rv=id=>+document.getElementById(id).value;
   CFG={
-    conf:  +document.getElementById("s-conf").value||65,
-    pot:   +document.getElementById("s-pot").value||8,
-    risk:  +document.getElementById("s-risk").value||50,
-    rr:    +document.getElementById("s-rr").value||1.5,
-    rsiOS: +document.getElementById("s-rsi-os").value||35,
-    rsiOB: +document.getElementById("s-rsi-ob").value||65,
-    vol:   +document.getElementById("s-vol").value||1.2,
-    delta: +document.getElementById("s-delta").value||0.4,
-    iv:    +document.getElementById("s-iv").value||18,
-    oi:    +document.getElementById("s-oi").value||15,
-    optSL: +document.getElementById("s-opt-sl").value||25,
-    optTgt:+document.getElementById("s-opt-tgt").value||50,
-    scanStocks:+document.getElementById("s-scan-stocks").value||5,
-    tick:  +document.getElementById("s-tick").value||10,
-    portRef:+document.getElementById("s-port-ref").value||30,
-    scanOpts:+document.getElementById("s-scan-opts").value||5,
-    minStockConf:+document.getElementById("s-min-stock-conf").value||50,
-    minOptConf:+document.getElementById("s-min-opt-conf").value||50,
+    minStockConf: rv("s-min-stock-conf")||DEF.minStockConf,
+    pot:          rv("s-pot")          ||DEF.pot,
+    risk:         rv("s-risk")         ||DEF.risk,
+    rr:           rv("s-rr")           ||DEF.rr,
+    rsiOS:        rv("s-rsi-os")       ||DEF.rsiOS,
+    rsiOB:        rv("s-rsi-ob")       ||DEF.rsiOB,
+    vol:          rv("s-vol")          ||DEF.vol,
+    delta:        rv("s-delta")        ||DEF.delta,
+    iv:           rv("s-iv")           ||DEF.iv,
+    oi:           rv("s-oi")           ||DEF.oi,
+    optSL:        rv("s-opt-sl")       ||DEF.optSL,
+    optTgt:       rv("s-opt-tgt")      ||DEF.optTgt,
+    scanStocks:   rv("s-scan-stocks")  ||DEF.scanStocks,
+    tick:         rv("s-tick")         ||DEF.tick,
+    portRef:      rv("s-port-ref")     ||DEF.portRef,
+    scanOpts:     rv("s-scan-opts")    ||DEF.scanOpts,
+    minOptConf:   rv("s-min-opt-conf") ||DEF.minOptConf,
   };
   localStorage.setItem("friday_cfg",JSON.stringify(CFG));
   clearTimers(); startTimers();
@@ -1051,13 +1052,16 @@ function getRec(conf, pot, risk, rr) {
   return "AVOID";
 }
 
-// Auto compute SL / Target from ATR
+// Auto compute SL / Target from ATR — aligned with PDF formula
+// PDF: Target gives ~8% upside, SL ~4% downside → R:R ~2.0
+// ATR-based: target = LTP + ATR×3 (swing high), SL = LTP - ATR×1.5 (below recent low)
+// For typical Nifty50 stock: ATR ~1.5-2% of price → target ~4.5-6%, SL ~2.3-3%
 function autoSLTarget(ltp, high, low, atr) {
-  const v = atr || ltp * 0.015;
-  return {
-    target:   +(ltp + v * 2.0).toFixed(2),
-    sl:       +(Math.max(low * 0.995, ltp - v * 1.5)).toFixed(2),
-  };
+  const v = atr || ltp * 0.02;  // fallback: 2% of price if no ATR
+  const target = +(ltp + v * 3.0).toFixed(2);       // ~4-6% upside
+  // SL = max of (day low - 0.5%) and (ltp - ATR×1.5) — whichever is more protective
+  const sl = +(Math.max(low * 0.995, ltp - v * 1.5)).toFixed(2);
+  return { target, sl };
 }
 
 // ══════════════════════════════════════
@@ -1373,8 +1377,19 @@ async function triggerScan(){
     }
     lg(`Technical data for ${Object.keys(tech).length} stocks`,"o");
 
-    // Build stock analysis from top-volume ranked stocks
+    // Pre-compute sector strength using ALL quotes (before individual analysis loop)
+    // This ensures every stock gets a fair sector score
     const secMap={};
+    for(const {inst} of volRanked){
+      const q=allQ[inst.key];
+      if(!q?.last_price) continue;
+      const sec=inst.sec||"NSE";
+      const chg=getChgPct(q);
+      if(!secMap[sec]) secMap[sec]={g:0,c:0};
+      if(chg>0) secMap[sec].g++;
+      secMap[sec].c++;
+    }
+    // Build stocks analysis
     const stocks=[];
     for(const {inst} of volRanked){
       const q=allQ[inst.key];
@@ -1398,9 +1413,8 @@ async function triggerScan(){
         !!bullPat                                            // bullish candle pattern
       ];
       const numInds=inds.filter(Boolean).length;
-      if(!secMap[inst.sec])secMap[inst.sec]={g:0,c:0};
-      if(chgPct>0)secMap[inst.sec].g++;secMap[inst.sec].c++;
-      const secSc=secMap[inst.sec]?Math.round(secMap[inst.sec].g/secMap[inst.sec].c*100):50;
+      // secMap already pre-computed above
+      const sec=inst.sec||"NSE"; const secSc=secMap[sec]?Math.round(secMap[sec].g/secMap[sec].c*100):50;
       const conf=calcConfidence(inds,vixSc,pcrSc,nBull,secSc,vol,avgVol,t.patterns||{});
       const {target,sl}=autoSLTarget(ltp,high,low,t.atr);
       const risk=calcRisk(ltp,sl,t.atr,vix);
@@ -1721,7 +1735,7 @@ function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,cnt){
 function renderStockCards(picks,totalScanned){
   const RC={STRONG_BUY:"strong-buy",BUY:"buy",MODERATE:"moderate",WATCH:"watch",AVOID:"avoid"};
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
-  document.getElementById("stocks-sub").textContent=`Conf≥${CFG.minStockConf}% · Upside≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · Sorted by Expected Value`;
+  document.getElementById("stocks-sub").textContent=`Confidence≥${CFG.minStockConf}% · Potential≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} (PDF defaults: 65/8/50/1.5)`;
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
   // picks already filtered by minStockConf in triggerScan
   const filteredPicks=picks; // all picks already pass conf>=minStockConf

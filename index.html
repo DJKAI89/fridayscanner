@@ -1185,11 +1185,16 @@ async function triggerScan(){
         const candles=await fetchCandles(inst.key,from200,today);
         if(candles.length>=15){
           const closes=candles.map(c=>+c[4]).reverse();
+          // 20-day average volume from candles (candles are newest-first)
+          const recentCandles=candles.slice(0,20);
+          const avgVol20=recentCandles.length>0
+            ?recentCandles.reduce((s,c)=>s+(+c[5]||0),0)/recentCandles.length
+            :0;
           tech[inst.s]={
             rsi:calcRSI(closes),
             macdBull:(closes.length>=35)?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
             a50:isAboveMA(closes,50),a200:isAboveMA(closes,200),
-            atr:calcATR(candles),patterns:detectPatterns(candles),candles
+            atr:calcATR(candles),patterns:detectPatterns(candles),candles,avgVol20
           };
         }
       }catch(e){lg("Candle "+inst.s+": "+e.message,"w");}
@@ -1207,16 +1212,21 @@ async function triggerScan(){
       const t=tech[inst.s]||{};
       const nearSupp=((ltp-low)/ltp*100)<2;
       const bullPat=t.patterns&&(t.patterns.bullishEngulfing||t.patterns.hammer||t.patterns.morningStar);
+      const avgVol=t.avgVol20||vol; // 20-day avg from candles, fallback to current
       const inds=[
-        t.rsi!==null&&t.rsi>=CFG.rsiOS&&t.rsi<=CFG.rsiOB,
-        t.macdBull===true,t.a50===true,t.a200===true,
-        vol>0&&vol>=vol*CFG.vol,nearSupp,!!bullPat
+        t.rsi!==null&&t.rsi>=CFG.rsiOS&&t.rsi<=CFG.rsiOB, // RSI in healthy range
+        t.macdBull===true,                                   // MACD bullish
+        t.a50===true,                                        // above 50MA
+        t.a200===true,                                       // above 200MA
+        avgVol>0&&vol>=avgVol*CFG.vol,                       // volume spike vs 20d avg
+        nearSupp,                                            // near day low (support)
+        !!bullPat                                            // bullish candle pattern
       ];
       const numInds=inds.filter(Boolean).length;
       if(!secMap[inst.sec])secMap[inst.sec]={g:0,c:0};
       if(chgPct>0)secMap[inst.sec].g++;secMap[inst.sec].c++;
       const secSc=secMap[inst.sec]?Math.round(secMap[inst.sec].g/secMap[inst.sec].c*100):50;
-      const conf=calcConfidence(inds,vixSc,pcrSc,nBull,secSc,vol,vol,t.patterns||{});
+      const conf=calcConfidence(inds,vixSc,pcrSc,nBull,secSc,vol,avgVol,t.patterns||{});
       const {target,sl}=autoSLTarget(ltp,high,low,t.atr);
       const risk=calcRisk(ltp,sl,t.atr,vix);
       const pot=calcPotential(ltp,target,sl,numInds);
@@ -1352,7 +1362,10 @@ async function loadOptions(force=true){
     document.getElementById("options-upd-time").textContent="Last scan: "+lastOptScan;
     if(firstOptLoad) document.getElementById("loading-options").style.display="none";
     document.getElementById("dash-options").style.display="block";
-    lg("✅ Options done: "+groups.reduce((s,g)=>s+g.picks.length,0)+" signals","o");
+    const idxCount=groups.filter(g=>g.type==="index").reduce((s,g)=>s+g.picks.length,0);
+    const stkCount=groups.filter(g=>g.type==="stock").reduce((s,g)=>s+g.picks.length,0);
+    lg(`✅ Options: ${idxCount} index + ${stkCount} stock signals (${groups.filter(g=>g.type==="stock").length} stocks scanned)`,"o");
+    if(stkCount===0) lg("⚠ 0 stock options — try lowering Delta/OI thresholds in Settings","w");
 
   }catch(e){
     lg("Options ❌ "+e.message,"e");
@@ -1363,27 +1376,33 @@ async function loadOptions(force=true){
 }
 
 function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType) {
-  // Delta score: higher abs delta = more in the money = more confident direction
+  // ── Delta score (30%) — directional strength ──
+  // Aligned with PDF: higher confidence = higher abs delta
   const absD = Math.abs(delta);
-  const deltaScore = absD >= 0.7 ? 90 : absD >= 0.5 ? 75 : absD >= 0.3 ? 55 : 35;
+  const deltaScore = absD >= 0.7 ? 90 : absD >= 0.5 ? 75 : absD >= 0.3 ? 55 : absD >= 0.15 ? 40 : 25;
 
-  // IV score: moderate IV is ideal. Very high IV = risky premium, very low = low volatility
-  const ivScore = iv >= 40 ? 30 : iv >= 25 ? 70 : iv >= 15 ? 85 : 50;
+  // ── IV score (20%) — implied volatility context ──
+  // Moderate IV = healthy expectation; too high = expensive; too low = dull
+  const ivScore = iv >= 50 ? 25 : iv >= 35 ? 45 : iv >= 20 ? 70 : iv >= 12 ? 80 : 55;
 
-  // OI build score: significant OI buildup in direction = high confidence
-  const oiScore = oiChg >= 30 ? 90 : oiChg >= 15 ? 70 : oiChg >= 5 ? 55 : oiChg < -15 ? 20 : 40;
+  // ── OI change score (25%) — buildup shows conviction ──
+  // Stock options have lower absolute OI, so use relative change
+  const oiScore = oiChg >= 30 ? 90 : oiChg >= 15 ? 72 : oiChg >= 5 ? 57
+                : oiChg >= 0  ? 45 : oiChg >= -10 ? 35 : 20;
 
-  // Moneyness: ATM or slightly OTM is best for risk/reward
-  const moneyness = spot > 0 ? ((strike - spot) / spot * 100) : 0;
-  const atmScore = Math.abs(moneyness) <= 2 ? 90 : Math.abs(moneyness) <= 5 ? 75 : Math.abs(moneyness) <= 10 ? 55 : 35;
+  // ── Moneyness score (15%) — ATM/near-ATM best R:R ──
+  const moneyness = spot > 0 ? Math.abs((strike - spot) / spot * 100) : 10;
+  const atmScore  = moneyness <= 1 ? 95 : moneyness <= 3 ? 82 : moneyness <= 6 ? 65
+                  : moneyness <= 10 ? 48 : 30;
 
-  // Theta penalty: high decay = lower confidence for buyers
-  const thetaScore = theta < -2 ? 40 : theta < -0.5 ? 65 : 80;
+  // ── Theta score (10%) — time decay penalty ──
+  const thetaScore = theta < -5 ? 30 : theta < -1 ? 50 : theta < -0.3 ? 68 : 82;
 
-  // Signal count bonus
-  const sigBonus = Math.min(20, signals.length * 5);
+  // ── Signal quality bonus (up to 15 pts) ──
+  const sigBonus = Math.min(15, signals.filter(s=>s.s>=2).length * 7);
 
-  return Math.round(deltaScore * 0.30 + ivScore * 0.20 + oiScore * 0.25 + atmScore * 0.15 + thetaScore * 0.10 + sigBonus);
+  const raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus;
+  return Math.round(Math.min(100, raw));
 }
 
 function scanChain(chain, atm, spot, name, expiry, lotSize) {
@@ -1407,6 +1426,8 @@ function scanChain(chain, atm, spot, name, expiry, lotSize) {
       if (oiChg <= -CFG.oi)   signals.push({l:"OI "+oiChg.toFixed(0)+"% Unwind",s:1});
       if (theta < -0.5)       signals.push({l:"Θ "+theta?.toFixed(2),     s:1});
       if (sp === atm)         signals.push({l:"ATM",                       s:1});
+      // Always include if delta is meaningful (even below threshold) to surface stock opts
+      if (!signals.length && absD >= 0.15 && oi > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
       if (!signals.length)    continue;
 
       // Entry / SL / Target
@@ -1439,7 +1460,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize) {
     }
   }
   // Sort by confidence DESC
-  return picks.sort((a, b) => b.confidence - a.confidence).slice(0, 8);
+  return picks.sort((a, b) => b.confidence - a.confidence).slice(0, 10);
 }
 
 // ══════════════════════════════════════
@@ -1458,15 +1479,33 @@ async function loadPortfolio(){
     const holdings=holdRes.status==="fulfilled"?holdRes.value?.data||[]:[]; 
     lg(`Portfolio: ${positions.length} positions, ${holdings.length} holdings`);
 
-    // today's P&L = net_change (pts) × qty  or fallback (LTP - open) × qty
-    const mapPos=(p,type)=>({
-      sym:p.trading_symbol||"—", type:type||p.product||"INTRADAY",
-      qty:+(p.quantity||0), avg:+(p.average_price||0),
-      ltp:+(p.last_price||0),
-      pnl:+(p.pnl!=null?p.pnl:(p.last_price-p.average_price)*p.quantity||0),
-      todayPnl:p.net_change!=null?p.net_change*(+(p.quantity||0)):
-               (p.ohlc?.open?(+(p.last_price||0)-(+(p.ohlc.open||0)))*(+(p.quantity||0)):0)
-    });
+    // Upstox field reference:
+    // positions: pnl = unrealised total P&L (LTP - avg_price) * qty
+    //            day_pnl = today's realised+unrealised P&L for the day
+    //            last_price = current LTP
+    // holdings:  pnl = total unrealised P&L
+    //            last_price = current LTP
+    //            close_price = previous close (for today's change)
+    const mapPos=(p,type)=>{
+      const qty     = +(p.quantity||0);
+      const avg     = +(p.average_price||0);
+      const ltp     = +(p.last_price||0);
+      // Total P&L = (LTP - avg_price) × qty  [most reliable, works for both]
+      const totalPnl = (ltp - avg) * qty;
+      // Today's P&L:
+      // For positions: use day_pnl if available, else (ltp - ohlc.open) × qty
+      // For holdings: (ltp - close_price) × qty  where close_price = prev close
+      let todayPnl = 0;
+      if(p.day_pnl!=null)         todayPnl = +(p.day_pnl);          // intraday positions
+      else if(p.close_price>0)    todayPnl = (ltp - p.close_price) * qty; // holdings
+      else if(p.ohlc?.open>0)     todayPnl = (ltp - p.ohlc.open)   * qty; // fallback
+      return {
+        sym:p.trading_symbol||"—", type:type||p.product||"INTRADAY",
+        qty, avg, ltp,
+        pnl:   +totalPnl.toFixed(2),
+        todayPnl: +todayPnl.toFixed(2),
+      };
+    };
     const all=[
       ...positions.map(p=>mapPos(p,p.product||"INTRADAY")),
       ...holdings.map(h=>mapPos(h,"HOLDING"))
@@ -1507,7 +1546,8 @@ function renderStockCards(picks){
   document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signals`;
   document.getElementById("stocks-sub").textContent=`Conf≥${CFG.conf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · Sorted by Expected Value`;
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
-  const filteredPicks=picks.filter(p=>p.conf>=CFG.minStockConf);
+  // Apply both the pre-filter (conf,pot,risk,rr) AND the minStockConf display filter
+const filteredPicks=picks.filter(p=>p.conf>=CFG.minStockConf);
 document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
     const rc=RC2[p.rec]||"watch";
     return`<div class="card ${rc}" style="animation-delay:${i*.04}s">
@@ -1650,7 +1690,7 @@ function renderPortfolio(all){
   const tInv=all.reduce((s,p)=>s+p.avg*p.qty,0);
   const tPnl=all.reduce((s,p)=>s+(p.pnl||0),0);
   const tVal=tInv+tPnl;
-  const todayPnl=all.reduce((s,p)=>s+(p.todayPnl||0),0);
+  const todayPnl=all.reduce((s,p)=>s+(isNaN(p.todayPnl)?0:p.todayPnl),0);
 
   document.getElementById("port-summary").innerHTML=`
     <div class="sc">

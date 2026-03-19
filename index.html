@@ -1034,13 +1034,28 @@ function autoSLTarget(ltp, high, low, atr) {
 // ══════════════════════════════════════
 // TICK — live prices every N sec
 // ══════════════════════════════════════
+// Extract % change from Upstox quote — uses net_change field (LTP - prev_close)
+// ohlc.close is intraday close = same as LTP, NOT yesterday's close
+function getChgPct(q){
+  if(!q) return 0;
+  // Prefer Upstox net_change fields
+  if(q.net_change_percentage!=null) return +q.net_change_percentage;
+  if(q.net_change!=null&&q.last_price>0){
+    const prevClose=q.last_price-q.net_change;
+    return prevClose>0?(q.net_change/prevClose)*100:0;
+  }
+  // Fallback: use ohlc.open as proxy (first price of day)
+  if(q.ohlc?.open&&q.ohlc.open>0) return ((q.last_price-q.ohlc.open)/q.ohlc.open)*100;
+  return 0;
+}
+
 async function tickPrices(){
   if(scanning) return;
   try{
     const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
     const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"];
-    if(nQ) tickStat("nifty-val","nifty-sub",nQ.last_price,nQ.ohlc?.close);
-    if(bQ) tickStat("bn-val","bn-sub",bQ.last_price,bQ.ohlc?.close);
+    if(nQ) tickStat("nifty-val","nifty-sub",nQ.last_price,getChgPct(nQ));
+    if(bQ) tickStat("bn-val","bn-sub",bQ.last_price,getChgPct(bQ));
     // Tick stock LTPs in cards
     const keys=NIFTY50.slice(0,25).map(i=>i.key).join(",");
     const sd=await fetchQ(keys);
@@ -1057,22 +1072,24 @@ async function tickPrices(){
         lastPrices[sym]=ltp;
       }
     });
-    // Update ticker
+    // Update ticker with correct % change
     if(nQ&&bQ){
-      const nc=nQ.ohlc?.close?((nQ.last_price-nQ.ohlc.close)/nQ.ohlc.close*100):0;
-      const bc=bQ.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0;
+      const nc=getChgPct(nQ), bc=getChgPct(bQ);
       document.getElementById("ticker").textContent=
         ("  NIFTY ₹"+fmt(nQ.last_price,0)+" "+fmtC(nc)+"  ●  BANKNIFTY ₹"+fmt(bQ.last_price,0)+" "+fmtC(bc)+"  ●  "+ist()+"  ●  ").repeat(7);
     }
   }catch(e){lg("Tick: "+e.message,"w");}
 }
-function tickStat(vid,sid,ltp,prev){
+function tickStat(vid,sid,ltp,chg){
+  // chg is now the pre-computed % change (positive or negative)
   const ve=document.getElementById(vid),se=document.getElementById(sid);if(!ve)return;
-  const old=parseFloat(ve.dataset.prev||ltp),chg=prev?((ltp-prev)/prev*100):0;
+  const old=parseFloat(ve.dataset.prev||ltp);
   ve.textContent="₹"+fmt(ltp,0);
-  ve.className="sc-val "+(chg>=0?"up":"dn")+(ltp>old?" flash-up":ltp<old?" flash-dn":"");
+  // Color: red if negative, green if positive — even at 0.00% show correct color
+  const color=chg<0?"dn":"up";
+  ve.className="sc-val "+color+(ltp>old?" flash-up":ltp<old?" flash-dn":"");
   ve.dataset.prev=ltp;
-  if(se){se.textContent=fmtC(chg);se.className="sc-sub "+(chg>=0?"up":"dn");}
+  if(se){se.textContent=fmtC(chg);se.className="sc-sub "+color;}
 }
 
 // ══════════════════════════════════════
@@ -1094,7 +1111,7 @@ async function triggerScan(){
     const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
     const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"],vQ=idxD["NSE_INDEX:India VIX"];
     const vix=vQ?.last_price||15;
-    const nLtp=nQ?.last_price||0,nChgPct=nQ?.ohlc?.close?((nLtp-nQ.ohlc.close)/nQ.ohlc.close*100):0;
+    const nLtp=nQ?.last_price||0,nChgPct=getChgPct(nQ);
     const nBull=nLtp>=(nQ?.ohlc?.open||nLtp);
     const {txt:vixTxt,sc:vixSc}=interpVIX(vix);
     lg(`Nifty ${fmt(nLtp,0)} ${fmtC(nChgPct)} | VIX ${vix} (${vixTxt})`);
@@ -1144,9 +1161,9 @@ async function triggerScan(){
     const stocks=[];
     for(const [k,q] of Object.entries(allQ)){
       const inst=INST_MAP[k];if(!inst||!q.last_price)continue;
-      const ltp=q.last_price,prev=q.ohlc?.close||ltp;
+      const ltp=q.last_price;
       const high=q.ohlc?.high||ltp,low=q.ohlc?.low||ltp;
-      const vol=q.volume||0,chgPct=prev?((ltp-prev)/prev*100):0;
+      const vol=q.volume||0,chgPct=getChgPct(q);
       lastPrices[inst.s]=ltp;
       const t=tech[inst.s]||{};
       const nearSupp=((ltp-low)/ltp*100)<2;
@@ -1180,10 +1197,10 @@ async function triggerScan(){
     const stEl=document.getElementById("scan-time"); if(stEl) stEl.textContent=lastStockScan;
     document.getElementById("mkt-closed").style.display=isOpen()?"none":"block";
 
-    renderStatsStocks({ltp:nLtp,chgPct:nChgPct},{ltp:bQ?.last_price||0,chgPct:bQ?.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0},
+    renderStatsStocks({ltp:nLtp,chgPct:nChgPct},{ltp:bQ?.last_price||0,chgPct:getChgPct(bQ)},
       vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,picks.length);
     renderStockCards(picks);
-    updateTicker(nLtp,nChgPct,bQ?.last_price||0,bQ?.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0,sent,sentSc,topSec,vix,pcr);
+    updateTicker(nLtp,nChgPct,bQ?.last_price||0,getChgPct(bQ),sent,sentSc,topSec,vix,pcr);
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("dash-stocks").style.display="block";
     setStatus("live","Live");scanSecs=CFG.scanStocks*60;
@@ -1394,7 +1411,7 @@ async function loadPortfolio(){
     const all=[
       ...positions.map(p=>({sym:p.trading_symbol||"—",type:p.product||"INTRADAY",qty:+(p.quantity||0),avg:+(p.average_price||0),ltp:+(p.last_price||0),pnl:+(p.pnl||(p.last_price-p.average_price)*p.quantity||0)})),
       ...holdings.map(h=>({sym:h.trading_symbol||"—",type:"HOLDING",qty:+(h.quantity||0),avg:+(h.average_price||0),ltp:+(h.last_price||0),pnl:+(h.pnl||(h.last_price-h.average_price)*h.quantity||0)}))
-    ];
+    ].sort((a,b)=>a.sym.localeCompare(b.sym)); // A→Z
 
     lastPortScan=getIST();
     document.getElementById("port-upd-time").textContent="Last update: "+lastPortScan;

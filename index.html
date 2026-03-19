@@ -175,6 +175,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
   <div class="hdr-r" id="hdr-ctrl" style="display:none">
     <div class="refresh-info" id="refresh-info">Stocks: —<br>Options: —<br>Portfolio: —</div>
+    <div style="font-size:9px;color:#94a3b8;text-align:right;display:none" id="scan-time"></div>
     <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l">STOCKS</div></div>
     <div style="display:flex;align-items:center;gap:5px"><div class="dot live" id="sdot"></div><span style="font-size:10px;color:#64748b" id="stxt">Live</span></div>
     <button class="btn btn-g" id="scan-btn" onclick="triggerScan()">▶ Scan</button>
@@ -190,6 +191,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
 <div id="token-gate">
   <div class="tc">
+    <div id="token-exp-msg" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:11px;color:#991b1b;font-weight:600">
+      ⚠ Your Upstox token has expired. Paste your new token below to continue.
+    </div>
     <h2>🔐 Launch F.R.I.D.A.Y</h2>
     <div class="info-box blue">
       <strong>⚠ Open via http:// not file://</strong><br>
@@ -692,6 +696,23 @@ function clearToken(){
   document.getElementById("hdr-ctrl").style.display="none";
   document.getElementById("token-gate").style.display="flex";
 }
+function handleTokenExpired(){
+  // Token has expired — clear it and show the token gate immediately
+  clearTimers();
+  TOKEN="";
+  localStorage.removeItem("friday_token");
+  localStorage.removeItem("friday_token_date");
+  document.getElementById("app").style.display="none";
+  document.getElementById("hdr-ctrl").style.display="none";
+  // Show token gate with expiry message
+  document.getElementById("token-gate").style.display="flex";
+  // Pre-fill a message in the token textarea
+  const ta = document.getElementById("token-input");
+  if(ta){ ta.placeholder = "⚠ Your token expired. Paste your new Upstox access token here..."; ta.value=""; }
+  // Show expiry banner if it exists
+  const errEl = document.getElementById("token-exp-msg");
+  if(errEl) errEl.style.display="block";
+}
 function showTokenMsg(msg,color){
   const el=document.getElementById("token-save-msg");
   el.textContent=msg; el.style.color=color; el.style.display="block";
@@ -832,7 +853,7 @@ async function apiGet(url){
       if(d.contents){try{d=JSON.parse(d.contents);}catch(e){}}
       return d;
     }catch(e){
-      if(e.message==="TOKEN_EXPIRED") throw new Error("Token expired — update in ⚙ Settings tab.");
+      if(e.message==="TOKEN_EXPIRED") { handleTokenExpired(); throw new Error("TOKEN_EXPIRED"); }
       lg(p.n+" ✗ "+e.message,"w");
     }
   }
@@ -1156,7 +1177,7 @@ async function triggerScan(){
 
     lastStockScan=getIST();
     document.getElementById("stocks-upd-time").textContent="Last scan: "+lastStockScan;
-    document.getElementById("scan-time").textContent=lastStockScan;
+    const stEl=document.getElementById("scan-time"); if(stEl) stEl.textContent=lastStockScan;
     document.getElementById("mkt-closed").style.display=isOpen()?"none":"block";
 
     renderStatsStocks({ltp:nLtp,chgPct:nChgPct},{ltp:bQ?.last_price||0,chgPct:bQ?.ohlc?.close?((bQ.last_price-bQ.ohlc.close)/bQ.ohlc.close*100):0},
@@ -1173,8 +1194,10 @@ async function triggerScan(){
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("err-stocks-msg").textContent=e.message;
     document.getElementById("err-stocks").style.display="block";
-    setStatus("err","Error");
-    document.getElementById("log-drawer").style.display="block";
+    if(e.message!=="TOKEN_EXPIRED"){
+      setStatus("err","Error");
+      document.getElementById("log-drawer").style.display="block";
+    }
   }finally{scanning=false;btn.disabled=false;btn.textContent="▶ Scan";}
 }
 

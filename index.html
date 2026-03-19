@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 
 <html lang="en">
@@ -379,10 +378,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <!-- Scan intervals -->
   <div class="setting-card">
     <h4>⏱ Scan Intervals</h4>
-    <div class="set-row"><div><div class="set-lbl">Stocks scan (min)</div><div class="set-sub">Full analysis cycle</div></div><input class="set-inp" id="s-scan-stocks" type="number" value="15" min="5" max="60"></div>
-    <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency</div></div><input class="set-inp" id="s-tick" type="number" value="15" min="10" max="60"></div>
-    <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
-    <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Stocks scan (min)</div><div class="set-sub">Full analysis cycle (min 15 recommended)</div></div><input class="set-inp" id="s-scan-stocks" type="number" value="15" min="5" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency (min 15 recommended)</div></div><input class="set-inp" id="s-tick" type="number" value="15" min="10" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency (min 60 recommended)</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
+    <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan (min 15 recommended)</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
     <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
   </div>
 </div>
@@ -1229,7 +1228,7 @@ async function tickPrices(){
   if(scanning) return;
   try{
     const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
-    const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"];
+    const nQ=idxD["NSE_INDEX|Nifty 50"],bQ=idxD["NSE_INDEX|Nifty Bank"];
     if(nQ) tickStat("nifty-val","nifty-sub",nQ);
     if(bQ) tickStat("bn-val","bn-sub",bQ);
     // Tick stock LTPs in cards
@@ -1262,7 +1261,7 @@ async function tickPrices(){
         const optIdxKeys=INDEX_OPTS.map(u=>u.key).join(",");
         const optIdxD=await fetchQ(optIdxKeys);
         INDEX_OPTS.forEach(und=>{
-          const q=optIdxD[und.key.replace("|",":")];
+          const q=optIdxD[und.key];
           if(!q) return;
           const ltp=q.last_price;
           const pts=q.net_change!=null?q.net_change:(q.ohlc?.open?(ltp-q.ohlc.open):0);
@@ -1452,7 +1451,7 @@ async function triggerScan(){
   try{
     // Indices + VIX
     const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
-    const nQ=idxD["NSE_INDEX:Nifty 50"],bQ=idxD["NSE_INDEX:Nifty Bank"],vQ=idxD["NSE_INDEX:India VIX"];
+    const nQ=idxD["NSE_INDEX|Nifty 50"],bQ=idxD["NSE_INDEX|Nifty Bank"],vQ=idxD["NSE_INDEX|India VIX"];
     const vix=vQ?.last_price||15;
     const nLtp=nQ?.last_price||0,nChgPct=getChgPct(nQ);
     const nBull=nLtp>=(nQ?.ohlc?.open||nLtp);
@@ -1664,8 +1663,8 @@ async function loadOptions(force=true){
     let optVix = 15;
     try{
       const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
-      const nQ2  = mktD["NSE_INDEX:Nifty 50"] || mktD["NSE_INDEX|Nifty 50"];
-      const vQ2  = mktD["NSE_INDEX:India VIX"] || mktD["NSE_INDEX|India VIX"];
+      const nQ2  = mktD["NSE_INDEX|Nifty 50"];
+      const vQ2  = mktD["NSE_INDEX|India VIX"];
       if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.open || nQ2.last_price);
       if(vQ2) optVix = vQ2.last_price || 15;
       lg(`Options market context: ${optNiftyBullish?"BULLISH":"BEARISH"} VIX=${optVix.toFixed(1)}`);

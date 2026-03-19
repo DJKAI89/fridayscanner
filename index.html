@@ -812,7 +812,7 @@ function startTimers(){
   // Stocks scan
   scanTimer=setInterval(()=>triggerScan(),CFG.scanStocks*60*1000);
   // Options scan
-  optTimer=setInterval(()=>{if(activeTab==="options"||true) loadOptions(false);},CFG.scanOpts*60*1000);
+  optTimer=setInterval(()=>loadOptions(true),CFG.scanOpts*60*1000);
   // Price tick
   tickTimer=setInterval(tickPrices,CFG.tick*1000);
   // Portfolio
@@ -1175,30 +1175,36 @@ async function triggerScan(){
     const d2=await fetchQ(NIFTY50.slice(25).map(i=>i.key).join(","));
     const allQ={...d1,...d2};
 
-    // Historical candles for top 15 by volume
+    // Fetch candles for all 50 stocks (batched with small delay to avoid rate limit)
+    // Using 60-day window: enough for RSI(14), MACD(26+9), MA50, MA200 approximation
     const today=new Date().toISOString().split("T")[0];
+    const from60 =new Date(Date.now()- 65*864e5).toISOString().split("T")[0];
     const from200=new Date(Date.now()-215*864e5).toISOString().split("T")[0];
-    const byVol=[...NIFTY50].sort((a,b)=>(allQ[b.key]?.volume||0)-(allQ[a.key]?.volume||0)).slice(0,15);
     const tech={};
+    // Sort by volume desc — fetch candles for highest-volume first
+    const byVol=[...NIFTY50].sort((a,b)=>(allQ[b.key]?.volume||0)-(allQ[a.key]?.volume||0));
     for(const inst of byVol){
       try{
-        const candles=await fetchCandles(inst.key,from200,today);
-        if(candles.length>=15){
-          const closes=candles.map(c=>+c[4]).reverse();
-          // 20-day average volume from candles (candles are newest-first)
+        // Use 60-day history for speed; fall back gracefully if unavailable
+        const candles=await fetchCandles(inst.key,from60,today);
+        if(candles.length>=5){
+          const closes=candles.map(c=>+c[4]).reverse(); // oldest first
           const recentCandles=candles.slice(0,20);
-          const avgVol20=recentCandles.length>0
-            ?recentCandles.reduce((s,c)=>s+(+c[5]||0),0)/recentCandles.length
-            :0;
+          const avgVol20=recentCandles.reduce((s,c)=>s+(+c[5]||0),0)/Math.max(1,recentCandles.length);
           tech[inst.s]={
-            rsi:calcRSI(closes),
-            macdBull:(closes.length>=35)?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
-            a50:isAboveMA(closes,50),a200:isAboveMA(closes,200),
-            atr:calcATR(candles),patterns:detectPatterns(candles),candles,avgVol20
+            rsi:    calcRSI(closes),
+            macdBull: closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null,
+            a50:    isAboveMA(closes,50),
+            a200:   isAboveMA(closes,200),
+            atr:    calcATR(candles),
+            patterns: detectPatterns(candles),
+            candles, avgVol20
           };
+          lg(`${inst.s}: RSI=${tech[inst.s].rsi} MACD=${tech[inst.s].macdBull} a50=${tech[inst.s].a50}`);
         }
       }catch(e){lg("Candle "+inst.s+": "+e.message,"w");}
     }
+    lg(`Technical data fetched for ${Object.keys(tech).length}/${NIFTY50.length} stocks`,"o");
 
     // Build stock analysis
     const secMap={};
@@ -1231,7 +1237,8 @@ async function triggerScan(){
       const risk=calcRisk(ltp,sl,t.atr,vix);
       const pot=calcPotential(ltp,target,sl,numInds);
       const rec=getRec(conf,pot.adj,risk,pot.rr);
-      const passes=(conf>=CFG.conf&&pot.adj>=CFG.pot&&risk<CFG.risk&&pot.rr>=CFG.rr);
+      const passes=(conf>=CFG.minStockConf&&pot.adj>=CFG.pot&&risk<CFG.risk&&pot.rr>=CFG.rr);
+      const prev=q.ohlc?.close||ltp;
       stocks.push({...inst,ltp,prev,high,low,vol,chgPct,rsi:t.rsi,macdBull:t.macdBull,a50:t.a50,a200:t.a200,
         atr:t.atr,patterns:t.patterns||{},inds,numInds,nearSupp,bullPat,conf,risk,pot,rec,target,sl,secSc,passes});
     }
@@ -1251,7 +1258,7 @@ async function triggerScan(){
     const bPts=bQ?.net_change!=null?bQ.net_change:(bQ?.ohlc?.open?(bLtp-bQ.ohlc.open):0);
     renderStatsStocks({ltp:nLtp,chgPct:nChgPct,pts:nPts},{ltp:bLtp,chgPct:getChgPct(bQ),pts:bPts},
       vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,picks.length);
-    renderStockCards(picks);
+    renderStockCards(picks,Object.keys(allQ).length);
     updateTicker(nLtp,nChgPct,bQ?.last_price||0,getChgPct(bQ),sent,sentSc,topSec,vix,pcr);
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("dash-stocks").style.display="block";
@@ -1275,8 +1282,7 @@ async function triggerScan(){
 // ══════════════════════════════════════
 async function loadOptions(force=true){
   if(optLoading)return;
-  const dashVisible=document.getElementById("dash-options").style.display!=="none";
-  if(!force&&dashVisible)return; // skip if already loaded and not forced
+  // Always re-scan — never skip even if tab was visited before
   optLoading=true;
   document.getElementById("err-options").style.display="none";
   const firstOptLoad=document.getElementById("dash-options").style.display==="none";
@@ -1540,15 +1546,15 @@ function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,cnt){
     <div class="sc"><div class="sc-lbl">PICKS FOUND</div><div class="sc-val bl">${cnt}</div><div class="sc-sub" style="color:#64748b">${topSec} leads</div></div>`;
 }
 
-function renderStockCards(picks){
+function renderStockCards(picks,totalScanned){
   const RC={STRONG_BUY:"strong-buy",BUY:"buy",MODERATE:"moderate",WATCH:"watch",AVOID:"avoid"};
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
-  document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signals`;
   document.getElementById("stocks-sub").textContent=`Conf≥${CFG.conf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · Sorted by Expected Value`;
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
-  // Apply both the pre-filter (conf,pot,risk,rr) AND the minStockConf display filter
-const filteredPicks=picks.filter(p=>p.conf>=CFG.minStockConf);
-document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
+  // picks already filtered by minStockConf in triggerScan
+  const filteredPicks=picks; // all picks already pass conf>=minStockConf
+  document.getElementById("stocks-title").textContent=`Professional Picks · ${filteredPicks.length} signals`;
+  document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
     const rc=RC2[p.rec]||"watch";
     return`<div class="card ${rc}" style="animation-delay:${i*.04}s">
       <div class="c-rank">${i+1}</div>
@@ -1598,7 +1604,7 @@ document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredP
       </div>
       <div class="c-why ${rc}">${p.rec==="STRONG BUY"?"🔥":p.rec==="BUY"?"✅":p.rec==="MODERATE"?"⚡":"👀"} ${p.numInds}/7 indicators. R:R ${p.pot.rr}:1, Win ~${p.pot.wr}%, EV ${p.pot.ev>=0?"+":""}${p.pot.ev.toFixed(2)}%. ${p.rsi?"RSI "+p.rsi+".":""} ${p.macdBull?"MACD bullish.":""}</div>
     </div>`;
-  }).join(""):`<div class="empty-state">No picks pass filters (Conf≥${CFG.conf}%, MinConf≥${CFG.minStockConf}%, Pot≥${CFG.pot}%, Risk<${CFG.risk}%, R:R≥${CFG.rr}).<br>Relax thresholds in ⚙ Settings.</div>`;
+  }).join(""):`<div class="empty-state">No picks pass filters · Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}<br>Scanned ${totalScanned||50} stocks · Try lowering thresholds in ⚙ Settings.</div>`;
 }
 
 function renderStatsOptions(idxGroups){

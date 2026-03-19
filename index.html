@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 
 <html lang="en">
@@ -176,7 +177,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="hdr-r" id="hdr-ctrl" style="display:none">
     <div class="refresh-info" id="refresh-info">Stocks: —<br>Options: —<br>Portfolio: —</div>
     <div style="font-size:9px;color:#94a3b8;text-align:right;display:none" id="scan-time"></div>
-    <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l">STOCKS</div></div>
+    <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l">NEXT SCAN</div></div>
     <div style="display:flex;align-items:center;gap:5px"><div class="dot live" id="sdot"></div><span style="font-size:10px;color:#64748b" id="stxt">Live</span></div>
     <button class="btn btn-g" id="scan-btn" onclick="triggerScan()">▶ Scan</button>
     <button class="btn btn-s" onclick="toggleLog()">🔍</button>
@@ -229,7 +230,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <div class="pane active" id="pane-stocks">
     <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-    <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk · Targets</p></div>
+    <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
     <div id="dash-stocks" style="display:none">
       <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed · Showing last data · Hours: 9:15 AM – 3:30 PM IST</div>
       <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span><span style="margin-left:4px;color:#16a34a;font-weight:600">● Auto-refresh every 5 min</span></div>
@@ -244,7 +245,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <div class="pane" id="pane-options">
     <div class="err-b" id="err-options"><h4>⚠ Options Error</h4><p id="err-options-msg"></p><button onclick="loadOptions(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-    <div id="loading-options" class="spin-wrap" style="display:none"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning all F&O options...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Nifty · BankNifty · Sensex · Top F&O Stocks · All strikes · Entry · SL · Target</p></div>
+    <div id="loading-options" class="spin-wrap" style="display:none"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning F&O options...</p><p id="opt-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Nifty · BankNifty · Sensex · Top F&O Stocks · Entry · SL · Target</p></div>
     <div id="dash-options" style="display:none">
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span><span style="margin-left:4px;color:#16a34a;font-weight:600">● Auto-refresh every 5 min</span></div>
       <div class="stats-g" id="stats-options"></div>
@@ -378,10 +379,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <!-- Scan intervals -->
   <div class="setting-card">
     <h4>⏱ Scan Intervals</h4>
-    <div class="set-row"><div><div class="set-lbl">Stocks scan (min)</div><div class="set-sub">Full analysis cycle</div></div><input class="set-inp" id="s-scan-stocks" type="number" value="5" min="1" max="30"></div>
-    <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency</div></div><input class="set-inp" id="s-tick" type="number" value="10" min="5" max="60"></div>
-    <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency</div></div><input class="set-inp" id="s-port-ref" type="number" value="30" min="10" max="120"></div>
-    <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan</div></div><input class="set-inp" id="s-scan-opts" type="number" value="5" min="1" max="30"></div>
+    <div class="set-row"><div><div class="set-lbl">Stocks scan (min)</div><div class="set-sub">Full analysis cycle</div></div><input class="set-inp" id="s-scan-stocks" type="number" value="15" min="5" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency</div></div><input class="set-inp" id="s-tick" type="number" value="15" min="10" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
+    <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
     <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
   </div>
 </div>
@@ -658,7 +659,7 @@ const FO_STOCK_LIST=[
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
 let CFG=JSON.parse(localStorage.getItem("friday_cfg")||"{}");
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:5,tick:10,portRef:30,scanOpts:5,minOptConf:50};
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50};
 CFG=Object.assign({},DEF,CFG);
 
 let scanning=false,optLoading=false,portLoading=false;
@@ -865,34 +866,81 @@ function updateRefreshInfo(){
 // ══════════════════════════════════════
 // API
 // ══════════════════════════════════════
+// ── Throttle: pause ms between calls to stay within Upstox rate limits ──
+const THROTTLE_MS = 300; // 300ms between calls = ~3 calls/sec, well within 10/sec limit
+let _lastCallTs  = 0;
+async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+async function throttle(){
+  const now=Date.now(), gap=now-_lastCallTs;
+  if(gap<THROTTLE_MS) await sleep(THROTTLE_MS-gap);
+  _lastCallTs=Date.now();
+}
+
+// ── Retry helper: up to 3 retries with exponential backoff ──
+async function withRetry(fn, label="", retries=3){
+  for(let attempt=1;attempt<=retries;attempt++){
+    try{
+      await throttle();
+      return await fn();
+    }catch(e){
+      if(e.message==="TOKEN_EXPIRED") throw e;
+      if(attempt===retries) throw e;
+      const wait=attempt*1000; // 1s, 2s, 3s
+      lg(`${label} retry ${attempt}/${retries} in ${wait}ms: ${e.message}`,"w");
+      await sleep(wait);
+    }
+  }
+}
+
 async function apiGet(url){
   const full="https://api.upstox.com"+url;
   const hdrs={"Authorization":"Bearer "+TOKEN,"Accept":"application/json"};
+  // Try direct first (works on GitHub Pages / localhost with CORS)
+  // Fall back to corsproxy only if direct fails
   const proxies=[
     {n:"direct",   f:()=>fetch(full,{headers:hdrs})},
     {n:"corsproxy",f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full),{headers:hdrs})},
-    {n:"allorigins",f:()=>fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(full))},
   ];
   for(const p of proxies){
     try{
       const res=await p.f();
       if(res.status===401) throw new Error("TOKEN_EXPIRED");
+      if(res.status===429){ lg("Rate limited — pausing 5s","w"); await sleep(5000); throw new Error("Rate limited"); }
       if(!res.ok) throw new Error("HTTP "+res.status);
       const txt=await res.text();
       let d=JSON.parse(txt);
       if(d.contents){try{d=JSON.parse(d.contents);}catch(e){}}
       return d;
     }catch(e){
-      if(e.message==="TOKEN_EXPIRED") { handleTokenExpired(); throw new Error("TOKEN_EXPIRED"); }
+      if(e.message==="TOKEN_EXPIRED"){ handleTokenExpired(); throw e; }
       lg(p.n+" ✗ "+e.message,"w");
     }
   }
-  throw new Error("All proxies failed. Open via http://localhost:8080 not file://");
+  throw new Error("API failed for: "+url.slice(0,60));
 }
-async function fetchQ(keys){const d=await apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(keys));return d?.data||{};}
-async function fetchCandles(key,from,to){const d=await apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/day/"+to+"/"+from);return d?.data?.candles||[];}
-async function fetchOptions(key,expiry){const d=await apiGet("/v2/option/chain?instrument_key="+encodeURIComponent(key)+"&expiry_date="+expiry);return d?.data||[];}
-async function fetchExpiries(key){const d=await apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key));return(d?.data||[]).map(e=>e.expiry||e).filter(Boolean).sort();}
+
+// ── Normalized fetch helpers ──
+// Upstox returns keys with ":" separator (e.g. "NSE_EQ:ISIN")
+// We always normalize to "|" to match our instrument_key format
+async function fetchQ(keys){
+  const d=await withRetry(()=>apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(keys)),"fetchQ");
+  const raw=d?.data||{};
+  const out={};
+  for(const[k,v] of Object.entries(raw)) out[k.replace(/:/g,"|")]=v;
+  return out;
+}
+async function fetchCandles(key,from,to){
+  const d=await withRetry(()=>apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/day/"+to+"/"+from),"candle:"+key.slice(0,20));
+  return d?.data?.candles||[];
+}
+async function fetchOptions(key,expiry){
+  const d=await withRetry(()=>apiGet("/v2/option/chain?instrument_key="+encodeURIComponent(key)+"&expiry_date="+expiry),"chain:"+key.slice(0,20));
+  return d?.data||[];
+}
+async function fetchExpiries(key){
+  const d=await withRetry(()=>apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key)),"expiry:"+key.slice(0,20));
+  return(d?.data||[]).map(e=>e.expiry||e).filter(Boolean).sort();
+}
 
 // ══════════════════════════════════════
 // TECHNICAL CALCULATIONS
@@ -1017,15 +1065,19 @@ function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patte
 // ── CountConfirmingIndicators ──
 // C#: MACD/50MA/200MA/NearSupport only count when direction aligns with Buy/StrongBuy
 function countIndicators(rsi, macdBull, a50, a200, vol, avgVol, nearSupp, patterns, rec) {
+  const volOk = avgVol > 0 && vol > 0 && avgVol !== vol ? (vol >= avgVol * 1.2) : null;
+  return countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec);
+}
+function countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec) {
   const isBuy = rec === "BUY" || rec === "STRONG BUY" || rec === "MODERATE";
   let count = 0;
-  if (rsi !== null && rsi >= 40 && rsi <= 70)                count++; // RSI 40-70
-  if (macdBull === true && isBuy)                             count++; // MACD bullish (direction-aware)
-  if (a50 === true && isBuy)                                  count++; // Above 50MA (direction-aware)
-  if (a200 === true && isBuy)                                 count++; // Above 200MA (direction-aware)
-  if (avgVol > 0 && vol >= avgVol * 1.2)                      count++; // Volume >1.2x avg
-  if (nearSupp && isBuy)                                      count++; // Near support (direction-aware)
-  if (patterns.bullishEngulfing||patterns.hammer||patterns.morningStar) count++; // Bullish pattern
+  if (rsi !== null && rsi !== undefined && rsi >= 40 && rsi <= 70) count++; // RSI 40-70
+  if (macdBull === true && isBuy)                                    count++; // MACD bullish
+  if (a50 === true && isBuy)                                         count++; // Above 50MA
+  if (a200 === true && isBuy)                                        count++; // Above 200MA
+  if (volOk === true)                                                count++; // Volume >1.2x avg
+  if (nearSupp && isBuy)                                             count++; // Near support
+  if (patterns && (patterns.bullishEngulfing||patterns.hammer||patterns.morningStar)) count++;
   return count;
 }
 
@@ -1421,60 +1473,71 @@ async function triggerScan(){
       }
     }catch(e){lg("PCR skip: "+e.message,"w");}
 
-    // ── Step 1: Get NSE universe (from Upstox CSV, cached daily in sessionStorage) ──
-    const scanUniverse = await getNSEUniverse();
-    lg(`Universe: ${scanUniverse.length} NSE EQ stocks loaded`,"o");
+    // ── Step 1: Use NIFTY50 + top F&O list as scan universe (reliable keys) ──
+    // Also try NSE universe from cache if available
+    let scanUniverse = NIFTY50.map(i=>({key:i.key,s:i.s,n:i.n,sec:i.sec}));
+    try{
+      const cached=sessionStorage.getItem("nse_universe");
+      const cachedDate=sessionStorage.getItem("nse_universe_date");
+      if(cached && cachedDate===new Date().toDateString()){
+        const parsed=JSON.parse(cached);
+        if(parsed.length>100){ scanUniverse=parsed; lg(`NSE universe: ${parsed.length} stocks (cache)`,"o"); }
+      }
+    }catch(e){}
+    if(scanUniverse.length<=50) lg(`Scan universe: ${scanUniverse.length} stocks (Nifty50)`);
 
-    // ── Step 2: Get live quotes in batches of 25 ──
-    // NOTE: Upstox returns keys with ":" (e.g. NSE_EQ:ISIN) but inst.key uses "|"
-    // We normalize all returned keys to use "|" for consistent lookup
-    lg("Fetching live quotes for NSE universe...");
+    // ── Step 2: Fetch quotes for all stocks (2 batches of 25 for Nifty50, more for full universe) ──
+    // Upstox response keys use ":" — we normalize to "|" to match inst.key
+    lg("Fetching quotes...");
     let allQ={};
-    for(let bi=0;bi<scanUniverse.length;bi+=25){
-      const batch=scanUniverse.slice(bi,bi+25).map(i=>i.key).join(",");
+    // Use at most 200 stocks for quote fetch (rate limit safe)
+    const universeSlice = scanUniverse.slice(0,200);
+    for(let bi=0;bi<universeSlice.length;bi+=25){
+      const batch=universeSlice.slice(bi,bi+25).map(i=>i.key).join(",");
       try{
-        const bd=await fetchQ(batch);
-        // Normalize: replace ":" with "|" in returned keys so allQ[inst.key] works
-        for(const [k,v] of Object.entries(bd)){
-          allQ[k.replace(/:/g,"|")] = v;
-        }
-      }catch(e){lg("Quote batch "+bi+": "+e.message,"w");}
+        const bd=await fetchQ(batch); // fetchQ already normalizes : → |
+        Object.assign(allQ,bd);
+        updateScanProgress(`Quotes ${Math.min(bi+25,universeSlice.length)}/${universeSlice.length}`);
+      }catch(e){lg("Q batch: "+e.message,"w");}
     }
-    lg(`Quotes received: ${Object.keys(allQ).length}`,"o");
+    lg(`Quotes: ${Object.keys(allQ).length} received`,"o");
 
-    // ── Step 3: Pick top 80 by today's volume ──
-    // Debug: show key format sample
-    const sampleKey = Object.keys(allQ)[0] || "";
-    lg(`allQ sample key: ${sampleKey} | universe sample: ${scanUniverse[0]?.key||""}`);
-    const volRanked = scanUniverse
+    // ── Step 3: Rank by volume, pick top 50 ──
+    const volRanked = universeSlice
+      .filter(inst => {
+        const q=allQ[inst.key];
+        return q?.last_price>5 && (q?.volume||0)>0;
+      })
       .map(inst=>({inst, vol:allQ[inst.key]?.volume||0}))
-      .filter(x=>x.vol>0 && allQ[x.inst.key]?.last_price>10) // price > ₹10
       .sort((a,b)=>b.vol-a.vol)
-      .slice(0,80);
-    lg(`Top ${volRanked.length} stocks by volume selected for analysis`,"o");
+      .slice(0,50);
+    lg(`Volume ranked: ${volRanked.length} stocks`,"o");
 
-    // ── Step 4: Fetch 60-day candles for technical analysis ──
+    // ── Step 4: Candles for top 20 stocks — throttled, with progress ──
     const today=new Date().toISOString().split("T")[0];
     const from60=new Date(Date.now()-65*864e5).toISOString().split("T")[0];
     const tech={};
-    for(const {inst} of volRanked){
+    const candleStocks=volRanked.slice(0,20);
+    for(let ci=0;ci<candleStocks.length;ci++){
+      const {inst}=candleStocks[ci];
+      updateScanProgress(`Candles ${ci+1}/${candleStocks.length}: ${inst.s}`);
       try{
         const candles=await fetchCandles(inst.key,from60,today);
         if(candles.length>=5){
           const closes=candles.map(c=>+c[4]).reverse();
-          const recentCandles=candles.slice(0,20);
-          const avgVol20=recentCandles.reduce((s,c)=>s+(+c[5]||0),0)/Math.max(1,recentCandles.length);
+          const rc=candles.slice(0,20);
+          const avgVol20=rc.reduce((s,x)=>s+(+x[5]||0),0)/Math.max(1,rc.length);
           tech[inst.s]={
             rsi:calcRSI(closes),
             macdBull:closes.length>=35?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
-            a50:isAboveMA(closes,50), a200:isAboveMA(closes,200),
-            atr:calcATR(candles), patterns:detectPatterns(candles),
-            candles, avgVol20
+            a50:isAboveMA(closes,50),a200:isAboveMA(closes,200),
+            atr:calcATR(candles),patterns:detectPatterns(candles),
+            avgVol20
           };
         }
       }catch(e){lg("Candle "+inst.s+": "+e.message,"w");}
     }
-    lg(`Technical data for ${Object.keys(tech).length} stocks`,"o");
+    lg(`Technical data: ${Object.keys(tech).length}/${candleStocks.length} stocks`,"o");
 
     // Pre-compute sector strength using ALL quotes (C# GetSectorForSymbol mapping)
     const secMap={};
@@ -1509,8 +1572,12 @@ async function triggerScan(){
       // Preliminary R:R to seed direction-aware indicator count
       const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 1;
       const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
+      // When no candle data, avgVol is same as vol → volume indicator would always be false.
+      // Instead: if no avgVol20 from candles, mark vol indicator as null (unknown).
+      const hasAvgVol = !!t.avgVol20;
+      const volOk = hasAvgVol ? (vol >= t.avgVol20 * 1.2) : null; // null = unknown
       // Count confirming indicators (C# CountConfirmingIndicators — direction-aware)
-      const numInds = countIndicators(t.rsi, t.macdBull, t.a50, t.a200, vol, avgVol, nearSupp, patterns, preRec);
+      const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec);
       // Full confidence calculation (C# CalculateConfidence with numInds as signal input)
       const conf   = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, avgVol, patterns, preRec, numInds);
       // Risk, Potential, final Rec
@@ -1557,6 +1624,20 @@ async function triggerScan(){
       document.getElementById("log-drawer").style.display="block";
     }
   }finally{scanning=false;btn.disabled=false;btn.textContent="▶ Scan";}
+}
+
+// ── Progress helpers ──
+function updateScanProgress(msg){
+  const el=document.getElementById("scan-progress");
+  if(el) el.textContent=msg;
+  const upd=document.getElementById("stocks-upd-time");
+  if(upd) upd.textContent="⏳ "+msg;
+}
+function updateOptProgress(msg){
+  const el=document.getElementById("opt-progress");
+  if(el) el.textContent=msg;
+  const upd=document.getElementById("options-upd-time");
+  if(upd) upd.textContent="⏳ "+msg;
 }
 
 // ══════════════════════════════════════
@@ -1624,40 +1705,50 @@ async function loadOptions(force=true){
     }
 
     // ─ STOCK OPTIONS: Top F&O stocks ─
-    const foStocks=FO_STOCK_LIST; // full F&O stocks list
-    // Get their spot prices in batches of 25 (normalize keys)
-    let foSpots={};
-    for(let bi=0;bi<foStocks.length;bi+=25){
-      const batch=foStocks.slice(bi,bi+25).map(s=>s.key).join(",");
-      try{
-        const bd=await fetchQ(batch);
-        for(const [k,v] of Object.entries(bd)) foSpots[k.replace(/:/g,"|")]=v;
-      }catch(e){lg("FO spots batch err: "+e.message,"w");}
-    }
+    // Use top 10 most liquid F&O stocks (reduces API calls from 200+ to 20)
+    const TOP_FO = [
+      "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","AXISBANK",
+      "BAJFINANCE","WIPRO","KOTAKBANK","ITC","LT","TATAMOTORS","ADANIENT","MARUTI"
+    ];
+    const foStocks = FO_STOCK_LIST.filter(s=>TOP_FO.includes(s.s));
+    lg(`Scanning ${foStocks.length} top F&O stocks`);
 
-    for(const inst of foStocks){
+    // Fetch spots for FO stocks (1 batch)
+    let foSpots={};
+    try{
+      const foKeys=foStocks.map(s=>s.key).join(",");
+      const bd=await fetchQ(foKeys); // fetchQ normalizes : → |
+      Object.assign(foSpots,bd);
+      lg(`FO spots: ${Object.keys(foSpots).length} received`);
+    }catch(e){lg("FO spots: "+e.message,"w");}
+
+    for(let fi=0;fi<foStocks.length;fi++){
+      const inst=foStocks[fi];
+      updateOptProgress(`Stock options ${fi+1}/${foStocks.length}: ${inst.s}`);
       try{
-        const spot=foSpots[inst.key]?.last_price||0;
-        const foQ=foSpots[inst.key];
-        const spotPts2=foQ?.net_change!=null?foQ.net_change:(foQ?.ohlc?.open?(spot-foQ.ohlc.open):0);
-        const spotChg=foQ?getChgPct(foQ):0;
-        if(spot<1){lg(inst.s+": no price","w");continue;}
+        const q=foSpots[inst.key];
+        const spot=q?.last_price||0;
+        if(spot<1){lg(inst.s+": no spot","w");continue;}
+        const spotPts2=q?.net_change!=null?q.net_change:(q?.ohlc?.open?(spot-q.ohlc.open):0);
+        const spotChg=getChgPct(q);
 
         const expiries=await fetchExpiries(inst.key);
-        if(!expiries.length) continue;
+        if(!expiries.length){lg(inst.s+": no expiries","w");continue;}
         const expiry=expiries[0];
-        const chain=await fetchOptions(inst.key,expiry);
-        const step=spot<500?5:spot<2000?10:spot<5000?50:100;
-        const atm=Math.round(spot/step)*step;
-        lg(`${inst.s}: ${chain.length} strikes spot ₹${fmt(spot,0)}`);
 
+        updateOptProgress(`${inst.s}: loading chain...`);
+        const chain=await fetchOptions(inst.key,expiry);
+        if(!chain.length){lg(inst.s+": empty chain","w");continue;}
+
+        const step=spot<200?5:spot<500?10:spot<2000?20:spot<5000?50:100;
+        const atm=Math.round(spot/step)*step;
         const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
-
         const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix);
+        lg(`${inst.s}: ${chain.length} strikes → ${picks.length} signals`,picks.length?"o":"");
         if(picks.length) groups.push({name:inst.s,spot,spotChg,spotPts:spotPts2,pcr,expiry,picks,type:"stock",fullName:inst.n});
-      }catch(e){lg(inst.s+" opts err: "+e.message,"w");}
+      }catch(e){lg(inst.s+" opts: "+e.message,"w");}
     }
 
     // Summary stats: all index spots

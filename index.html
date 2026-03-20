@@ -217,6 +217,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="tab active" onclick="switchTab('stocks')">📈 Stocks</button>
     <button class="tab" onclick="switchTab('options')">⚡ F&amp;O Options</button>
     <button class="tab" onclick="switchTab('portfolio')">💼 Portfolio</button>
+    <button class="tab" onclick="switchTab('alerts')">🔔 Alerts <span id="alerts-badge" style="display:none;background:#dc2626;color:#fff;border-radius:8px;padding:1px 5px;font-size:9px;margin-left:2px">0</span></button>
     <button class="tab" onclick="switchTab('settings')">⚙ Settings</button>
   </div>
 
@@ -267,7 +268,52 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         <div id="port-rows"></div>
       </div>
     </div>
+    <div id="port-correlation" style="display:none;margin:8px 16px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;font-size:11px;color:#1e40af"></div>
     <div class="disc" style="margin-top:12px">Live P&L from your Upstox positions and holdings. Refreshes every 30 seconds.</div>
+  </div>
+
+  <!-- ALERTS -->
+
+  <div class="pane" id="pane-alerts">
+    <div style="padding:0 16px 16px">
+      <!-- Add Alert -->
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:10px">🔔 Set Price Alert</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">SYMBOL</div>
+            <input id="al-sym" type="text" placeholder="e.g. RELIANCE" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">CONDITION</div>
+            <select id="al-cond" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
+              <option value="above">Price Crosses Above ▲</option>
+              <option value="below">Price Falls Below ▼</option>
+              <option value="conf">Confidence Reaches ≥</option>
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">VALUE</div>
+            <input id="al-val" type="number" placeholder="e.g. 2900" step="any" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">NOTE (optional)</div>
+            <input id="al-note" type="text" placeholder="e.g. Breakout level" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
+          </div>
+        </div>
+        <button class="btn btn-g" style="width:100%" onclick="addAlert()">+ Add Alert</button>
+      </div>
+      <!-- Active Alerts -->
+      <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px">ACTIVE ALERTS <span id="al-count" style="color:#16a34a"></span></div>
+      <div id="alerts-list"></div>
+      <!-- Triggered Alerts -->
+      <div id="triggered-section" style="display:none;margin-top:12px">
+        <div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:8px">🔥 TRIGGERED</div>
+        <div id="triggered-list"></div>
+      </div>
+    </div>
   </div>
 
   <!-- SETTINGS -->
@@ -864,6 +910,8 @@ function boot(){
   if(launchBtn){launchBtn.disabled=false;launchBtn.textContent="▶ Launch Scanner";}
   loadSettingsUI();
   updateTokenInfo();
+  requestNotifPermission();
+  renderAlerts();
   startTimers();
   triggerScan();
   loadOptions(false);
@@ -1319,6 +1367,115 @@ function interpPCR(p) {
        : {txt:"Very Bearish",sc:15};
 }
 
+// ─────────────────────────────────────────────────────────────
+// VWAP — Volume Weighted Average Price (uses most recent candles)
+// candles: Upstox format [timestamp,open,high,low,close,volume], newest first
+// ─────────────────────────────────────────────────────────────
+function calcVWAP(candles) {
+  // Use last 20 candles (represents ~1 month of daily data)
+  const recent = candles.slice(0, 20);
+  let sumPV = 0, sumV = 0;
+  for (const c of recent) {
+    const tp  = (+c[2] + +c[3] + +c[4]) / 3; // typical price
+    const vol = +c[5] || 0;
+    sumPV += tp * vol;
+    sumV  += vol;
+  }
+  return sumV > 0 ? +(sumPV / sumV).toFixed(2) : 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// SUPPORT & RESISTANCE — Pivot + 52-week H/L + Swing levels
+// ─────────────────────────────────────────────────────────────
+function calcSR(candles) {
+  if (!candles || candles.length < 5) return {pivotR1:0, pivotS1:0, pivotR2:0, pivotS2:0, week52H:0, week52L:0, swingH:0, swingL:0};
+
+  // Yesterday's candle (index 0 = most recent/today, index 1 = yesterday)
+  const yest  = candles[1] || candles[0];
+  const H = +yest[2], L = +yest[3], C = +yest[4];
+
+  // Classic Pivot Points (Floor Trader Method)
+  const P  = (H + L + C) / 3;
+  const R1 = +(2*P - L).toFixed(2);
+  const S1 = +(2*P - H).toFixed(2);
+  const R2 = +(P + (H - L)).toFixed(2);
+  const S2 = +(P - (H - L)).toFixed(2);
+
+  // 52-week High / Low (from available candle history)
+  const highs  = candles.map(c => +c[2]);
+  const lows   = candles.map(c => +c[3]);
+  const week52H = +Math.max(...highs).toFixed(2);
+  const week52L = +Math.min(...lows).toFixed(2);
+
+  // Swing High/Low — look for local extremes in last 10 candles
+  const recent = candles.slice(0, Math.min(10, candles.length));
+  const swingH = +Math.max(...recent.map(c=>+c[2])).toFixed(2);
+  const swingL = +Math.min(...recent.map(c=>+c[3])).toFixed(2);
+
+  return { pivotR1:R1, pivotS1:S1, pivotR2:R2, pivotS2:S2, week52H, week52L, swingH, swingL, pivot:+P.toFixed(2) };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Check if price is near a support level (within 1%)
+// ─────────────────────────────────────────────────────────────
+function isNearSupport(ltp, sr, low) {
+  if (!sr) return ((ltp-low)/ltp*100) < 2;
+  const levels = [sr.pivotS1, sr.pivotS2, sr.week52L, sr.swingL, low].filter(Boolean);
+  return levels.some(lvl => lvl > 0 && Math.abs((ltp - lvl)/ltp*100) < 1.5);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Delivery % from Upstox quote (field: delivery_volume / total_volume)
+// ─────────────────────────────────────────────────────────────
+function getDeliveryPct(q) {
+  if (!q) return null;
+  // Upstox provides these fields in some quote responses
+  if (q.delivery_volume != null && q.volume > 0)
+    return +(q.delivery_volume / q.volume * 100).toFixed(1);
+  if (q.delivery_quantity != null && q.volume > 0)
+    return +(q.delivery_quantity / q.volume * 100).toFixed(1);
+  return null; // not available
+}
+
+// ─────────────────────────────────────────────────────────────
+// MAX PAIN — Find strike where total option writer loss is minimum
+// chain: array from fetchOptions (each row has call_options + put_options)
+// ─────────────────────────────────────────────────────────────
+function calcMaxPain(chain) {
+  if (!chain || chain.length < 3) return 0;
+  const strikes = chain.map(r => r.strike_price).filter(Boolean).sort((a,b)=>a-b);
+  let minLoss = Infinity, maxPainStrike = strikes[0];
+  for (const testStrike of strikes) {
+    let totalLoss = 0;
+    for (const row of chain) {
+      const sp = row.strike_price;
+      const callOI = row.call_options?.market_data?.oi || 0;
+      const putOI  = row.put_options?.market_data?.oi  || 0;
+      // Call writers lose when testStrike > strike (calls expire ITM)
+      if (testStrike > sp) totalLoss += (testStrike - sp) * callOI;
+      // Put writers lose when testStrike < strike (puts expire ITM)
+      if (testStrike < sp) totalLoss += (sp - testStrike) * putOI;
+    }
+    if (totalLoss < minLoss) { minLoss = totalLoss; maxPainStrike = testStrike; }
+  }
+  return maxPainStrike;
+}
+
+// ─────────────────────────────────────────────────────────────
+// OI WALLS — Find strikes with highest Put OI (support) and Call OI (resistance)
+// ─────────────────────────────────────────────────────────────
+function calcOIWalls(chain) {
+  if (!chain || chain.length < 3) return {callWall:0, putWall:0};
+  let maxCallOI = 0, maxPutOI = 0, callWall = 0, putWall = 0;
+  for (const row of chain) {
+    const callOI = row.call_options?.market_data?.oi || 0;
+    const putOI  = row.put_options?.market_data?.oi  || 0;
+    if (callOI > maxCallOI) { maxCallOI = callOI; callWall = row.strike_price; }
+    if (putOI  > maxPutOI)  { maxPutOI  = putOI;  putWall  = row.strike_price; }
+  }
+  return { callWall, putWall, callWallOI: maxCallOI, putWallOI: maxPutOI };
+}
+
 // ── SL/Target from ATR ──
 function autoSLTarget(ltp, high, low, atr) {
   const v = atr || ltp * 0.02;
@@ -1575,6 +1732,26 @@ async function triggerScan(){
     const {txt:vixTxt, sc:vixSc} = interpVIX(vix);
     lg(`✅ Nifty ₹${fmt(nLtp,0)} | VIX ${vix.toFixed(1)} (${vixTxt}) | Market: ${nBull?"BULLISH":"BEARISH"}`,"o");
 
+    // ── Sector index performance ──
+    // Fetch key Nifty sector indices to compute real sector strength
+    const SECTOR_KEYS = "NSE_INDEX|Nifty Bank,NSE_INDEX|Nifty IT,NSE_INDEX|Nifty Auto,NSE_INDEX|Nifty Pharma,NSE_INDEX|Nifty FMCG,NSE_INDEX|Nifty Metal,NSE_INDEX|Nifty Realty,NSE_INDEX|Nifty Energy,NSE_INDEX|Nifty Infra";
+    const sectorIdxMap = {}; // sec name → change%
+    try{
+      const sD = await fetchQ(SECTOR_KEYS);
+      const secIdxPairs = [
+        ["Banking","NSE_INDEX|Nifty Bank"],["IT","NSE_INDEX|Nifty IT"],
+        ["Auto","NSE_INDEX|Nifty Auto"],["Pharma","NSE_INDEX|Nifty Pharma"],
+        ["FMCG","NSE_INDEX|Nifty FMCG"],["Metals","NSE_INDEX|Nifty Metal"],
+        ["Realty","NSE_INDEX|Nifty Realty"],["Energy","NSE_INDEX|Nifty Energy"],
+        ["Infra","NSE_INDEX|Nifty Infra"],
+      ];
+      secIdxPairs.forEach(([sec,key])=>{
+        const q = sD[key];
+        if(q) sectorIdxMap[sec] = getChgPct(q);
+      });
+      lg(`Sector indices: ${Object.keys(sectorIdxMap).length} loaded`);
+    }catch(e){ lg("Sector idx: "+e.message,"w"); }
+
     // ── STEP 2: PCR ──
     updateScanProgress("Step 2/5: Fetching PCR...");
     let pcr = 1, pcrTxt = "Neutral", pcrSc = 50;
@@ -1679,6 +1856,8 @@ async function triggerScan(){
           const closes = candles.map(c=>+c[4]).reverse();
           const rc     = candles.slice(0,20);
           const avgVol20 = rc.reduce((s,x)=>s+(+x[5]||0),0) / Math.max(1,rc.length);
+          const sr    = calcSR(candles);
+          const vwap  = calcVWAP(candles);
           tech[inst.s] = {
             rsi:      calcRSI(closes),
             macdBull: closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null,
@@ -1686,7 +1865,7 @@ async function triggerScan(){
             a200:     isAboveMA(closes,200),
             atr:      calcATR(candles),
             patterns: detectPatterns(candles),
-            avgVol20
+            avgVol20, sr, vwap
           };
           candleOK++;
         }
@@ -1719,20 +1898,41 @@ async function triggerScan(){
       const chgPct = getChgPct(q);
       lastPrices[inst.s] = ltp;
 
-      const t = tech[inst.s] || {};
-      const nearSupp = ((ltp-low)/ltp*100) < 2;
+      const t        = tech[inst.s] || {};
       const patterns = t.patterns || {};
-      const sec = getSector(inst.s);
-      const secSc = secMap[sec] ? Math.round(secMap[sec].g/secMap[sec].c*100) : 50;
+      const sr       = t.sr || {};
+      const vwap     = t.vwap || 0;
+      const nearSupp = isNearSupport(ltp, sr, low);
+      const delivPct = getDeliveryPct(q);   // null if not available
+      const sec      = getSector(inst.s);
+      // Sector strength: use real sector index performance when available,
+      // fall back to % of stocks up in sector
+      const secIdxChg = sectorIdxMap[sec]; // real index % change
+      const secSc = secIdxChg != null
+        ? Math.round(Math.min(100, Math.max(0, 50 + secIdxChg * 8))) // map -6%→2 to +6%→98
+        : secMap[sec] ? Math.round(secMap[sec].g/secMap[sec].c*100) : 50;
+
+      // VWAP signal: price above VWAP = institutional buying bias
+      const aboveVWAP = vwap > 0 ? ltp > vwap : null;
+
+      // S/R proximity: price within 1% of key resistance = caution
+      const nearResist = sr.pivotR1 ? Math.abs((ltp-sr.pivotR1)/ltp*100) < 1 : false;
 
       const {target, sl} = autoSLTarget(ltp, high, low, t.atr);
       const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 2;
       const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
 
-      // Volume indicator: only valid when we have 20-day avg from candles
+      // Volume indicator
       const volOk = t.avgVol20 ? (vol >= t.avgVol20*1.2) : null;
+
+      // Delivery % boost — high delivery = institutional conviction
+      const delivBoost = delivPct!=null ? (delivPct>=60 ? 1 : delivPct<=25 ? -1 : 0) : 0;
+
       const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec);
-      const conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
+      let conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
+      // Apply delivery % adjustment (±5 pts)
+      conf = Math.min(100, Math.max(0, conf + delivBoost*5));
+
       const risk  = calcRisk(ltp, sl, target, t.atr, vix);
       const pot   = calcPotential(ltp, target, sl, numInds, preRec);
       const rec   = getRec(conf, pot.base, risk, pot.rr);
@@ -1740,8 +1940,8 @@ async function triggerScan(){
 
       stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
-        atr:t.atr, patterns, numInds, nearSupp, conf, risk, pot, rec,
-        target, sl, secSc, passes});
+        atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
+        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP});
     }
 
     // Log score distribution so user can see why stocks pass/fail
@@ -1782,6 +1982,7 @@ async function triggerScan(){
     setStatus("live","Live");
     scanSecs = CFG.scanStocks*60;
     lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${pcr}`,"o");
+    checkAlerts(stocks); // check price/confidence alerts
     setTimeout(()=>loadOptions(true), 2000);
 
   }catch(e){
@@ -1871,9 +2072,11 @@ async function loadOptions(force=true){
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
         const atm=Math.round(spot/und.step)*und.step;
+        const maxPain = calcMaxPain(chain);
+        const oiWalls = calcOIWalls(chain);
 
         const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix);
-        groups.push({name:und.name,spot,spotChg,spotPts,pcr,expiry,picks,type:"index"});
+        groups.push({name:und.name,spot,spotChg,spotPts,pcr,expiry,picks,type:"index",maxPain,oiWalls});
       }catch(e){lg(und.name+" err: "+e.message,"w");}
     }
 
@@ -2219,11 +2422,20 @@ function renderStatsOptions(idxGroups){
   document.getElementById("stats-options").innerHTML=idxGroups.map(g=>{
     const pc=g.pcr>1?"up":g.pcr>0.7?"am":"dn";
     const pts=g.spotPts||0; const color=clr(pts); const sign=pts>=0?"+":"";
-    return`<div class="sc">
+    const mp=g.maxPain||0;
+    const mpDist=mp&&g.spot?((mp-g.spot)/g.spot*100).toFixed(1):null;
+    const mpColor=mpDist&&+mpDist<0?"dn":mpDist&&+mpDist>0?"up":"am";
+    const cw=g.oiWalls?.callWall||0, pw=g.oiWalls?.putWall||0;
+    return`<div class="sc" style="min-width:160px">
       <div class="sc-lbl">${g.name} SPOT · LIVE</div>
       <div class="sc-val ${color}" id="opt-spot-${g.name}" data-prev="${g.spot}">₹${fmt(g.spot,0)}</div>
       <div class="sc-sub ${color}" id="opt-pts-${g.name}">${sign}${fmt(pts,2)} pts</div>
-      <div class="sc-note">PCR <span class="${pc}" style="font-weight:700">${g.pcr}</span> · <span style="color:#16a34a;font-weight:600">${g.picks.length} signals</span> · ↻ ${CFG.tick}s</div>
+      <div class="sc-note" style="line-height:1.7">
+        PCR <span class="${pc}" style="font-weight:700">${g.pcr}</span>
+        ${mp?`· <span title="Max Pain">🎯 ₹${fmt(mp,0)}</span> <span class="${mpColor}">(${mpDist>0?"+":""}${mpDist}%)</span>`:""}
+        ${cw?`<br>📵 Call Wall ₹${fmt(cw,0)} · 🛡 Put Wall ₹${fmt(pw,0)}`:""}
+        <br><span style="color:#16a34a;font-weight:600">${g.picks.length} signals</span> · ↻ ${CFG.tick}s
+      </div>
     </div>`;
   }).join("");
 }
@@ -2330,6 +2542,16 @@ function renderPortfolio(all){
 
   document.getElementById("port-empty").style.display="none";
   document.getElementById("port-content").style.display="block";
+
+  // Portfolio concentration warning
+  const sectorCounts = {};
+  all.forEach(p=>{ const sec=getSector(p.sym); sectorCounts[sec]=(sectorCounts[sec]||0)+1; });
+  const topSec = Object.entries(sectorCounts).sort((a,b)=>b[1]-a[1])[0];
+  const portCorrelEl = document.getElementById("port-correlation");
+  if(portCorrelEl && topSec && topSec[1]>=2){
+    portCorrelEl.style.display="block";
+    portCorrelEl.innerHTML=`📊 <strong>Concentration:</strong> ${topSec[1]} positions in <strong>${topSec[0]}</strong> sector. Consider diversifying across sectors for lower correlation risk.`;
+  } else if(portCorrelEl){ portCorrelEl.style.display="none"; }
   document.getElementById("port-rows").innerHTML=all.map(p=>{
     const currVal=p.ltp*p.qty;
     const pnl=p.pnl||0;
@@ -2354,6 +2576,109 @@ function renderPortfolio(all){
 function updateTicker(nLtp,nChg,bLtp,bChg,sent,sc,topSec,vix,pcr){
   const nSign=nChg>=0?"+":"",bSign=bChg>=0?"+":""; const t=`  NIFTY ₹${fmt(nLtp,0)} ${nSign}${fmt(nChg,2)} pts  ●  BANKNIFTY ₹${fmt(bLtp,0)} ${bSign}${fmt(bChg,2)} pts  ●  VIX ${vix?.toFixed(1)}  ●  PCR ${pcr}  ●  ${sent} ${sc}/10  ●  ${topSec}  ●  `;
   document.getElementById("ticker").textContent=t.repeat(7);
+}
+
+// ══════════════════════════════════════
+// ALERTS ENGINE
+// ══════════════════════════════════════
+let alertsData = JSON.parse(localStorage.getItem("friday_alerts") || "[]");
+let triggeredAlerts = JSON.parse(localStorage.getItem("friday_triggered") || "[]");
+
+function saveAlerts(){
+  localStorage.setItem("friday_alerts", JSON.stringify(alertsData));
+  localStorage.setItem("friday_triggered", JSON.stringify(triggeredAlerts));
+}
+
+function addAlert(){
+  const sym   = document.getElementById("al-sym").value.trim().toUpperCase();
+  const cond  = document.getElementById("al-cond").value;
+  const val   = +document.getElementById("al-val").value;
+  const note  = document.getElementById("al-note").value.trim();
+  if(!sym || !val){ alert("Enter symbol and value"); return; }
+  alertsData.push({ id: Date.now(), sym, cond, val, note, active: true, created: getIST() });
+  saveAlerts();
+  document.getElementById("al-sym").value="";
+  document.getElementById("al-val").value="";
+  document.getElementById("al-note").value="";
+  renderAlerts();
+  lg(`Alert set: ${sym} ${cond} ${val}`,"o");
+}
+
+function deleteAlert(id){
+  alertsData = alertsData.filter(a=>a.id!==id);
+  saveAlerts(); renderAlerts();
+}
+
+function clearTriggered(){
+  triggeredAlerts = [];
+  saveAlerts(); renderAlerts();
+}
+
+function renderAlerts(){
+  const active = alertsData.filter(a=>a.active);
+  document.getElementById("al-count").textContent = `(${active.length})`;
+  const badge = document.getElementById("alerts-badge");
+  const trig = triggeredAlerts.slice(0,10);
+
+  // Active alerts list
+  document.getElementById("alerts-list").innerHTML = active.length ? active.map(a=>`
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <span style="font-weight:800;color:#0f172a">${a.sym}</span>
+        <span style="font-size:10px;color:#64748b;margin-left:6px">${a.cond==="above"?"▲ Above":a.cond==="above"?"▲ Above":a.cond==="below"?"▼ Below":"📊 Conf ≥"} ₹${a.val}</span>
+        ${a.note?`<div style="font-size:9px;color:#94a3b8">${a.note}</div>`:""}
+      </div>
+      <button onclick="deleteAlert(${a.id})" style="background:none;border:1px solid #fecaca;border-radius:5px;color:#dc2626;cursor:pointer;font-size:9px;padding:3px 7px">✕</button>
+    </div>`).join("") : '<div style="font-size:11px;color:#94a3b8;padding:8px">No active alerts. Set one above.</div>';
+
+  // Triggered section
+  const trigSec = document.getElementById("triggered-section");
+  const trigList = document.getElementById("triggered-list");
+  if(trig.length > 0){
+    trigSec.style.display="block";
+    if(badge){ badge.style.display="inline"; badge.textContent=trig.length; }
+    trigList.innerHTML = trig.map(t=>`
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:6px">
+        <div style="font-weight:800;color:#dc2626">🔥 ${t.sym}</div>
+        <div style="font-size:10px;color:#374151">${t.msg}</div>
+        <div style="font-size:9px;color:#94a3b8">${t.time}</div>
+      </div>`).join("") + `<button onclick="clearTriggered()" style="background:none;border:1px solid #e2e8f0;border-radius:5px;color:#64748b;cursor:pointer;font-size:9px;padding:4px 10px;margin-top:4px">Clear triggered</button>`;
+  } else {
+    trigSec.style.display="none";
+    if(badge) badge.style.display="none";
+  }
+}
+
+function checkAlerts(stocks){
+  if(!alertsData.length) return;
+  let triggered = false;
+  for(const a of alertsData){
+    if(!a.active) continue;
+    const stock = stocks.find(s=>s.s===a.sym);
+    if(!stock) continue;
+    let fire = false, msg = "";
+    if(a.cond==="above"  && stock.ltp >= a.val){ fire=true; msg=`${a.sym} hit ₹${fmt(stock.ltp)} (alert: ▲₹${a.val})`; }
+    if(a.cond==="below"  && stock.ltp <= a.val){ fire=true; msg=`${a.sym} fell to ₹${fmt(stock.ltp)} (alert: ▼₹${a.val})`; }
+    if(a.cond==="conf"   && stock.conf>= a.val){ fire=true; msg=`${a.sym} confidence reached ${stock.conf}% (alert: ≥${a.val}%)`; }
+    if(fire){
+      a.active = false; // one-shot alert
+      triggeredAlerts.unshift({ sym:a.sym, msg, time:getIST(), note:a.note });
+      if(triggeredAlerts.length > 20) triggeredAlerts.pop();
+      triggered = true;
+      lg(`🔔 ALERT TRIGGERED: ${msg}`,"o");
+      // Browser notification if permission granted
+      if(Notification.permission === "granted"){
+        new Notification("FRIDAY Alert 🔔", { body: msg, icon: "/favicon.ico" });
+      }
+    }
+  }
+  if(triggered){ saveAlerts(); renderAlerts(); }
+}
+
+function requestNotifPermission(){
+  if("Notification" in window && Notification.permission === "default"){
+    Notification.requestPermission();
+  }
 }
 
 // ══════════════════════════════════════

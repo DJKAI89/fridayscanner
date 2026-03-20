@@ -397,57 +397,156 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 // ══════════════════════════════════════
 // INSTRUMENTS
 // ══════════════════════════════════════
+// ── SCAN UNIVERSE: Nifty50 + Nifty Next50 + Top F&O stocks (~150 liquid NSE stocks) ──
 const NIFTY50=[
-  {key:"NSE_EQ|INE002A01018",s:"RELIANCE",  n:"Reliance Industries", sec:"Energy",    b:1.1, fo:true},
-  {key:"NSE_EQ|INE467B01029",s:"TCS",        n:"TCS",                 sec:"IT",        b:0.9, fo:true},
-  {key:"NSE_EQ|INE040A01034",s:"HDFCBANK",  n:"HDFC Bank",           sec:"Banking",   b:1.2, fo:true},
-  {key:"NSE_EQ|INE009A01021",s:"INFY",      n:"Infosys",             sec:"IT",        b:0.95,fo:true},
-  {key:"NSE_EQ|INE090A01021",s:"ICICIBANK", n:"ICICI Bank",          sec:"Banking",   b:1.25,fo:true},
-  {key:"NSE_EQ|INE030A01027",s:"HINDUNILVR",n:"Hindustan Unilever",  sec:"FMCG",      b:0.7, fo:false},
-  {key:"NSE_EQ|INE154A01025",s:"ITC",       n:"ITC",                 sec:"FMCG",      b:0.8, fo:true},
-  {key:"NSE_EQ|INE062A01020",s:"SBIN",      n:"State Bank of India", sec:"Banking",   b:1.3, fo:true},
-  {key:"NSE_EQ|INE397D01024",s:"BHARTIARTL",n:"Bharti Airtel",       sec:"Telecom",   b:0.85,fo:true},
-  {key:"NSE_EQ|INE237A01028",s:"KOTAKBANK", n:"Kotak Mahindra Bank", sec:"Banking",   b:1.1, fo:true},
-  {key:"NSE_EQ|INE018A01030",s:"LT",        n:"Larsen & Toubro",     sec:"Infra",     b:1.15,fo:true},
-  {key:"NSE_EQ|INE238A01034",s:"AXISBANK",  n:"Axis Bank",           sec:"Banking",   b:1.3, fo:true},
-  {key:"NSE_EQ|INE021A01026",s:"ASIANPAINT",n:"Asian Paints",        sec:"Consumer",  b:0.75,fo:true},
-  {key:"NSE_EQ|INE860A01027",s:"HCLTECH",   n:"HCL Technologies",    sec:"IT",        b:0.9, fo:true},
-  {key:"NSE_EQ|INE585B01010",s:"MARUTI",    n:"Maruti Suzuki",       sec:"Auto",      b:1.05,fo:true},
-  {key:"NSE_EQ|INE044A01036",s:"SUNPHARMA", n:"Sun Pharma",          sec:"Pharma",    b:0.85,fo:true},
-  {key:"NSE_EQ|INE280A01028",s:"TITAN",     n:"Titan Company",       sec:"Consumer",  b:1.0, fo:true},
-  {key:"NSE_EQ|INE296A01024",s:"BAJFINANCE",n:"Bajaj Finance",       sec:"NBFC",      b:1.4, fo:true},
-  {key:"NSE_EQ|INE075A01022",s:"WIPRO",     n:"Wipro",               sec:"IT",        b:0.9, fo:true},
-  {key:"NSE_EQ|INE239A01016",s:"NESTLEIND", n:"Nestle India",        sec:"FMCG",      b:0.65,fo:false},
-  {key:"NSE_EQ|INE669C01036",s:"TECHM",     n:"Tech Mahindra",       sec:"IT",        b:1.0, fo:true},
-  {key:"NSE_EQ|INE101A01026",s:"M&M",       n:"Mahindra & Mahindra", sec:"Auto",      b:1.1, fo:true},
-  {key:"NSE_EQ|INE752E01010",s:"POWERGRID", n:"Power Grid Corp",     sec:"Power",     b:0.7, fo:false},
-  {key:"NSE_EQ|INE733E01010",s:"NTPC",      n:"NTPC",                sec:"Power",     b:0.75,fo:false},
-  {key:"NSE_EQ|INE028A01039",s:"TATAMOTORS",n:"Tata Motors",         sec:"Auto",      b:1.35,fo:true},
-  {key:"NSE_EQ|INE081A01020",s:"TATASTEEL", n:"Tata Steel",          sec:"Metals",    b:1.5, fo:true},
-  {key:"NSE_EQ|INE423A01024",s:"ADANIENT",  n:"Adani Enterprises",   sec:"Conglom",   b:1.6, fo:true},
-  {key:"NSE_EQ|INE361B01024",s:"DIVISLAB",  n:"Divi's Laboratories", sec:"Pharma",    b:0.8, fo:false},
-  {key:"NSE_EQ|INE918I01026",s:"BAJAJFINSV",n:"Bajaj Finserv",       sec:"NBFC",      b:1.2, fo:true},
-  {key:"NSE_EQ|INE019A01038",s:"JSWSTEEL",  n:"JSW Steel",           sec:"Metals",    b:1.45,fo:true},
-  {key:"NSE_EQ|INE038A01020",s:"HINDALCO",  n:"Hindalco Industries", sec:"Metals",    b:1.4, fo:true},
-  {key:"NSE_EQ|INE059A01026",s:"CIPLA",     n:"Cipla",               sec:"Pharma",    b:0.85,fo:true},
-  {key:"NSE_EQ|INE089A01023",s:"DRREDDY",   n:"Dr Reddy's Labs",     sec:"Pharma",    b:0.9, fo:true},
-  {key:"NSE_EQ|INE213A01029",s:"ONGC",      n:"ONGC",                sec:"Energy",    b:1.1, fo:false},
-  {key:"NSE_EQ|INE522F01014",s:"COALINDIA", n:"Coal India",          sec:"Mining",    b:0.9, fo:false},
-  {key:"NSE_EQ|INE047A01021",s:"GRASIM",    n:"Grasim Industries",   sec:"Conglom",   b:1.05,fo:false},
-  {key:"NSE_EQ|INE066A01021",s:"EICHERMOT", n:"Eicher Motors",       sec:"Auto",      b:1.0, fo:true},
-  {key:"NSE_EQ|INE095A01012",s:"INDUSINDBK",n:"IndusInd Bank",       sec:"Banking",   b:1.35,fo:true},
-  {key:"NSE_EQ|INE437A01024",s:"APOLLOHOSP",n:"Apollo Hospitals",    sec:"Healthcare",b:0.9, fo:false},
-  {key:"NSE_EQ|INE742F01042",s:"ADANIPORTS",n:"Adani Ports",         sec:"Logistics", b:1.25,fo:false},
-  {key:"NSE_EQ|INE029A01011",s:"BPCL",      n:"BPCL",                sec:"Energy",    b:1.15,fo:true},
-  {key:"NSE_EQ|INE158A01026",s:"HEROMOTOCO",n:"Hero MotoCorp",       sec:"Auto",      b:0.95,fo:true},
-  {key:"NSE_EQ|INE192R01011",s:"TATACONSUM",n:"Tata Consumer",       sec:"FMCG",      b:0.85,fo:false},
-  {key:"NSE_EQ|INE216A01030",s:"BRITANNIA", n:"Britannia Industries",sec:"FMCG",      b:0.7, fo:false},
-  {key:"NSE_EQ|INE123W01016",s:"SBILIFE",   n:"SBI Life Insurance",  sec:"Insurance", b:0.85,fo:false},
-  {key:"NSE_EQ|INE795G01014",s:"HDFCLIFE",  n:"HDFC Life Insurance", sec:"Insurance", b:0.8, fo:false},
-  {key:"NSE_EQ|INE214T01019",s:"LTIM",      n:"LTIMindtree",         sec:"IT",        b:1.0, fo:true},
-  {key:"NSE_EQ|INE917I01010",s:"BAJAJ-AUTO",n:"Bajaj Auto",          sec:"Auto",      b:1.0, fo:true},
-  {key:"NSE_EQ|INE721I01017",s:"SHRIRAMFIN",n:"Shriram Finance",     sec:"NBFC",      b:1.2, fo:false},
-  {key:"NSE_EQ|INE481G01011",s:"ULTRACEMCO",n:"UltraTech Cement",    sec:"Cement",    b:1.0, fo:false},
+  // ── NIFTY 50 ──
+  {key:"NSE_EQ|INE002A01018",s:"RELIANCE",   n:"Reliance Industries",    sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE467B01029",s:"TCS",         n:"TCS",                    sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE040A01034",s:"HDFCBANK",   n:"HDFC Bank",              sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE009A01021",s:"INFY",       n:"Infosys",                sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE090A01021",s:"ICICIBANK",  n:"ICICI Bank",             sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE030A01027",s:"HINDUNILVR", n:"Hindustan Unilever",     sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE154A01025",s:"ITC",        n:"ITC",                    sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE062A01020",s:"SBIN",       n:"State Bank of India",    sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE397D01024",s:"BHARTIARTL", n:"Bharti Airtel",          sec:"Telecom",    fo:true},
+  {key:"NSE_EQ|INE237A01028",s:"KOTAKBANK",  n:"Kotak Mahindra Bank",    sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE018A01030",s:"LT",         n:"Larsen & Toubro",        sec:"Infra",      fo:true},
+  {key:"NSE_EQ|INE238A01034",s:"AXISBANK",   n:"Axis Bank",              sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE021A01026",s:"ASIANPAINT", n:"Asian Paints",           sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE860A01027",s:"HCLTECH",    n:"HCL Technologies",       sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE585B01010",s:"MARUTI",     n:"Maruti Suzuki",          sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE044A01036",s:"SUNPHARMA",  n:"Sun Pharma",             sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE280A01028",s:"TITAN",      n:"Titan Company",          sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE296A01024",s:"BAJFINANCE", n:"Bajaj Finance",          sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE075A01022",s:"WIPRO",      n:"Wipro",                  sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE239A01016",s:"NESTLEIND",  n:"Nestle India",           sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE669C01036",s:"TECHM",      n:"Tech Mahindra",          sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE101A01026",s:"M&M",        n:"Mahindra & Mahindra",    sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE752E01010",s:"POWERGRID",  n:"Power Grid Corp",        sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE733E01010",s:"NTPC",       n:"NTPC",                   sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE028A01039",s:"TATAMOTORS", n:"Tata Motors",            sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE081A01020",s:"TATASTEEL",  n:"Tata Steel",             sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE423A01024",s:"ADANIENT",   n:"Adani Enterprises",      sec:"Conglom",    fo:true},
+  {key:"NSE_EQ|INE361B01024",s:"DIVISLAB",   n:"Divi's Laboratories",    sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE918I01026",s:"BAJAJFINSV", n:"Bajaj Finserv",          sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE019A01038",s:"JSWSTEEL",   n:"JSW Steel",              sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE038A01020",s:"HINDALCO",   n:"Hindalco Industries",    sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE059A01026",s:"CIPLA",      n:"Cipla",                  sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE089A01023",s:"DRREDDY",    n:"Dr Reddy's Labs",        sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE213A01029",s:"ONGC",       n:"ONGC",                   sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE522F01014",s:"COALINDIA",  n:"Coal India",             sec:"Mining",     fo:true},
+  {key:"NSE_EQ|INE047A01021",s:"GRASIM",     n:"Grasim Industries",      sec:"Conglom",    fo:true},
+  {key:"NSE_EQ|INE066A01021",s:"EICHERMOT",  n:"Eicher Motors",          sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE095A01012",s:"INDUSINDBK", n:"IndusInd Bank",          sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE437A01024",s:"APOLLOHOSP", n:"Apollo Hospitals",       sec:"Healthcare", fo:true},
+  {key:"NSE_EQ|INE742F01042",s:"ADANIPORTS", n:"Adani Ports",            sec:"Logistics",  fo:true},
+  {key:"NSE_EQ|INE029A01011",s:"BPCL",       n:"BPCL",                   sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE158A01026",s:"HEROMOTOCO", n:"Hero MotoCorp",          sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE192R01011",s:"TATACONSUM", n:"Tata Consumer",          sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE216A01030",s:"BRITANNIA",  n:"Britannia Industries",   sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE123W01016",s:"SBILIFE",    n:"SBI Life Insurance",     sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE795G01014",s:"HDFCLIFE",   n:"HDFC Life Insurance",    sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE214T01019",s:"LTIM",       n:"LTIMindtree",            sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE917I01010",s:"BAJAJ-AUTO", n:"Bajaj Auto",             sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE721I01017",s:"SHRIRAMFIN", n:"Shriram Finance",        sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE481G01011",s:"ULTRACEMCO", n:"UltraTech Cement",       sec:"Cement",     fo:true},
+
+  // ── NIFTY NEXT 50 ──
+  {key:"NSE_EQ|INE765G01017",s:"ICICIGI",    n:"ICICI Lombard",          sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE726G01019",s:"ICICIPRULI", n:"ICICI Pru Life",         sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE018B01010",s:"SBICARD",    n:"SBI Cards",              sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE670A01023",s:"TATAELXSI",  n:"Tata Elxsi",             sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE248U01004",s:"MOTHERSON",  n:"Samvardhana Motherson",  sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE129A01019",s:"GAIL",       n:"GAIL India",             sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE262H01013",s:"HAVELLS",    n:"Havells India",          sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE752H01013",s:"PIDILITIND",  n:"Pidilite Industries",   sec:"Chemical",   fo:true},
+  {key:"NSE_EQ|INE121J01017",s:"NAUKRI",     n:"Info Edge (Naukri)",     sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE148O01028",s:"DELHIVERY",  n:"Delhivery",              sec:"Logistics",  fo:true},
+  {key:"NSE_EQ|INE040H01021",s:"LUPIN",      n:"Lupin",                  sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE437G01010",s:"NUVAMA",     n:"Nuvama Wealth",          sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE155A01022",s:"TORNTPOWER", n:"Torrent Power",          sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE406A01037",s:"AUROPHARMA", n:"Aurobindo Pharma",       sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE176A01028",s:"BIOCON",     n:"Biocon",                 sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE171A01029",s:"BANKBARODA", n:"Bank of Baroda",         sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE476A01022",s:"CANBK",      n:"Canara Bank",            sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE084A01016",s:"BANKINDIA",  n:"Bank of India",          sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE692A01016",s:"UNIONBANK",  n:"Union Bank of India",    sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE528G01035",s:"YESBANK",    n:"Yes Bank",               sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE545U01014",s:"BANDHANBNK", n:"Bandhan Bank",           sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE171A01029",s:"FEDERALBNK", n:"Federal Bank",           sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE092T01019",s:"IDFCFIRSTB", n:"IDFC First Bank",        sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE160A01022",s:"PNB",        n:"Punjab National Bank",   sec:"Banking",    fo:true},
+  {key:"NSE_EQ|INE491A01021",s:"RBLBANK",    n:"RBL Bank",               sec:"Banking",    fo:true},
+
+  // ── TOP F&O STOCKS (high liquidity, significant volume) ──
+  {key:"NSE_EQ|INE234A01023",s:"ETERNAL",    n:"Eternal (Zomato)",       sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE058A01010",s:"IRCTC",      n:"IRCTC",                  sec:"Travel",     fo:true},
+  {key:"NSE_EQ|INE114A01011",s:"SAIL",       n:"SAIL",                   sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE205A01025",s:"VEDL",       n:"Vedanta",                sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE774D01024",s:"NHPC",       n:"NHPC",                   sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE202E01016",s:"IREDA",      n:"IREDA",                  sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE263A01024",s:"BEL",        n:"Bharat Electronics",     sec:"Defence",    fo:true},
+  {key:"NSE_EQ|INE257A01026",s:"BHEL",       n:"BHEL",                   sec:"Infra",      fo:true},
+  {key:"NSE_EQ|INE208A01029",s:"ASHOKLEY",   n:"Ashok Leyland",          sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE494B01023",s:"TVSMOTOR",   n:"TVS Motor",              sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE347G01014",s:"DIXON",      n:"Dixon Technologies",     sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE591G01017",s:"COFORGE",    n:"Coforge",                sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE172A01027",s:"PERSISTENT", n:"Persistent Systems",     sec:"IT",         fo:true},
+  {key:"NSE_EQ|INE010B01027",s:"ZYDUSLIFE",  n:"Zydus Lifesciences",     sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE685A01028",s:"TORNTPHARM", n:"Torrent Pharma",         sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE318A01026",s:"ALKEM",      n:"Alkem Laboratories",     sec:"Pharma",     fo:true},
+  {key:"NSE_EQ|INE271C01023",s:"DLF",        n:"DLF",                    sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE075I01017",s:"GODREJPROP", n:"Godrej Properties",      sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE670K01029",s:"LODHA",      n:"Lodha (Macrotech)",      sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE036B01022",s:"PRESTIGE",   n:"Prestige Estates",       sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE620A01016",s:"OBEROIRLTY", n:"Oberoi Realty",          sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE621A01024",s:"PHOENIXLTD", n:"Phoenix Mills",          sec:"Realty",     fo:true},
+  {key:"NSE_EQ|INE188B01013",s:"HFCL",       n:"HFCL",                   sec:"Telecom",    fo:true},
+  {key:"NSE_EQ|INE646E01012",s:"INDUSTOWER", n:"Indus Towers",           sec:"Telecom",    fo:true},
+  {key:"NSE_EQ|INE517F01014",s:"TATAPOWER",  n:"Tata Power",             sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE364U01010",s:"ADANIGREEN", n:"Adani Green Energy",     sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE931S01010",s:"ADANIENSOL", n:"Adani Energy Solutions", sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE758E01017",s:"CESC",       n:"CESC",                   sec:"Power",      fo:true},
+  {key:"NSE_EQ|INE849H01027",s:"TRENT",      n:"Trent",                  sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE296B01018",s:"MUTHOOTFIN", n:"Muthoot Finance",        sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE090B01011",s:"CHOLAFIN",   n:"Cholamandalam Finance",  sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE688I01017",s:"M&MFIN",     n:"M&M Financial",          sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE756I01018",s:"BAJAJHFL",   n:"Bajaj Housing Finance",  sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE115A01026",s:"LICHSGFIN",  n:"LIC Housing Finance",    sec:"NBFC",       fo:true},
+  {key:"NSE_EQ|INE736A01011",s:"CDSL",       n:"CDSL",                   sec:"Finance",    fo:true},
+  {key:"NSE_EQ|INE596I01012",    s:"CAMS",       n:"CAMS",                   sec:"Finance",    fo:true},
+  {key:"NSE_EQ|INE174A01027",s:"MFSL",       n:"Max Financial Services", sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE334A01023",s:"STARHEALTH",  n:"Star Health Insurance",  sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE484J01027",s:"NIACL",      n:"New India Assurance",    sec:"Insurance",  fo:true},
+  {key:"NSE_EQ|INE053A01029",s:"AMBUJACEM",  n:"Ambuja Cements",         sec:"Cement",     fo:true},
+  {key:"NSE_EQ|INE070A01015",s:"ACC",        n:"ACC",                    sec:"Cement",     fo:true},
+  {key:"NSE_EQ|INE500A01026",s:"SHREECEM",   n:"Shree Cement",           sec:"Cement",     fo:true},
+  {key:"NSE_EQ|INE196A01026",s:"RAMCOCEM",   n:"Ramco Cements",          sec:"Cement",     fo:true},
+  {key:"NSE_EQ|INE523B01011",s:"JKCEMENT",   n:"JK Cement",              sec:"Cement",     fo:true},
+  {key:"NSE_EQ|INE017A01032",s:"HINDPETRO",  n:"HPCL",                   sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE242A01010",s:"IOC",        n:"Indian Oil Corp",        sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE011A01031",s:"PETRONET",   n:"Petronet LNG",           sec:"Energy",     fo:true},
+  {key:"NSE_EQ|INE266F01018",s:"CONCOR",     n:"Container Corp",         sec:"Logistics",  fo:true},
+  {key:"NSE_EQ|INE285B01017",s:"IRFC",       n:"IRFC",                   sec:"Finance",    fo:true},
+  {key:"NSE_EQ|INE277A01011",s:"HAL",        n:"HAL",                    sec:"Defence",    fo:true},
+  {key:"NSE_EQ|INE890L01014",s:"BDL",        n:"Bharat Dynamics",        sec:"Defence",    fo:true},
+  {key:"NSE_EQ|INE465A01025",s:"BHARATFORG", n:"Bharat Forge",           sec:"Auto",       fo:true},
+  {key:"NSE_EQ|INE048A01002",s:"CUMMINSIND", n:"Cummins India",          sec:"Industrial", fo:true},
+  {key:"NSE_EQ|INE058A01010",s:"THERMAX",    n:"Thermax",                sec:"Industrial", fo:true},
+  {key:"NSE_EQ|INE522A01014",s:"APLAPOLLO",  n:"APL Apollo Tubes",       sec:"Metals",     fo:true},
+  {key:"NSE_EQ|INE854D01024",s:"VBL",        n:"Varun Beverages",        sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE636A01011",s:"MARICO",     n:"Marico",                 sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE016A01026",s:"DABUR",      n:"Dabur India",            sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE179A01014",s:"COLPAL",     n:"Colgate-Palmolive",      sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE126A01031",s:"EMAMILTD",   n:"Emami",                  sec:"FMCG",       fo:true},
+  {key:"NSE_EQ|INE655A01013",s:"JUBLFOOD",   n:"Jubilant FoodWorks",     sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE274J01014",s:"NYKAA",      n:"Nykaa",                  sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE233A01035",s:"PAGEIND",    n:"Page Industries",        sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE093I01010",s:"POLYCAB",    n:"Polycab India",          sec:"Industrial", fo:true},
+  {key:"NSE_EQ|INE979J01012",s:"ABFRL",      n:"Aditya Birla Fashion",   sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE200M01013",s:"ZOMATO",     n:"Zomato",                 sec:"Consumer",   fo:true},
+  {key:"NSE_EQ|INE070D01027",s:"PAYTM",      n:"Paytm (One97 Comm)",     sec:"FinTech",    fo:true},
+  {key:"NSE_EQ|INE725G01011",s:"ANGELONE",   n:"Angel One",              sec:"Finance",    fo:true},
 ];
 const INST_MAP={}; NIFTY50.forEach(i=>INST_MAP[i.key]=i);
 
@@ -1491,63 +1590,73 @@ async function triggerScan(){
       }
     }catch(e){ lg("PCR skipped: "+e.message,"w"); }
 
-    // ── STEP 3: Quotes for Nifty50 stocks ──
-    updateScanProgress("Step 3/5: Fetching stock quotes (50 stocks)...");
-    const rawQ = {};  // raw response from API
-    const batch1 = NIFTY50.slice(0,25).map(i=>i.key).join(",");
-    const batch2 = NIFTY50.slice(25).map(i=>i.key).join(",");
-    try{
-      const d1 = await fetchQ(batch1);
-      Object.assign(rawQ, d1);
-      lg(`Batch 1: ${Object.keys(d1).length} quotes`,"o");
-    }catch(e){ lg("Batch 1 failed: "+e.message,"e"); }
-    try{
-      const d2 = await fetchQ(batch2);
-      Object.assign(rawQ, d2);
-      lg(`Batch 2: ${Object.keys(d2).length} quotes`,"o");
-    }catch(e){ lg("Batch 2 failed: "+e.message,"e"); }
+    // ── STEP 3: Build scan universe (CSV → all NSE EQ stocks, cached daily) ──
+    updateScanProgress("Step 3/5: Loading stock universe...");
 
-    const totalRaw = Object.keys(rawQ).length;
-    lg(`Raw quotes received: ${totalRaw}`,"o");
+    // Phase A: Get universe — try CSV first, fall back to hardcoded list
+    let scanList = NIFTY50; // always start with our curated list
+    try{
+      const csvUniverse = await getNSEUniverse(); // loads Upstox CSV, cached daily
+      if(csvUniverse.length > NIFTY50.length){
+        scanList = csvUniverse;
+        lg(`📋 Universe: ${csvUniverse.length} NSE EQ stocks from CSV`,"o");
+      }
+    }catch(e){ lg("CSV universe skipped — using curated list","w"); }
 
-    if(totalRaw === 0){
-      throw new Error("API returned 0 quotes. Check token and internet connection.");
+    lg(`Scanning ${scanList.length} stocks in ${Math.ceil(scanList.length/50)} batches...`,"o");
+
+    // Phase B: Quote all stocks in batches of 50
+    // fetchQ normalizes keys, so allQ[key] will match scanList[i].key format
+    const rawQ = {};
+    const BATCH = 50; // safe batch size for Upstox
+    const totalB = Math.ceil(scanList.length / BATCH);
+    for(let bi=0; bi<totalB; bi++){
+      const slice = scanList.slice(bi*BATCH, (bi+1)*BATCH);
+      updateScanProgress(`Step 3/5: Quotes ${Math.min((bi+1)*BATCH, scanList.length)}/${scanList.length}`);
+      try{
+        const bd = await fetchQ(slice.map(i=>i.key).join(","));
+        Object.assign(rawQ, bd);
+      }catch(e){ lg(`Quote batch ${bi+1}: ${e.message}`,"w"); }
     }
+    const totalRaw = Object.keys(rawQ).length;
+    lg(`✅ Quotes: ${totalRaw} stocks responded`,"o");
+    if(totalRaw === 0) throw new Error("API returned 0 quotes. Check token and internet connection.");
 
-    // ── Build a format-agnostic lookup map ──
-    // Upstox may return keys as: NSE_EQ:ISIN, NSE_EQ|ISIN, NSE_EQ:SYMBOL, NSE_EQ|SYMBOL
-    // Log the actual format so we can see it
-    const firstKey = Object.keys(rawQ)[0];
-    lg(`API key format: "${firstKey}"`,"o");
+    // Phase C: Match quotes to instruments (format-agnostic)
+    // Upstox may return NSE_EQ:ISIN or NSE_EQ|ISIN — handle both
+    const firstKey = Object.keys(rawQ)[0] || "";
+    lg(`Key format: "${firstKey}"`,"o");
 
-    // Build allQ with ALL possible key formats so lookup always works
+    // Build allQ covering all key variants for safe lookup
     const allQ = {};
     for(const [k,v] of Object.entries(rawQ)){
-      allQ[k]                          = v;  // original
-      allQ[k.replace(/:/g,"|")]        = v;  // colon → pipe
-      allQ[k.replace(/\|/g,":")]       = v;  // pipe → colon
-      // Also index by symbol extracted from the quote data itself
-      if(v?.symbol) allQ["SYM:"+v.symbol] = v;
+      allQ[k] = v;
+      allQ[k.replace(/:/g,"|")] = v;
+      allQ[k.replace(/\|/g,":")] = v;
       if(v?.tradingsymbol) allQ["SYM:"+v.tradingsymbol] = v;
     }
 
-    // Match NIFTY50 stocks using multiple fallback strategies
-    const quoted = NIFTY50.map(inst => {
-      const q =
-        allQ[inst.key]                          ||  // exact match (pipe+ISIN)
-        allQ[inst.key.replace(/\|/g,":")]       ||  // colon+ISIN
-        allQ["NSE_EQ|"+inst.s]                  ||  // pipe+symbol
-        allQ["NSE_EQ:"+inst.s]                  ||  // colon+symbol
-        allQ["SYM:"+inst.s];                        // symbol from response data
-      if(q) return {...inst, _q: q};
+    // Match each instrument using multiple key formats
+    const allMatched = scanList.map(inst => {
+      const q = allQ[inst.key]
+             || allQ[inst.key.replace(/\|/g,":")]
+             || allQ["NSE_EQ|"+inst.s]
+             || allQ["NSE_EQ:"+inst.s]
+             || allQ["SYM:"+inst.s];
+      if(q?.last_price > 0) return {...inst, _q:q};
       return null;
     }).filter(Boolean);
 
-    lg(`Stocks matched: ${quoted.length}/50`,"o");
+    // Phase D: Pick top 100 by TODAY'S volume (market-driven selection)
+    const byVolume = allMatched
+      .sort((a,b) => (b._q.volume||0) - (a._q.volume||0))
+      .slice(0, 100);
+
+    const quoted = byVolume; // these are the stocks we analyse
+    lg(`✅ Top ${quoted.length} stocks by today's volume (from ${allMatched.length} matched)`,"o");
     if(quoted.length === 0){
-      // Log all raw keys to help diagnose
-      const keysSample = Object.keys(rawQ).slice(0,5).join(", ");
-      throw new Error(`0/50 stocks matched. API key samples: [${keysSample}] | Expected like: ${NIFTY50[0].key}`);
+      const keysSample = Object.keys(rawQ).slice(0,3).join(", ");
+      throw new Error(`0 stocks matched. API samples: [${keysSample}]`);
     }
 
     // Convenience: build allQ keyed by inst.key for downstream use
@@ -1557,7 +1666,8 @@ async function triggerScan(){
     updateScanProgress("Step 4/5: Fetching candle history...");
     const today   = new Date().toISOString().split("T")[0];
     const from60  = new Date(Date.now() - 65*864e5).toISOString().split("T")[0];
-    const byVol   = [...quoted].sort((a,b) => (b._q?.volume||0) - (a._q?.volume||0));
+    // quoted is already sorted by volume (Phase D above)
+    const byVol = quoted;
     const tech    = {};
     let candleOK  = 0;
     for(let ci = 0; ci < Math.min(20, byVol.length); ci++){

@@ -2944,7 +2944,7 @@ async function refreshMarketStatus(){
       if(exStatus.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
       else if(status.includes("pre_open"))   msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
       else if(status.includes("end_of_day")) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
-      else                                   msg = "🔔 NSE Market Closed · Showing last data";
+      else                                   msg = "🔔 NSE Market Closed.";
     }
 
     _mktStatusCache = {open, msg, status, exStatus};

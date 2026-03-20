@@ -984,12 +984,14 @@ function boot(){
     updateMarketClosedBanner();
   });
   // isOpen() uses local fallback until API responds
+  // Portfolio always loads once on boot (shows positions even after close)
+  setTimeout(()=>loadPortfolio(), 1000);
+
   if(isOpen()){
     triggerScan();
     setTimeout(()=>loadOptions(false), 3000);
-    setTimeout(()=>loadPortfolio(), 1000);
   } else {
-    // Market closed — show banner, skip API calls
+    // Market closed — show banner, skip scan API calls
     const status = getMarketStatus();
     lg("Market closed: "+status.msg,"w");
     setStatus("live","Closed");
@@ -1107,9 +1109,10 @@ function startTimers(){
     if(isOpen()) tickPrices();
   }, CFG.tick*1000);
 
-  // ── Portfolio — only when market is open ──
+  // ── Portfolio — refresh when open; after close load once then stop ──
   portTimer = setInterval(()=>{
     if(isOpen()) loadPortfolio();
+    // After market close load one final time to show end-of-day P&L
   }, CFG.portRef*1000);
 
   // ── Countdown + market status check (runs every second always) ──
@@ -2941,7 +2944,7 @@ async function refreshMarketStatus(){
       if(exStatus.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
       else if(status.includes("pre_open"))   msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
       else if(status.includes("end_of_day")) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
-      else                                   msg = "🔔 NSE Market Closed · "+data.exchange_status;
+      else                                   msg = "🔔 NSE Market Closed · Showing last data";
     }
 
     _mktStatusCache = {open, msg, status, exStatus};

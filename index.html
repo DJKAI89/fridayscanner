@@ -217,7 +217,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="tab active" onclick="switchTab('stocks')">📈 Stocks</button>
     <button class="tab" onclick="switchTab('options')">⚡ F&amp;O Options</button>
     <button class="tab" onclick="switchTab('portfolio')">💼 Portfolio</button>
-    <button class="tab" onclick="switchTab('alerts')">🔔 Alerts <span id="alerts-badge" style="display:none;background:#dc2626;color:#fff;border-radius:8px;padding:1px 5px;font-size:9px;margin-left:2px">0</span></button>
+    <button class="tab" onclick="switchTab('lookup')">🔍 Analyse</button>
     <button class="tab" onclick="switchTab('settings')">⚙ Settings</button>
   </div>
 
@@ -272,48 +272,72 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="disc" style="margin-top:12px">Live P&L from your Upstox positions and holdings. Refreshes every 30 seconds.</div>
   </div>
 
-  <!-- ALERTS -->
+  <!-- LOOKUP / ANALYSE -->
 
-  <div class="pane" id="pane-alerts">
+  <div class="pane" id="pane-lookup">
     <div style="padding:0 16px 16px">
-      <!-- Add Alert -->
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:10px">🔔 Set Price Alert</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <div>
-            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">SYMBOL</div>
-            <input id="al-sym" type="text" placeholder="e.g. RELIANCE" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px;font-weight:700;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
-          </div>
-          <div>
-            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">CONDITION</div>
-            <select id="al-cond" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
-              <option value="above">Price Crosses Above ▲</option>
-              <option value="below">Price Falls Below ▼</option>
-              <option value="conf">Confidence Reaches ≥</option>
-            </select>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <div>
-            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">VALUE</div>
-            <input id="al-val" type="number" placeholder="e.g. 2900" step="any" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
-          </div>
-          <div>
-            <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">NOTE (optional)</div>
-            <input id="al-note" type="text" placeholder="e.g. Breakout level" style="width:100%;border:1px solid #e2e8f0;border-radius:6px;padding:7px 10px;font-size:12px">
-          </div>
-        </div>
-        <button class="btn btn-g" style="width:100%" onclick="addAlert()">+ Add Alert</button>
-      </div>
-      <!-- Active Alerts -->
-      <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px">ACTIVE ALERTS <span id="al-count" style="color:#16a34a"></span></div>
-      <div id="alerts-list"></div>
-      <!-- Triggered Alerts -->
-      <div id="triggered-section" style="display:none;margin-top:12px">
-        <div style="font-size:11px;font-weight:700;color:#dc2626;margin-bottom:8px">🔥 TRIGGERED</div>
-        <div id="triggered-list"></div>
-      </div>
+
+```
+  <!-- Search bar -->
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
+    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">🔍 Analyse Any Stock</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:10px">Enter NSE symbol · Full stock analysis + F&O options if eligible</div>
+    <div style="display:flex;gap:8px">
+      <input id="lkp-sym" type="text" placeholder="e.g. RELIANCE, HDFCBANK, ITC..."
+        style="flex:1;border:1.5px solid #e2e8f0;border-radius:8px;padding:10px 13px;font-size:14px;font-weight:700;text-transform:uppercase;outline:none"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')lookupStock()">
+      <button class="btn btn-g" id="lkp-btn" onclick="lookupStock()" style="padding:10px 18px;font-size:13px">Analyse ▶</button>
     </div>
+    <!-- Quick picks -->
+    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
+      <span style="font-size:9px;color:#94a3b8;align-self:center">Quick:</span>
+      <button onclick="lkpQuick('RELIANCE')" class="lkp-q">RELIANCE</button>
+      <button onclick="lkpQuick('HDFCBANK')" class="lkp-q">HDFCBANK</button>
+      <button onclick="lkpQuick('INFY')" class="lkp-q">INFY</button>
+      <button onclick="lkpQuick('TCS')" class="lkp-q">TCS</button>
+      <button onclick="lkpQuick('SBIN')" class="lkp-q">SBIN</button>
+      <button onclick="lkpQuick('TATAMOTORS')" class="lkp-q">TATAMOTORS</button>
+      <button onclick="lkpQuick('BAJFINANCE')" class="lkp-q">BAJFINANCE</button>
+      <button onclick="lkpQuick('ITC')" class="lkp-q">ITC</button>
+    </div>
+  </div>
+
+  <!-- Loading state -->
+  <div id="lkp-loading" style="display:none;text-align:center;padding:30px">
+    <div class="spin" style="margin:0 auto 10px"></div>
+    <div id="lkp-progress" style="font-size:12px;color:#16a34a;font-weight:600">Fetching data...</div>
+  </div>
+
+  <!-- Error state -->
+  <div id="lkp-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px"></div>
+
+  <!-- Results -->
+  <div id="lkp-results" style="display:none">
+
+    <!-- ── SECTION 1: Stock Analysis ── -->
+    <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+      <span style="background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px">1</span>
+      📈 STOCK ANALYSIS
+    </div>
+    <div id="lkp-stock-card" class="cards-g"></div>
+
+    <!-- ── SECTION 2: F&O Options ── -->
+    <div id="lkp-fo-section" style="display:none;margin-top:16px">
+      <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span style="background:#7c3aed;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px">2</span>
+        ⚡ F&O OPTIONS ANALYSIS
+        <span id="lkp-fo-badge" style="font-size:9px;color:#7c3aed;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:4px;padding:2px 6px"></span>
+      </div>
+      <div id="lkp-fo-stats" class="stats-g" style="margin-bottom:8px"></div>
+      <div id="lkp-fo-cards" class="cards-g"></div>
+    </div>
+
+  </div>
+
+</div>
+```
+
   </div>
 
   <!-- SETTINGS -->
@@ -910,8 +934,6 @@ function boot(){
   if(launchBtn){launchBtn.disabled=false;launchBtn.textContent="▶ Launch Scanner";}
   loadSettingsUI();
   updateTokenInfo();
-  requestNotifPermission();
-  renderAlerts();
   startTimers();
   triggerScan();
   loadOptions(false);
@@ -2353,7 +2375,7 @@ function renderStockCards(picks,totalScanned){
   // picks already filtered by minStockConf in triggerScan
   const filteredPicks=picks; // all picks already pass conf>=minStockConf
   document.getElementById("stocks-title").textContent=`Professional Picks · ${filteredPicks.length} signals`;
-  document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
+  document.getElementById(cardContainerId).innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
     const rc=RC2[p.rec]||"watch";
     return`<div class="card ${rc}" style="animation-delay:${i*.04}s${p._fallback?';opacity:0.8;border-style:dashed':''}">
       ${p._fallback?`<div style="background:#fffbeb;border-bottom:1px solid #fde68a;padding:4px 10px;font-size:9px;color:#92400e;font-weight:700;border-radius:8px 8px 0 0;margin:-1px -1px 8px -1px">⚠ Below filter threshold — relax settings to include</div>`:''}
@@ -2415,7 +2437,7 @@ function renderStockCards(picks,totalScanned){
       </div>
       <div class="c-why ${rc}">${p.rec==="STRONG BUY"?"🔥":p.rec==="BUY"?"✅":p.rec==="MODERATE"?"⚡":"👀"} ${p.numInds}/7 indicators. R:R ${p.pot.rr}:1, Win ~${p.pot.wr}%, EV ${p.pot.ev>=0?"+":""}${p.pot.ev.toFixed(2)}%. ${p.rsi?"RSI "+p.rsi+".":""} ${p.macdBull?"MACD bullish.":""}</div>
     </div>`;
-  }).join(""):`<div class="empty-state">No picks pass filters · Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}<br>Scanned ${totalScanned||50} stocks · Try lowering thresholds in ⚙ Settings.</div>`;
+  }).join(""):`<div class="empty-state">No picks pass filters · Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}<br>Scanned ${totalScanned||50} stocks · Try lowering in ⚙ Settings.</div>`;
 }
 
 function renderStatsOptions(idxGroups){
@@ -2579,107 +2601,144 @@ function updateTicker(nLtp,nChg,bLtp,bChg,sent,sc,topSec,vix,pcr){
 }
 
 // ══════════════════════════════════════
-// ALERTS ENGINE
+// STOCK LOOKUP / ANALYSE ENGINE
 // ══════════════════════════════════════
-let alertsData = JSON.parse(localStorage.getItem("friday_alerts") || "[]");
-let triggeredAlerts = JSON.parse(localStorage.getItem("friday_triggered") || "[]");
+function lkpQuick(sym){ document.getElementById("lkp-sym").value=sym; lookupStock(); }
 
-function saveAlerts(){
-  localStorage.setItem("friday_alerts", JSON.stringify(alertsData));
-  localStorage.setItem("friday_triggered", JSON.stringify(triggeredAlerts));
-}
+async function lookupStock(){
+  const sym = (document.getElementById("lkp-sym").value||"").trim().toUpperCase();
+  if(!sym){ return; }
+  const btn = document.getElementById("lkp-btn");
+  btn.disabled=true; btn.textContent="⏳";
+  document.getElementById("lkp-loading").style.display="block";
+  document.getElementById("lkp-results").style.display="none";
+  document.getElementById("lkp-error").style.display="none";
+  document.getElementById("lkp-progress").textContent="Looking up "+sym+"...";
+  try{
+    // Find instrument in known lists, or construct key
+    let inst = NIFTY50.find(i=>i.s===sym) || FO_STOCK_LIST.find(i=>i.s===sym)
+             || {key:"NSE_EQ|"+sym, s:sym, n:sym, sec:"NSE", fo:false};
 
-function addAlert(){
-  const sym   = document.getElementById("al-sym").value.trim().toUpperCase();
-  const cond  = document.getElementById("al-cond").value;
-  const val   = +document.getElementById("al-val").value;
-  const note  = document.getElementById("al-note").value.trim();
-  if(!sym || !val){ alert("Enter symbol and value"); return; }
-  alertsData.push({ id: Date.now(), sym, cond, val, note, active: true, created: getIST() });
-  saveAlerts();
-  document.getElementById("al-sym").value="";
-  document.getElementById("al-val").value="";
-  document.getElementById("al-note").value="";
-  renderAlerts();
-  lg(`Alert set: ${sym} ${cond} ${val}`,"o");
-}
+    // Step 1: Quote
+    document.getElementById("lkp-progress").textContent="Fetching live quote...";
+    const qData = await fetchQ(inst.key);
+    const q = qData[inst.key] || qData["NSE_EQ:"+sym] || qData["NSE_EQ|"+sym]
+            || Object.values(qData)[0];
+    if(!q?.last_price) throw new Error(sym+" not found. Check the NSE symbol spelling.");
+    const ltp=q.last_price, high=q.ohlc?.high||ltp, low=q.ohlc?.low||ltp;
+    const vol=q.volume||0, chgPct=getChgPct(q), delivPct=getDeliveryPct(q);
 
-function deleteAlert(id){
-  alertsData = alertsData.filter(a=>a.id!==id);
-  saveAlerts(); renderAlerts();
-}
-
-function clearTriggered(){
-  triggeredAlerts = [];
-  saveAlerts(); renderAlerts();
-}
-
-function renderAlerts(){
-  const active = alertsData.filter(a=>a.active);
-  document.getElementById("al-count").textContent = `(${active.length})`;
-  const badge = document.getElementById("alerts-badge");
-  const trig = triggeredAlerts.slice(0,10);
-
-  // Active alerts list
-  document.getElementById("alerts-list").innerHTML = active.length ? active.map(a=>`
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <span style="font-weight:800;color:#0f172a">${a.sym}</span>
-        <span style="font-size:10px;color:#64748b;margin-left:6px">${a.cond==="above"?"▲ Above":a.cond==="above"?"▲ Above":a.cond==="below"?"▼ Below":"📊 Conf ≥"} ₹${a.val}</span>
-        ${a.note?`<div style="font-size:9px;color:#94a3b8">${a.note}</div>`:""}
-      </div>
-      <button onclick="deleteAlert(${a.id})" style="background:none;border:1px solid #fecaca;border-radius:5px;color:#dc2626;cursor:pointer;font-size:9px;padding:3px 7px">✕</button>
-    </div>`).join("") : '<div style="font-size:11px;color:#94a3b8;padding:8px">No active alerts. Set one above.</div>';
-
-  // Triggered section
-  const trigSec = document.getElementById("triggered-section");
-  const trigList = document.getElementById("triggered-list");
-  if(trig.length > 0){
-    trigSec.style.display="block";
-    if(badge){ badge.style.display="inline"; badge.textContent=trig.length; }
-    trigList.innerHTML = trig.map(t=>`
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 12px;margin-bottom:6px">
-        <div style="font-weight:800;color:#dc2626">🔥 ${t.sym}</div>
-        <div style="font-size:10px;color:#374151">${t.msg}</div>
-        <div style="font-size:9px;color:#94a3b8">${t.time}</div>
-      </div>`).join("") + `<button onclick="clearTriggered()" style="background:none;border:1px solid #e2e8f0;border-radius:5px;color:#64748b;cursor:pointer;font-size:9px;padding:4px 10px;margin-top:4px">Clear triggered</button>`;
-  } else {
-    trigSec.style.display="none";
-    if(badge) badge.style.display="none";
-  }
-}
-
-function checkAlerts(stocks){
-  if(!alertsData.length) return;
-  let triggered = false;
-  for(const a of alertsData){
-    if(!a.active) continue;
-    const stock = stocks.find(s=>s.s===a.sym);
-    if(!stock) continue;
-    let fire = false, msg = "";
-    if(a.cond==="above"  && stock.ltp >= a.val){ fire=true; msg=`${a.sym} hit ₹${fmt(stock.ltp)} (alert: ▲₹${a.val})`; }
-    if(a.cond==="below"  && stock.ltp <= a.val){ fire=true; msg=`${a.sym} fell to ₹${fmt(stock.ltp)} (alert: ▼₹${a.val})`; }
-    if(a.cond==="conf"   && stock.conf>= a.val){ fire=true; msg=`${a.sym} confidence reached ${stock.conf}% (alert: ≥${a.val}%)`; }
-    if(fire){
-      a.active = false; // one-shot alert
-      triggeredAlerts.unshift({ sym:a.sym, msg, time:getIST(), note:a.note });
-      if(triggeredAlerts.length > 20) triggeredAlerts.pop();
-      triggered = true;
-      lg(`🔔 ALERT TRIGGERED: ${msg}`,"o");
-      // Browser notification if permission granted
-      if(Notification.permission === "granted"){
-        new Notification("FRIDAY Alert 🔔", { body: msg, icon: "/favicon.ico" });
+    // Step 2: Candles
+    document.getElementById("lkp-progress").textContent="Loading 60-day candle history...";
+    const today=new Date().toISOString().split("T")[0];
+    const from60=new Date(Date.now()-65*864e5).toISOString().split("T")[0];
+    let tech={};
+    try{
+      const candles=await fetchCandles(inst.key,from60,today);
+      if(candles.length>=5){
+        const closes=candles.map(c=>+c[4]).reverse();
+        const rc=candles.slice(0,20);
+        const avgVol20=rc.reduce((s,x)=>s+(+x[5]||0),0)/Math.max(1,rc.length);
+        tech={rsi:calcRSI(closes),
+              macdBull:closes.length>=35?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
+              a50:isAboveMA(closes,50), a200:isAboveMA(closes,200),
+              atr:calcATR(candles), patterns:detectPatterns(candles),
+              avgVol20, sr:calcSR(candles), vwap:calcVWAP(candles)};
       }
+    }catch(e){lg("Lookup candle: "+e.message,"w");}
+
+    // Step 3: Market context
+    document.getElementById("lkp-progress").textContent="Fetching market context...";
+    let vix=15,vixSc=70,pcrSc=50,nBull=true;
+    try{
+      const mD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
+      const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
+      const vQ2=mD["NSE_INDEX|India VIX"]||mD["NSE_INDEX:India VIX"];
+      if(vQ2) vix=vQ2.last_price||15;
+      if(nQ2) nBull=nQ2.last_price>=(nQ2.ohlc?.open||nQ2.last_price);
+      vixSc=interpVIX(vix).sc;
+    }catch(e){}
+
+    // Step 4: Score
+    const patterns=tech.patterns||{}, sr=tech.sr||{};
+    const nearSupp=isNearSupport(ltp,sr,low);
+    const {target,sl}=autoSLTarget(ltp,high,low,tech.atr);
+    const preRR=(sl>0&&ltp>sl)?(target-ltp)/(ltp-sl):2;
+    const preRec=preRR>=2?"BUY":preRR>=1.5?"MODERATE":"WATCH";
+    const volOk=tech.avgVol20?(vol>=tech.avgVol20*1.2):null;
+    const numInds=countIndicatorsEx(tech.rsi,tech.macdBull,tech.a50,tech.a200,volOk,nearSupp,patterns,preRec);
+    let conf=calcConfidence(null,vixSc,pcrSc,nBull,50,vol,tech.avgVol20||vol,patterns,preRec,numInds);
+    if(delivPct!=null) conf=Math.min(100,conf+(delivPct>=60?5:delivPct<=25?-5:0));
+    const risk=calcRisk(ltp,sl,target,tech.atr,vix);
+    const pot=calcPotential(ltp,target,sl,numInds,preRec);
+    const rec=getRec(conf,pot.base,risk,pot.rr);
+    const stockObj={...inst,ltp,prev:q.ohlc?.close||ltp,high,low,vol,chgPct,
+      rsi:tech.rsi,macdBull:tech.macdBull,a50:tech.a50,a200:tech.a200,
+      atr:tech.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,
+      target,sl,secSc:50,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null};
+
+    // Render stock card
+    renderStockCards([stockObj],1,"lkp-stock-card");
+
+    // Step 5: F&O Options
+    const foSec=document.getElementById("lkp-fo-section");
+    const isFO=inst.fo===true||FO_STOCK_LIST.some(f=>f.s===sym)||NIFTY50.find(i=>i.s===sym)?.fo;
+    if(isFO){
+      foSec.style.display="block";
+      document.getElementById("lkp-fo-badge").textContent="F&O Eligible";
+      document.getElementById("lkp-fo-cards").innerHTML="";
+      document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#7c3aed;padding:8px">Loading options chain...</div>';
+      document.getElementById("lkp-progress").textContent="Loading F&O chain for "+sym+"...";
+      try{
+        const foInst=FO_STOCK_LIST.find(f=>f.s===sym)||NIFTY50.find(i=>i.s===sym)||inst;
+        const expiries=await fetchExpiries(foInst.key);
+        if(expiries.length){
+          const expiry=expiries[0];
+          const chain=await fetchOptions(foInst.key,expiry);
+          if(chain.length){
+            const step=ltp<200?5:ltp<500?10:ltp<2000?20:ltp<5000?50:100;
+            const atm=Math.round(ltp/step)*step;
+            const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
+            const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
+            const pcr2=ceOI>0?+(peOI/ceOI).toFixed(2):1;
+            const maxPain2=calcMaxPain(chain);
+            const oiWalls2=calcOIWalls(chain);
+            const picks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,nBull,vix);
+            const mp2dist=maxPain2&&ltp?((maxPain2-ltp)/ltp*100).toFixed(1):null;
+            document.getElementById("lkp-fo-stats").innerHTML=
+              `<div class="sc"><div class="sc-lbl">${sym} LTP</div><div class="sc-val ${clr(chgPct)}">₹${fmt(ltp,0)}</div><div class="sc-sub ${clr(chgPct)}">${chgPct>=0?"+":""}${chgPct.toFixed(2)}%</div></div>`+
+              `<div class="sc"><div class="sc-lbl">PCR</div><div class="sc-val ${pcr2>1?"up":pcr2>0.7?"am":"dn"}">${pcr2}</div><div class="sc-sub">${interpPCR(pcr2).txt}</div></div>`+
+              (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+ 
+              (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+ 
+              (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
+            document.getElementById("lkp-fo-badge").textContent="F&O · "+picks.length+" signals · Exp "+expiry;
+            document.getElementById("lkp-fo-cards").innerHTML=picks.length
+              ?picks.map((p,i)=>optCard(p,i)).join("")
+              :'<div style="font-size:11px;color:#64748b;padding:8px">No signals at current thresholds. Try lowering delta/OI in ⚙ Settings.</div>';
+          }
+        }
+      }catch(e){
+        document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#dc2626;padding:8px">Options error: '+e.message+'</div>';
+      }
+    } else {
+      foSec.style.display="none";
     }
+
+    document.getElementById("lkp-results").style.display="block";
+    document.getElementById("lkp-loading").style.display="none";
+    btn.disabled=false; btn.textContent="Analyse ▶";
+
+  }catch(e){
+    document.getElementById("lkp-error").textContent="⚠ "+e.message;
+    document.getElementById("lkp-error").style.display="block";
+    document.getElementById("lkp-loading").style.display="none";
+    btn.disabled=false; btn.textContent="Analyse ▶";
+    lg("Lookup: "+e.message,"e");
   }
-  if(triggered){ saveAlerts(); renderAlerts(); }
 }
 
-function requestNotifPermission(){
-  if("Notification" in window && Notification.permission === "default"){
-    Notification.requestPermission();
-  }
-}
+function checkAlerts(){ /* removed */ }
+function requestNotifPermission(){ /* removed */ }
 
 // ══════════════════════════════════════
 // CONFIDENCE PREVIEW (settings UI)

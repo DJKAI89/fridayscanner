@@ -382,7 +382,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency (min 15 recommended)</div></div><input class="set-inp" id="s-tick" type="number" value="15" min="10" max="60"></div>
     <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency (min 60 recommended)</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
     <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan (min 15 recommended)</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
-    <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-g" style="flex:1;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
+      <button class="btn" style="margin-top:4px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;padding:8px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer" onclick="resetSettings()">↺ Reset Defaults</button>
+    </div>
   </div>
 </div>
 ```
@@ -657,9 +660,20 @@ const FO_STOCK_LIST=[
 // STATE
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
-let CFG=JSON.parse(localStorage.getItem("friday_cfg")||"{}");
+const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
 const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50};
-CFG=Object.assign({},DEF,CFG);
+let CFG = DEF; // start with DEF
+try{
+  const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
+  // Only restore saved settings if they match current version
+  if(saved && saved._v === CFG_VERSION){
+    CFG = Object.assign({}, DEF, saved);
+  } else {
+    // Old settings — clear them and use DEF
+    localStorage.removeItem("friday_cfg");
+    CFG = {...DEF};
+  }
+}catch(e){ CFG = {...DEF}; }
 
 let scanning=false,optLoading=false,portLoading=false;
 let scanTimer,optTimer,tickTimer,portTimer,cdTimer,scanSecs;
@@ -817,9 +831,18 @@ function saveSettings(){
     scanOpts:     rv("s-scan-opts")    ||DEF.scanOpts,
     minOptConf:   rv("s-min-opt-conf") ||DEF.minOptConf,
   };
+  CFG._v = CFG_VERSION; // version stamp
   localStorage.setItem("friday_cfg",JSON.stringify(CFG));
   clearTimers(); startTimers();
   alert("✅ Settings saved! Timers restarted.");
+}
+function resetSettings(){
+  if(!confirm("Reset all settings to defaults?")) return;
+  localStorage.removeItem("friday_cfg");
+  CFG = {...DEF};
+  loadSettingsUI();
+  clearTimers(); startTimers();
+  alert("✅ Settings reset to defaults!");
 }
 
 // ══════════════════════════════════════
@@ -1432,197 +1455,217 @@ async function getNSEUniverse(){
 // STOCKS SCAN
 // ══════════════════════════════════════
 async function triggerScan(){
-  if(scanning)return;
-  scanning=true;
-  const btn=document.getElementById("scan-btn");
-  btn.disabled=true;btn.textContent="⏳";
+  if(scanning) return;
+  scanning = true;
+  const btn = document.getElementById("scan-btn");
+  btn.disabled = true; btn.textContent = "⏳";
   setStatus("scan","Scanning...");
-  document.getElementById("err-stocks").style.display="none";
-  // Only show spinner if this is the FIRST load (dash not yet visible)
-  const firstLoad=document.getElementById("dash-stocks").style.display==="none";
-  if(firstLoad) document.getElementById("loading-stocks").style.display="block";
-  else {
-    // Show a subtle inline refresh indicator instead of hiding everything
-    const upd=document.getElementById("stocks-upd-time");
-    if(upd) upd.textContent="🔄 Refreshing...";
-  }
+  document.getElementById("err-stocks").style.display = "none";
+  const firstLoad = document.getElementById("dash-stocks").style.display === "none";
+  if(firstLoad) document.getElementById("loading-stocks").style.display = "block";
   lg("=== Stock scan started ===");
 
   try{
-    // Indices + VIX
-    const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
-    const nQ=idxD["NSE_INDEX|Nifty 50"],bQ=idxD["NSE_INDEX|Nifty Bank"],vQ=idxD["NSE_INDEX|India VIX"];
-    const vix=vQ?.last_price||15;
-    const nLtp=nQ?.last_price||0,nChgPct=getChgPct(nQ);
-    const nBull=nLtp>=(nQ?.ohlc?.open||nLtp);
-    const {txt:vixTxt,sc:vixSc}=interpVIX(vix);
-    lg(`Nifty ${fmt(nLtp,0)} ${fmtC(nChgPct)} | VIX ${vix} (${vixTxt})`);
+    // ── STEP 1: Market context (Nifty + VIX) ──
+    updateScanProgress("Step 1/5: Fetching market data...");
+    const idxD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
+    const nQ = idxD["NSE_INDEX|Nifty 50"], bQ = idxD["NSE_INDEX|Nifty Bank"], vQ = idxD["NSE_INDEX|India VIX"];
+    const vix   = vQ?.last_price || 15;
+    const nLtp  = nQ?.last_price || 0, nChgPct = getChgPct(nQ);
+    const nBull = nLtp >= (nQ?.ohlc?.open || nLtp);
+    const {txt:vixTxt, sc:vixSc} = interpVIX(vix);
+    lg(`✅ Nifty ₹${fmt(nLtp,0)} | VIX ${vix.toFixed(1)} (${vixTxt}) | Market: ${nBull?"BULLISH":"BEARISH"}`,"o");
 
-    // PCR
-    let pcr=1,pcrTxt="Neutral",pcrSc=50;
+    // ── STEP 2: PCR ──
+    updateScanProgress("Step 2/5: Fetching PCR...");
+    let pcr = 1, pcrTxt = "Neutral", pcrSc = 50;
     try{
-      const exp=await fetchExpiries("NSE_INDEX|Nifty 50");
+      const exp = await fetchExpiries("NSE_INDEX|Nifty 50");
       if(exp.length){
-        const ch=await fetchOptions("NSE_INDEX|Nifty 50",exp[0]);
-        const ceOI=ch.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
-        const peOI=ch.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
-        pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
-        const pi=interpPCR(pcr);pcrTxt=pi.txt;pcrSc=pi.sc;
-        lg(`PCR: ${pcr} (${pcrTxt})`);
+        const ch = await fetchOptions("NSE_INDEX|Nifty 50", exp[0]);
+        const ceOI = ch.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0), 0);
+        const peOI = ch.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0), 0);
+        pcr = ceOI > 0 ? +(peOI/ceOI).toFixed(2) : 1;
+        const pi = interpPCR(pcr); pcrTxt = pi.txt; pcrSc = pi.sc;
+        lg(`✅ PCR: ${pcr} (${pcrTxt})`,"o");
       }
-    }catch(e){lg("PCR skip: "+e.message,"w");}
+    }catch(e){ lg("PCR skipped: "+e.message,"w"); }
 
-    // ── Step 1: Use NIFTY50 + top F&O list as scan universe (reliable keys) ──
-    // Also try NSE universe from cache if available
-    let scanUniverse = NIFTY50.map(i=>({key:i.key,s:i.s,n:i.n,sec:i.sec}));
+    // ── STEP 3: Quotes for Nifty50 stocks ──
+    updateScanProgress("Step 3/5: Fetching stock quotes (50 stocks)...");
+    // Always use hardcoded NIFTY50 — keys are verified, no CSV complexity
+    const allQ = {};
+    const batch1 = NIFTY50.slice(0,25).map(i=>i.key).join(",");
+    const batch2 = NIFTY50.slice(25).map(i=>i.key).join(",");
     try{
-      const cached=sessionStorage.getItem("nse_universe");
-      const cachedDate=sessionStorage.getItem("nse_universe_date");
-      if(cached && cachedDate===new Date().toDateString()){
-        const parsed=JSON.parse(cached);
-        if(parsed.length>100){ scanUniverse=parsed; lg(`NSE universe: ${parsed.length} stocks (cache)`,"o"); }
+      const d1 = await fetchQ(batch1);
+      Object.assign(allQ, d1);
+      lg(`Batch 1: ${Object.keys(d1).length} quotes`);
+    }catch(e){ lg("Batch 1 failed: "+e.message,"e"); }
+    try{
+      const d2 = await fetchQ(batch2);
+      Object.assign(allQ, d2);
+      lg(`Batch 2: ${Object.keys(d2).length} quotes`);
+    }catch(e){ lg("Batch 2 failed: "+e.message,"e"); }
+
+    lg(`✅ Quotes received: ${Object.keys(allQ).length}/50`,"o");
+
+    // Log a sample key to diagnose format issues
+    const sampleK = Object.keys(allQ)[0] || "NONE";
+    const sampleStock = NIFTY50[0].key;
+    lg(`Key check — allQ sample: "${sampleK}" | NIFTY50 sample: "${sampleStock}"`);
+    if(sampleK !== "NONE" && !allQ[sampleStock]){
+      lg("⚠ Key mismatch! API returns different format than NIFTY50.key — trying fix...","w");
+      // Try both colon and pipe formats
+      const fixed = {};
+      for(const [k,v] of Object.entries(allQ)){
+        fixed[k] = v;
+        fixed[k.replace(/:/g,"|")] = v;
+        fixed[k.replace(/\|/g,":")] = v;
       }
-    }catch(e){}
-    if(scanUniverse.length<=50) lg(`Scan universe: ${scanUniverse.length} stocks (Nifty50)`);
-
-    // ── Step 2: Fetch quotes for all stocks (2 batches of 25 for Nifty50, more for full universe) ──
-    // Upstox response keys use ":" — we normalize to "|" to match inst.key
-    lg("Fetching quotes...");
-    let allQ={};
-    // Use at most 200 stocks for quote fetch (rate limit safe)
-    const universeSlice = scanUniverse.slice(0,200);
-    for(let bi=0;bi<universeSlice.length;bi+=25){
-      const batch=universeSlice.slice(bi,bi+25).map(i=>i.key).join(",");
-      try{
-        const bd=await fetchQ(batch); // fetchQ already normalizes : → |
-        Object.assign(allQ,bd);
-        updateScanProgress(`Quotes ${Math.min(bi+25,universeSlice.length)}/${universeSlice.length}`);
-      }catch(e){lg("Q batch: "+e.message,"w");}
+      Object.assign(allQ, fixed);
     }
-    lg(`Quotes: ${Object.keys(allQ).length} received`,"o");
 
-    // ── Step 3: Rank by volume, pick top 50 ──
-    const volRanked = universeSlice
-      .filter(inst => {
-        const q=allQ[inst.key];
-        return q?.last_price>5 && (q?.volume||0)>0;
-      })
-      .map(inst=>({inst, vol:allQ[inst.key]?.volume||0}))
-      .sort((a,b)=>b.vol-a.vol)
-      .slice(0,50);
-    lg(`Volume ranked: ${volRanked.length} stocks`,"o");
+    // Map stocks that have quotes
+    const quoted = NIFTY50.filter(i => allQ[i.key]?.last_price > 0);
+    lg(`Stocks with live quotes: ${quoted.length}/50`,"o");
+    if(quoted.length === 0){
+      throw new Error("0 stocks have live quotes — check API connection and token. See log for key format.");
+    }
 
-    // ── Step 4: Candles for top 20 stocks — throttled, with progress ──
-    const today=new Date().toISOString().split("T")[0];
-    const from60=new Date(Date.now()-65*864e5).toISOString().split("T")[0];
-    const tech={};
-    const candleStocks=volRanked.slice(0,20);
-    for(let ci=0;ci<candleStocks.length;ci++){
-      const {inst}=candleStocks[ci];
-      updateScanProgress(`Candles ${ci+1}/${candleStocks.length}: ${inst.s}`);
+    // ── STEP 4: Candles for top 20 by volume ──
+    updateScanProgress("Step 4/5: Fetching candle history...");
+    const today   = new Date().toISOString().split("T")[0];
+    const from60  = new Date(Date.now() - 65*864e5).toISOString().split("T")[0];
+    const byVol   = [...quoted].sort((a,b) => (allQ[b.key]?.volume||0) - (allQ[a.key]?.volume||0));
+    const tech    = {};
+    let candleOK  = 0;
+    for(let ci = 0; ci < Math.min(20, byVol.length); ci++){
+      const inst = byVol[ci];
+      updateScanProgress(`Step 4/5: Candles ${ci+1}/20 — ${inst.s}`);
       try{
-        const candles=await fetchCandles(inst.key,from60,today);
-        if(candles.length>=5){
-          const closes=candles.map(c=>+c[4]).reverse();
-          const rc=candles.slice(0,20);
-          const avgVol20=rc.reduce((s,x)=>s+(+x[5]||0),0)/Math.max(1,rc.length);
-          tech[inst.s]={
-            rsi:calcRSI(closes),
-            macdBull:closes.length>=35?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
-            a50:isAboveMA(closes,50),a200:isAboveMA(closes,200),
-            atr:calcATR(candles),patterns:detectPatterns(candles),
+        const candles = await fetchCandles(inst.key, from60, today);
+        if(candles.length >= 5){
+          const closes = candles.map(c=>+c[4]).reverse();
+          const rc     = candles.slice(0,20);
+          const avgVol20 = rc.reduce((s,x)=>s+(+x[5]||0),0) / Math.max(1,rc.length);
+          tech[inst.s] = {
+            rsi:      calcRSI(closes),
+            macdBull: closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null,
+            a50:      isAboveMA(closes,50),
+            a200:     isAboveMA(closes,200),
+            atr:      calcATR(candles),
+            patterns: detectPatterns(candles),
             avgVol20
           };
+          candleOK++;
         }
-      }catch(e){lg("Candle "+inst.s+": "+e.message,"w");}
+      }catch(e){ lg(`Candle ${inst.s}: ${e.message}`,"w"); }
     }
-    lg(`Technical data: ${Object.keys(tech).length}/${candleStocks.length} stocks`,"o");
+    lg(`✅ Candle data: ${candleOK}/${Math.min(20,byVol.length)} stocks`,"o");
 
-    // Pre-compute sector strength using ALL quotes (C# GetSectorForSymbol mapping)
-    const secMap={};
-    for(const {inst} of volRanked){
-      const q=allQ[inst.key];
-      if(!q?.last_price) continue;
-      const sec=(inst.sec&&inst.sec!=="NSE")?inst.sec:getSector(inst.s);
-      const chg=getChgPct(q);
-      if(!secMap[sec]) secMap[sec]={g:0,c:0};
-      if(chg>0) secMap[sec].g++;
+    // ── STEP 5: Analysis ──
+    updateScanProgress("Step 5/5: Calculating scores...");
+
+    // Pre-compute sector map
+    const secMap = {};
+    for(const inst of quoted){
+      const sec = getSector(inst.s);
+      const chg = getChgPct(allQ[inst.key]);
+      if(!secMap[sec]) secMap[sec] = {g:0,c:0};
+      if(chg > 0) secMap[sec].g++;
       secMap[sec].c++;
     }
-    // Build stocks analysis
-    const stocks=[];
-    for(const {inst} of volRanked){
-      const q=allQ[inst.key];
-      const k=inst.key;
-      if(!q||!q.last_price)continue;
-      const ltp=q.last_price;
-      const high=q.ohlc?.high||ltp,low=q.ohlc?.low||ltp;
-      const vol=q.volume||0,chgPct=getChgPct(q);
-      lastPrices[inst.s]=ltp;
-      const t=tech[inst.s]||{};
+
+    // Score each stock
+    const stocks = [];
+    for(const inst of quoted){
+      const q    = allQ[inst.key];
+      const ltp  = q.last_price;
+      const high = q.ohlc?.high || ltp;
+      const low  = q.ohlc?.low  || ltp;
+      const vol  = q.volume || 0;
+      const chgPct = getChgPct(q);
+      lastPrices[inst.s] = ltp;
+
+      const t = tech[inst.s] || {};
       const nearSupp = ((ltp-low)/ltp*100) < 2;
-      const avgVol   = t.avgVol20 || vol;
       const patterns = t.patterns || {};
-      // Sector from C# GetSectorForSymbol
-      const secName  = (inst.sec && inst.sec!=="NSE") ? inst.sec : getSector(inst.s);
-      const secSc    = secMap[secName] ? Math.round(secMap[secName].g/secMap[secName].c*100) : 50;
-      // SL / Target from ATR
+      const sec = getSector(inst.s);
+      const secSc = secMap[sec] ? Math.round(secMap[sec].g/secMap[sec].c*100) : 50;
+
       const {target, sl} = autoSLTarget(ltp, high, low, t.atr);
-      // Preliminary R:R to seed direction-aware indicator count
-      const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 1;
+      const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 2;
       const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
-      // When no candle data, avgVol is same as vol → volume indicator would always be false.
-      // Instead: if no avgVol20 from candles, mark vol indicator as null (unknown).
-      const hasAvgVol = !!t.avgVol20;
-      const volOk = hasAvgVol ? (vol >= t.avgVol20 * 1.2) : null; // null = unknown
-      // Count confirming indicators (C# CountConfirmingIndicators — direction-aware)
+
+      // Volume indicator: only valid when we have 20-day avg from candles
+      const volOk = t.avgVol20 ? (vol >= t.avgVol20*1.2) : null;
       const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec);
-      // Full confidence calculation (C# CalculateConfidence with numInds as signal input)
-      const conf   = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, avgVol, patterns, preRec, numInds);
-      // Risk, Potential, final Rec
-      const risk   = calcRisk(ltp, sl, target, t.atr, vix);
-      const pot    = calcPotential(ltp, target, sl, numInds, preRec);
-      const rec    = getRec(conf, pot.base, risk, pot.rr);
-      const passes = (conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr);
-      const prev=q.ohlc?.close||ltp;
-      stocks.push({...inst,ltp,prev,high,low,vol,chgPct,rsi:t.rsi,macdBull:t.macdBull,a50:t.a50,a200:t.a200,
-        atr:t.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,target,sl,secSc,passes});
+      const conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
+      const risk  = calcRisk(ltp, sl, target, t.atr, vix);
+      const pot   = calcPotential(ltp, target, sl, numInds, preRec);
+      const rec   = getRec(conf, pot.base, risk, pot.rr);
+      const passes = conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr;
+
+      stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
+        rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
+        atr:t.atr, patterns, numInds, nearSupp, conf, risk, pot, rec,
+        target, sl, secSc, passes});
     }
 
-    const picks=stocks.filter(s=>s.passes).sort((a,b)=>b.pot.ev-a.pot.ev).slice(0,12);
-    const topSec=Object.entries(secMap).sort((a,b)=>(b[1].g/b[1].c)-(a[1].g/a[1].c))[0]?.[0]||"Mixed";
-    const sent=nChgPct>0.5?"BULLISH":nChgPct<-0.5?"BEARISH":"NEUTRAL";
-    const sentSc=Math.round(Math.min(Math.max((nChgPct+3)/6*10,1),10));
+    // Log score distribution so user can see why stocks pass/fail
+    const confBuckets = {0:0,30:0,40:0,50:0,60:0,70:0,80:0};
+    stocks.forEach(s => {
+      const b = Math.floor(s.conf/10)*10;
+      const key = [0,30,40,50,60,70,80].reverse().find(k=>b>=k) || 0;
+      confBuckets[key]++;
+    });
+    lg(`Score distribution: ${JSON.stringify(confBuckets)} (threshold: ${CFG.minStockConf}%)`);
+    lg(`Passes check: pot>=${CFG.pot}%=${stocks.filter(s=>s.pot.base>=CFG.pot).length}, risk<${CFG.risk}%=${stocks.filter(s=>s.risk<CFG.risk).length}, rr>=${CFG.rr}=${stocks.filter(s=>s.pot.rr>=CFG.rr).length}, conf>=${CFG.minStockConf}%=${stocks.filter(s=>s.conf>=CFG.minStockConf).length}`);
 
-    lastStockScan=getIST();
-    document.getElementById("stocks-upd-time").textContent="Last scan: "+lastStockScan;
-    const stEl=document.getElementById("scan-time"); if(stEl) stEl.textContent=lastStockScan;
-    document.getElementById("mkt-closed").style.display=isOpen()?"none":"block";
+    let picks = stocks.filter(s=>s.passes).sort((a,b)=>b.pot.ev-a.pot.ev).slice(0,12);
+    // If no picks pass all filters, show best available with a warning
+    if(picks.length === 0 && stocks.length > 0){
+      const best = [...stocks].sort((a,b)=>b.conf-a.conf).slice(0,5);
+      picks = best.map(s=>({...s, passes:false, _fallback:true}));
+      lg(`⚠ 0 stocks passed all filters → showing top 5 by confidence. Relax thresholds in ⚙ Settings.`,"w");
+    }
+    const topSec = Object.entries(secMap).sort((a,b)=>(b[1].g/b[1].c)-(a[1].g/a[1].c))[0]?.[0] || "Mixed";
+    const sent   = nChgPct>0.5 ? "BULLISH" : nChgPct<-0.5 ? "BEARISH" : "NEUTRAL";
+    const sentSc = Math.round(Math.min(Math.max((nChgPct+3)/6*10, 1), 10));
 
-    const bLtp=bQ?.last_price||0;
-    const nPts=nQ?.net_change!=null?nQ.net_change:(nQ?.ohlc?.open?(nLtp-nQ.ohlc.open):0);
-    const bPts=bQ?.net_change!=null?bQ.net_change:(bQ?.ohlc?.open?(bLtp-bQ.ohlc.open):0);
-    renderStatsStocks({ltp:nLtp,chgPct:nChgPct,pts:nPts},{ltp:bLtp,chgPct:getChgPct(bQ),pts:bPts},
-      vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,picks.length);
-    renderStockCards(picks,volRanked.length);
-    updateTicker(nLtp,nChgPct,bQ?.last_price||0,getChgPct(bQ),sent,sentSc,topSec,vix,pcr);
-    document.getElementById("loading-stocks").style.display="none";
-    document.getElementById("dash-stocks").style.display="block";
-    setStatus("live","Live"); scanSecs=CFG.scanStocks*60;
-    lg(`✅ ${picks.length} picks from ${volRanked.length} stocks | ${sent} | VIX ${vix} (${vixTxt}) | PCR ${pcr} (${pcrTxt})`,"o");
-    // Also trigger options re-scan after stocks finish
-    setTimeout(()=>loadOptions(true), 1000);
+    lastStockScan = getIST();
+    document.getElementById("stocks-upd-time").textContent = "Last scan: "+lastStockScan;
+    document.getElementById("mkt-closed").style.display = isOpen()?"none":"block";
+
+    const bLtp = bQ?.last_price || 0;
+    const nPts = nQ?.net_change!=null ? nQ.net_change : (nQ?.ohlc?.open?(nLtp-nQ.ohlc.open):0);
+    const bPts = bQ?.net_change!=null ? bQ.net_change : (bQ?.ohlc?.open?(bLtp-bQ.ohlc.open):0);
+    renderStatsStocks({ltp:nLtp, chgPct:nChgPct, pts:nPts}, {ltp:bLtp, chgPct:getChgPct(bQ), pts:bPts},
+      vix, vixTxt, pcr, pcrTxt, sent, sentSc, topSec, picks.length);
+    renderStockCards(picks, quoted.length);
+    updateTicker(nLtp, nChgPct, bLtp, getChgPct(bQ), sent, sentSc, topSec, vix, pcr);
+
+    document.getElementById("loading-stocks").style.display = "none";
+    document.getElementById("dash-stocks").style.display = "block";
+    setStatus("live","Live");
+    scanSecs = CFG.scanStocks*60;
+    lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${pcr}`,"o");
+    setTimeout(()=>loadOptions(true), 2000);
 
   }catch(e){
-    lg("❌ "+e.message,"e");
-    document.getElementById("loading-stocks").style.display="none";
-    document.getElementById("err-stocks-msg").textContent=e.message;
-    document.getElementById("err-stocks").style.display="block";
-    if(e.message!=="TOKEN_EXPIRED"){
-      setStatus("err","Error");
-      document.getElementById("log-drawer").style.display="block";
-    }
-  }finally{scanning=false;btn.disabled=false;btn.textContent="▶ Scan";}
+    lg("❌ Stock scan error: "+e.message,"e");
+    document.getElementById("loading-stocks").style.display = "none";
+    document.getElementById("dash-stocks").style.display = "block"; // show whatever we have
+    document.getElementById("err-stocks-msg").textContent = e.message;
+    document.getElementById("err-stocks").style.display = "block";
+    document.getElementById("log-drawer").style.display = "block"; // always show log on error
+    setStatus("err","Error");
+  }finally{
+    scanning = false;
+    btn.disabled = false;
+    btn.textContent = "▶ Scan";
+  }
 }
 
 // ── Progress helpers ──
@@ -1978,7 +2021,8 @@ function renderStockCards(picks,totalScanned){
   document.getElementById("stocks-title").textContent=`Professional Picks · ${filteredPicks.length} signals`;
   document.getElementById("cards-stocks").innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
     const rc=RC2[p.rec]||"watch";
-    return`<div class="card ${rc}" style="animation-delay:${i*.04}s">
+    return`<div class="card ${rc}" style="animation-delay:${i*.04}s${p._fallback?';opacity:0.8;border-style:dashed':''}">
+      ${p._fallback?`<div style="background:#fffbeb;border-bottom:1px solid #fde68a;padding:4px 10px;font-size:9px;color:#92400e;font-weight:700;border-radius:8px 8px 0 0;margin:-1px -1px 8px -1px">⚠ Below filter threshold — relax settings to include</div>`:''}
       <div class="c-rank">${i+1}</div>
       <span class="c-rec ${rc}">${p.rec}</span>
       <div class="c-head"><div class="c-sym">${p.s} <span style="font-size:9px;color:#94a3b8;font-weight:400">${p.sec}</span></div><div class="c-name">${p.n}</div></div>
@@ -2019,10 +2063,19 @@ function renderStockCards(picks,totalScanned){
         <div class="cbox neutral"><div class="cb-l">INDICATORS</div><div class="cb-v ${p.numInds>=5?"up":p.numInds>=3?"am":"dn"}">${p.numInds}/7</div><div class="cb-s" style="color:#64748b">confirming</div></div>
         <div class="cbox neutral"><div class="cb-l">DAY HIGH/LOW</div><div class="cb-v" style="color:#374151;font-size:11px">₹${fmt(p.high,0)} / ${fmt(p.low,0)}</div></div>
       </div>
-      <!-- 7 Indicators (reconstructed from stored fields) -->
+      <!-- 7 Indicators ──────────────────────────── -->
       <div class="c-inds">${(()=>{
-        const di=[p.rsi!==null&&p.rsi>=CFG.rsiOS&&p.rsi<=CFG.rsiOB, p.macdBull===true, p.a50===true, p.a200===true, (p.vol||0)>0, ((p.ltp-p.low)/p.ltp*100)<2, !!(p.patterns?.bullishEngulfing||p.patterns?.hammer||p.patterns?.morningStar)];
-        return indLbls.map((l,j)=>`<span class="ind ${di[j]?'ok':'na'}">${l}</span>`).join("");
+        const isBuy=p.rec==="BUY"||p.rec==="STRONG BUY"||p.rec==="MODERATE";
+        const di=[
+          p.rsi!=null&&p.rsi>=CFG.rsiOS&&p.rsi<=CFG.rsiOB,
+          p.macdBull===true && isBuy,
+          p.a50===true && isBuy,
+          p.a200===true && isBuy,
+          p.numInds>=5,  // proxy for vol spike when we have it
+          p.nearSupp && isBuy,
+          !!(p.patterns?.bullishEngulfing||p.patterns?.hammer||p.patterns?.morningStar)
+        ];
+        return indLbls.map((l,j)=>`<span class="ind ${di[j]?'ok':di[j]===false&&p.rsi!=null?'no':'na'}">${l}</span>`).join("");
       })()}
         ${Object.entries(p.patterns).filter(([,v])=>v).map(([k])=>`<span class="ind ok">📊${k.replace(/([A-Z])/g,' $1').trim()}</span>`).join("")}
       </div>

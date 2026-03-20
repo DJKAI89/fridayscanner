@@ -327,7 +327,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
     <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
     <div id="dash-stocks" style="display:none">
-      <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed · Showing last data · Hours: 9:15 AM – 3:30 PM IST</div>
+      <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
       <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span><span style="margin-left:4px;color:#16a34a;font-weight:600">● Auto-refresh every 5 min</span></div>
       <div class="stats-g" id="stats-stocks"></div>
       <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Conf≥65% · Pot≥8% · Risk&lt;50% · R:R≥1.5 · Sorted by Expected Value</span></div>
@@ -339,7 +339,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <!-- OPTIONS -->
 
   <div class="pane" id="pane-options">
-    <div class="mkt-closed" id="mkt-closed-opts" style="display:none">🔔 NSE Market Closed · Showing last data · Hours: 9:15 AM – 3:30 PM IST</div>
+    <div class="mkt-closed" id="mkt-closed-opts" style="display:none">🔔 NSE Market Closed</div>
     <div class="err-b" id="err-options"><h4>⚠ Options Error</h4><p id="err-options-msg"></p><button onclick="loadOptions(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
     <div id="loading-options" class="spin-wrap" style="display:none"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning F&O options...</p><p id="opt-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Nifty · BankNifty · Sensex · Top F&O Stocks · Entry · SL · Target</p></div>
     <div id="dash-options" style="display:none">
@@ -1129,14 +1129,41 @@ function resetSettings(){
 }
 
 // ══════════════════════════════════════
-// TABS
+// SLIDE MENU + NAVIGATION
 // ══════════════════════════════════════
+const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',settings:'⚙ Settings'};
+
+function openMenu(){
+  document.getElementById("nav-drawer").classList.add("open");
+  document.getElementById("nav-overlay").classList.add("visible");
+  document.getElementById("menu-btn").classList.add("open");
+}
+function closeMenu(){
+  document.getElementById("nav-drawer").classList.remove("open");
+  document.getElementById("nav-overlay").classList.remove("visible");
+  document.getElementById("menu-btn").classList.remove("open");
+}
+function toggleMenu(){
+  document.getElementById("nav-drawer").classList.contains("open")?closeMenu():openMenu();
+}
+
 function switchTab(t){
   activeTab=t;
-  document.querySelectorAll(".tab").forEach((el,i)=>el.classList.toggle("active",["stocks","options","portfolio","settings"][i]===t));
-  document.querySelectorAll(".pane").forEach(el=>el.classList.remove("active"));
-  document.getElementById("pane-"+t).classList.add("active");
+  closeMenu();
+  // Panes
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+  const pane=document.getElementById("pane-"+t);
+  if(pane) pane.classList.add('active');
+  // Nav highlight
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  const navEl=document.getElementById("nav-"+t);
+  if(navEl) navEl.classList.add('active');
+  // Header label
+  const lbl=document.getElementById("active-page-lbl");
+  if(lbl) lbl.textContent=PAGE_LABELS[t]||t;
   updateRefreshInfo();
+  // Load options on first visit
+  if(t==="options"&&document.getElementById("dash-options").style.display==="none"&&!optLoading) loadOptions(false);
 }
 
 // ══════════════════════════════════════
@@ -3014,7 +3041,7 @@ async function refreshMarketStatus(){
       if(exStatus.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
       else if(status.includes("pre_open"))   msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
       else if(status.includes("end_of_day")) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
-      else                                   msg = "🔔 NSE Market Closed · Showing last data";
+      else                                   msg = "🔔 NSE Market Closed";
     }
 
     _mktStatusCache = {open, msg, status, exStatus};
@@ -3043,7 +3070,7 @@ function getMarketStatus(){
   if(!open){
     if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed`;
     else if(h<9||(h===9&&m<15)) msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
-    else                         msg = "🔔 NSE Market Closed· Hours: 9:15 AM – 3:30 PM IST";
+    else                         msg = "🔔 NSE Market Closed";
   }
   return {open, msg};
 }

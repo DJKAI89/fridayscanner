@@ -219,7 +219,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="hdr-r" id="hdr-ctrl" style="display:none">
     <div class="refresh-info" id="refresh-info">Stocks: —<br>Options: —<br>Portfolio: —</div>
     <div style="font-size:9px;color:#94a3b8;text-align:right;display:none" id="scan-time"></div>
-    <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l">NEXT SCAN</div></div>
+    <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l" id="cdown-lbl">NEXT SCAN</div></div>
     <div style="display:flex;align-items:center;gap:5px"><div class="dot live" id="sdot"></div><span style="font-size:10px;color:#64748b" id="stxt">Live</span></div>
     <button class="btn btn-g" id="scan-btn" onclick="triggerScan()">▶ Scan</button>
     <button class="btn btn-s" onclick="toggleLog()">🔍</button>
@@ -978,9 +978,25 @@ function boot(){
   loadSettingsUI();
   updateTokenInfo();
   startTimers();
-  triggerScan();
-  loadOptions(false);
-  loadPortfolio();
+  updateMarketClosedBanner();
+  // Fetch real market status from Upstox API, then decide whether to scan
+  refreshMarketStatus().then(()=>{
+    updateMarketClosedBanner();
+  });
+  // isOpen() uses local fallback until API responds
+  if(isOpen()){
+    triggerScan();
+    setTimeout(()=>loadOptions(false), 3000);
+    setTimeout(()=>loadPortfolio(), 1000);
+  } else {
+    // Market closed — show banner, skip API calls
+    const status = getMarketStatus();
+    lg("Market closed: "+status.msg,"w");
+    setStatus("live","Closed");
+    document.getElementById("loading-stocks").style.display="none";
+    document.getElementById("dash-stocks").style.display="block";
+    document.getElementById("mkt-closed").style.display="block";
+  }
 }
 window.onload=()=>{
   // Always start hidden — show the right screen
@@ -1073,24 +1089,67 @@ function switchTab(t){
 // ══════════════════════════════════════
 function clearTimers(){clearInterval(scanTimer);clearInterval(optTimer);clearInterval(tickTimer);clearInterval(portTimer);clearInterval(cdTimer);}
 function startTimers(){
-  scanSecs=CFG.scanStocks*60;
-  // Stocks scan
-  scanTimer=setInterval(()=>triggerScan(),CFG.scanStocks*60*1000);
-  // Options scan
-  optTimer=setInterval(()=>loadOptions(true),CFG.scanOpts*60*1000);
-  // Price tick
-  tickTimer=setInterval(tickPrices,CFG.tick*1000);
-  // Portfolio
-  portTimer=setInterval(loadPortfolio,CFG.portRef*1000);
-  // Countdown display
-  cdTimer=setInterval(()=>{
-    scanSecs=Math.max(0,scanSecs-1);
-    if(scanSecs<=0) scanSecs=CFG.scanStocks*60;
-    const m=Math.floor(scanSecs/60),s=String(scanSecs%60).padStart(2,"0");
-    const el=document.getElementById("cdown");
-    el.textContent=m+":"+s; el.className="cdown-v"+(scanSecs<30?" urg":"");
+  scanSecs = CFG.scanStocks*60;
+
+  // ── Stocks scan — only when market is open ──
+  scanTimer = setInterval(()=>{
+    if(isOpen()) triggerScan();
+    else updateMarketClosedBanner();
+  }, CFG.scanStocks*60*1000);
+
+  // ── Options scan — only when market is open ──
+  optTimer = setInterval(()=>{
+    if(isOpen()) loadOptions(true);
+  }, CFG.scanOpts*60*1000);
+
+  // ── Price tick — only when market is open ──
+  tickTimer = setInterval(()=>{
+    if(isOpen()) tickPrices();
+  }, CFG.tick*1000);
+
+  // ── Portfolio — only when market is open ──
+  portTimer = setInterval(()=>{
+    if(isOpen()) loadPortfolio();
+  }, CFG.portRef*1000);
+
+  // ── Countdown + market status check (runs every second always) ──
+  cdTimer = setInterval(()=>{
+    const mktOpen = isOpen();
+    updateMarketClosedBanner();
+
+    if(mktOpen){
+      scanSecs = Math.max(0, scanSecs-1);
+      if(scanSecs <= 0) scanSecs = CFG.scanStocks*60;
+    } else {
+      // Show "CLOSED" in countdown when market is shut
+      scanSecs = CFG.scanStocks*60; // reset so it shows full time when market reopens
+    }
+
+    const el = document.getElementById("cdown");
+    if(mktOpen){
+      const mins = Math.floor(scanSecs/60), secs = String(scanSecs%60).padStart(2,"0");
+      el.textContent = mins+":"+secs;
+      el.className = "cdown-v"+(scanSecs<30?" urg":"");
+      el.style.color = "";
+    } else {
+      el.textContent = "OFF";
+      el.className = "cdown-v";
+      el.style.color = "#dc2626";
+    }
     updateRefreshInfo();
-  },1000);
+  }, 1000);
+}
+
+function updateMarketClosedBanner(){
+  const status = getMarketStatus();
+  const el = document.getElementById("mkt-closed");
+  if(!el) return;
+  if(!status.open){
+    el.textContent = status.msg;
+    el.style.display = "block";
+  } else {
+    el.style.display = "none";
+  }
 }
 function updateRefreshInfo(){
   document.getElementById("refresh-info").innerHTML=
@@ -2820,7 +2879,101 @@ function fmtVol(n){if(!n)return"—";if(n>=1e7)return(n/1e7).toFixed(2)+"Cr";if(
 function clr(n){return n>=0?"up":"dn";}
 function getIST(){return new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+" IST";}
 function ist(){return getIST();}
-function isOpen(){const n=new Date(),h=+n.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}),m=+n.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});return(h>9||(h===9&&m>=15))&&(h<15||(h===15&&m<=30));}
+// ── Market Status — driven by Upstox API ─────────────────────────────────
+// Cached so we don't call the API every second
+let _mktStatusCache  = null;   // {open, msg, status, exchange_status}
+let _mktStatusTs     = 0;      // timestamp of last fetch
+const MKT_CACHE_MS   = 60000;  // refresh every 60 seconds
+
+// Synchronous isOpen() for timers — uses cache, refreshes asynchronously
+function isOpen(){
+  // If cache is fresh, use it
+  if(_mktStatusCache && Date.now()-_mktStatusTs < MKT_CACHE_MS){
+    return _mktStatusCache.open;
+  }
+  // Trigger async refresh in background (don't block)
+  refreshMarketStatus();
+  // Fallback: local time-based check while waiting for API
+  return _localIsOpen();
+}
+
+// Local time fallback (no API) — used on first call before cache is ready
+function _localIsOpen(){
+  const now = new Date();
+  const h = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false});
+  const m = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+  const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+  if(day==="Sat"||day==="Sun") return false;
+  return (h>9||(h===9&&m>=15))&&(h<15||(h===15&&m<=30));
+}
+
+// Fetch market status from Upstox API and update cache
+async function refreshMarketStatus(){
+  if(Date.now()-_mktStatusTs < MKT_CACHE_MS) return; // still fresh
+  _mktStatusTs = Date.now(); // prevent concurrent fetches
+  try{
+    const url = "https://api.upstox.com/v2/market/status/NSE";
+    const hdrs = {"Authorization":"Bearer "+TOKEN,"Accept":"application/json"};
+    let data = null;
+    // Try direct, then corsproxy
+    for(const fetchUrl of [url, "https://corsproxy.io/?"+encodeURIComponent(url)]){
+      try{
+        const res = await fetch(fetchUrl, {headers:hdrs});
+        if(!res.ok) continue;
+        const txt = await res.text();
+        let d = JSON.parse(txt);
+        if(d.contents) d = JSON.parse(d.contents);
+        data = d?.data;
+        if(data) break;
+      }catch(e){}
+    }
+    if(!data) throw new Error("no data");
+
+    // Upstox response fields:
+    // data.market_status: "open" | "closed" | "pre_open" | "end_of_day"
+    // data.exchange_status: "market_open" | "market_closed" | "holiday" etc.
+    const status = (data.market_status||"").toLowerCase();
+    const exStatus = (data.exchange_status||"").toLowerCase();
+    const open = status === "open" || status === "normal_open";
+
+    let msg = "";
+    if(!open){
+      if(exStatus.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
+      else if(status.includes("pre_open"))   msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
+      else if(status.includes("end_of_day")) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
+      else                                   msg = "🔔 NSE Market Closed · "+data.exchange_status;
+    }
+
+    _mktStatusCache = {open, msg, status, exStatus};
+    _mktStatusTs    = Date.now();
+    lg(`Market API: ${status} (${exStatus}) → ${open?"OPEN":"CLOSED"}`);
+    updateMarketClosedBanner();
+  }catch(e){
+    // On failure keep using local fallback — don't update cache so it retries next call
+    _mktStatusTs = Date.now() - MKT_CACHE_MS + 10000; // retry in 10s
+    lg("Market status API: "+e.message+" — using local time fallback","w");
+  }
+}
+
+// Returns {open, msg} — uses cache if available
+function getMarketStatus(){
+  if(_mktStatusCache && Date.now()-_mktStatusTs < MKT_CACHE_MS){
+    return _mktStatusCache;
+  }
+  // Fallback to local time check
+  const open = _localIsOpen();
+  const now = new Date();
+  const h = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false});
+  const m = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+  const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+  let msg = "";
+  if(!open){
+    if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed · Showing last scan data`;
+    else if(h<9||(h===9&&m<15)) msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
+    else                         msg = "🔔 NSE Market Closed · Showing last scan data";
+  }
+  return {open, msg};
+}
 </script>
 
 </body>

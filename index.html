@@ -2484,6 +2484,8 @@ function renderStockCards(picks,totalScanned,containerId){
 }
 
 function renderStatsOptions(idxGroups){
+  // 2×2 grid on mobile, 4 across on wider screens
+  document.getElementById("stats-options").style.gridTemplateColumns="repeat(auto-fill,minmax(min(calc(50% - 5px),200px),1fr))";
   document.getElementById("stats-options").innerHTML=idxGroups.map(g=>{
     const pc=g.pcr>1?"up":g.pcr>0.7?"am":"dn";
     const pts=g.spotPts||0; const color=clr(pts); const sign=pts>=0?"+":"";
@@ -2491,14 +2493,14 @@ function renderStatsOptions(idxGroups){
     const mpDist=mp&&g.spot?((mp-g.spot)/g.spot*100).toFixed(1):null;
     const mpColor=mpDist&&+mpDist<0?"dn":mpDist&&+mpDist>0?"up":"am";
     const cw=g.oiWalls?.callWall||0, pw=g.oiWalls?.putWall||0;
-    return`<div class="sc" style="min-width:160px">
+    return`<div class="sc" style="min-width:0;overflow:hidden">
       <div class="sc-lbl">${g.name} SPOT · LIVE</div>
-      <div class="sc-val ${color}" id="opt-spot-${g.name}" data-prev="${g.spot}">₹${fmt(g.spot,0)}</div>
+      <div class="sc-val ${color}" id="opt-spot-${g.name}" data-prev="${g.spot}" style="font-size:clamp(14px,4vw,20px)">₹${fmt(g.spot,0)}</div>
       <div class="sc-sub ${color}" id="opt-pts-${g.name}">${sign}${fmt(pts,2)} pts</div>
-      <div class="sc-note" style="line-height:1.7">
+      <div class="sc-note" style="margin-top:5px;line-height:1.6;font-size:9px">
         PCR <span class="${pc}" style="font-weight:700">${g.pcr}</span>
-        ${mp?`· <span title="Max Pain">🎯 ₹${fmt(mp,0)}</span> <span class="${mpColor}">(${mpDist>0?"+":""}${mpDist}%)</span>`:""}
-        ${cw?`<br>📵 Call Wall ₹${fmt(cw,0)} · 🛡 Put Wall ₹${fmt(pw,0)}`:""}
+        ${mp?` · 🎯<span class="${mpColor}">${mpDist>0?"+":""}${mpDist}%</span>`:""}
+        ${cw?`<br>📵₹${fmt(cw,0)} · 🛡₹${fmt(pw,0)}`:""}
         <br><span style="color:#16a34a;font-weight:600">${g.picks.length} signals</span> · ↻ ${CFG.tick}s
       </div>
     </div>`;

@@ -87,8 +87,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 .cb-l{font-size:7px;color:#94a3b8;letter-spacing:.5px;margin-bottom:2px}
 .cb-v{font-size:13px;font-weight:700}.cb-s{font-size:9px;font-weight:500;margin-top:1px}
 /* Trade setup box */
-.trade-setup{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;margin-bottom:8px;background:#0f172a;border-radius:8px;overflow:hidden;padding:1px;gap:1px}
-.ts-box{background:#1e293b;padding:7px 8px;text-align:center}
+.trade-setup{display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;margin-bottom:8px;background:#e2e8f0;border-radius:8px;overflow:hidden;padding:1px;gap:1px}
+.ts-box{background:#f8fafc;padding:7px 8px;text-align:center}
 .ts-l{font-size:7px;color:#64748b;letter-spacing:.5px;margin-bottom:2px}
 .ts-v{font-size:13px;font-weight:800}
 .ts-s{font-size:9px;margin-top:1px}
@@ -1644,7 +1644,7 @@ async function triggerScan(){
     lg(`Score distribution: ${JSON.stringify(confBuckets)} (threshold: ${CFG.minStockConf}%)`);
     lg(`Passes check: pot>=${CFG.pot}%=${stocks.filter(s=>s.pot.base>=CFG.pot).length}, risk<${CFG.risk}%=${stocks.filter(s=>s.risk<CFG.risk).length}, rr>=${CFG.rr}=${stocks.filter(s=>s.pot.rr>=CFG.rr).length}, conf>=${CFG.minStockConf}%=${stocks.filter(s=>s.conf>=CFG.minStockConf).length}`);
 
-    let picks = stocks.filter(s=>s.passes).sort((a,b)=>b.pot.ev-a.pot.ev).slice(0,12);
+    let picks = stocks.filter(s=>s.passes).sort((a,b)=>b.conf-a.conf).slice(0,12);
     // If no picks pass all filters, show best available with a warning
     if(picks.length === 0 && stocks.length > 0){
       const best = [...stocks].sort((a,b)=>b.conf-a.conf).slice(0,5);
@@ -2034,7 +2034,7 @@ function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,cnt){
 function renderStockCards(picks,totalScanned){
   const RC={STRONG_BUY:"strong-buy",BUY:"buy",MODERATE:"moderate",WATCH:"watch",AVOID:"avoid"};
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
-  document.getElementById("stocks-sub").textContent=`Confidence≥${CFG.minStockConf}% · Potential≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} (PDF defaults: 65/8/50/1.5)`;
+  document.getElementById("stocks-sub").textContent=`Confidence≥${CFG.minStockConf}% · Potential≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · Sorted by Confidence`;
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
   // inds array reconstructed for display
   // picks already filtered by minStockConf in triggerScan
@@ -2158,13 +2158,13 @@ function optCard(p,i){
       <div class="c-name">${p.type==="CE"?"📈 Call":"📉 Put"} · Lot ${p.lot} · Spot ₹${fmt(p.spot,0)} · Exp ${p.expiry}</div>
     </div>
     <!-- Capital Required -->
-    <div style="background:#0f172a;border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
-      <div><div style="font-size:7px;color:#64748b;margin-bottom:2px">CAPITAL REQUIRED</div><div style="font-size:16px;font-weight:800;color:#f8fafc">₹${fmt(p.amtRequired,0)}</div><div style="font-size:9px;color:#94a3b8">${p.lot} lots × ₹${fmt(p.entry)} premium</div></div>
-      <div style="text-align:right"><div style="font-size:7px;color:#64748b;margin-bottom:2px">MAX PROFIT</div><div style="font-size:13px;font-weight:700;color:#4ade80">+₹${fmt(p.maxProfit,0)}</div><div style="font-size:9px;color:#f87171">Max Loss: −₹${fmt(p.maxLoss,0)}</div></div>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+      <div><div style="font-size:7px;color:#64748b;margin-bottom:2px">CAPITAL REQUIRED</div><div style="font-size:16px;font-weight:800;color:#0f172a">₹${fmt(p.amtRequired,0)}</div><div style="font-size:9px;color:#64748b">${p.lot} lots × ₹${fmt(p.entry)} premium</div></div>
+      <div style="text-align:right"><div style="font-size:7px;color:#64748b;margin-bottom:2px">MAX PROFIT</div><div style="font-size:13px;font-weight:700;color:#16a34a">+₹${fmt(p.maxProfit,0)}</div><div style="font-size:9px;color:#dc2626">Max Loss: −₹${fmt(p.maxLoss,0)}</div></div>
     </div>
     <!-- Trade setup: Entry, SL, Target -->
     <div class="trade-setup">
-      <div class="ts-box"><div class="ts-l">ENTRY</div><div class="ts-v bl">₹${fmt(p.entry)}</div><div class="ts-s" style="color:#94a3b8">LTP</div></div>
+      <div class="ts-box"><div class="ts-l">ENTRY</div><div class="ts-v bl">₹${fmt(p.entry)}</div><div class="ts-s" style="color:#64748b">LTP</div></div>
       <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">−${CFG.optSL}%</div></div>
       <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.tgt)}</div><div class="ts-s up">+${CFG.optTgt}% R:R ${p.rr}</div></div>
     </div>

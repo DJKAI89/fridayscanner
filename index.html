@@ -1493,51 +1493,71 @@ async function triggerScan(){
 
     // ── STEP 3: Quotes for Nifty50 stocks ──
     updateScanProgress("Step 3/5: Fetching stock quotes (50 stocks)...");
-    // Always use hardcoded NIFTY50 — keys are verified, no CSV complexity
-    const allQ = {};
+    const rawQ = {};  // raw response from API
     const batch1 = NIFTY50.slice(0,25).map(i=>i.key).join(",");
     const batch2 = NIFTY50.slice(25).map(i=>i.key).join(",");
     try{
       const d1 = await fetchQ(batch1);
-      Object.assign(allQ, d1);
-      lg(`Batch 1: ${Object.keys(d1).length} quotes`);
+      Object.assign(rawQ, d1);
+      lg(`Batch 1: ${Object.keys(d1).length} quotes`,"o");
     }catch(e){ lg("Batch 1 failed: "+e.message,"e"); }
     try{
       const d2 = await fetchQ(batch2);
-      Object.assign(allQ, d2);
-      lg(`Batch 2: ${Object.keys(d2).length} quotes`);
+      Object.assign(rawQ, d2);
+      lg(`Batch 2: ${Object.keys(d2).length} quotes`,"o");
     }catch(e){ lg("Batch 2 failed: "+e.message,"e"); }
 
-    lg(`✅ Quotes received: ${Object.keys(allQ).length}/50`,"o");
+    const totalRaw = Object.keys(rawQ).length;
+    lg(`Raw quotes received: ${totalRaw}`,"o");
 
-    // Log a sample key to diagnose format issues
-    const sampleK = Object.keys(allQ)[0] || "NONE";
-    const sampleStock = NIFTY50[0].key;
-    lg(`Key check — allQ sample: "${sampleK}" | NIFTY50 sample: "${sampleStock}"`);
-    if(sampleK !== "NONE" && !allQ[sampleStock]){
-      lg("⚠ Key mismatch! API returns different format than NIFTY50.key — trying fix...","w");
-      // Try both colon and pipe formats
-      const fixed = {};
-      for(const [k,v] of Object.entries(allQ)){
-        fixed[k] = v;
-        fixed[k.replace(/:/g,"|")] = v;
-        fixed[k.replace(/\|/g,":")] = v;
-      }
-      Object.assign(allQ, fixed);
+    if(totalRaw === 0){
+      throw new Error("API returned 0 quotes. Check token and internet connection.");
     }
 
-    // Map stocks that have quotes
-    const quoted = NIFTY50.filter(i => allQ[i.key]?.last_price > 0);
-    lg(`Stocks with live quotes: ${quoted.length}/50`,"o");
+    // ── Build a format-agnostic lookup map ──
+    // Upstox may return keys as: NSE_EQ:ISIN, NSE_EQ|ISIN, NSE_EQ:SYMBOL, NSE_EQ|SYMBOL
+    // Log the actual format so we can see it
+    const firstKey = Object.keys(rawQ)[0];
+    lg(`API key format: "${firstKey}"`,"o");
+
+    // Build allQ with ALL possible key formats so lookup always works
+    const allQ = {};
+    for(const [k,v] of Object.entries(rawQ)){
+      allQ[k]                          = v;  // original
+      allQ[k.replace(/:/g,"|")]        = v;  // colon → pipe
+      allQ[k.replace(/\|/g,":")]       = v;  // pipe → colon
+      // Also index by symbol extracted from the quote data itself
+      if(v?.symbol) allQ["SYM:"+v.symbol] = v;
+      if(v?.tradingsymbol) allQ["SYM:"+v.tradingsymbol] = v;
+    }
+
+    // Match NIFTY50 stocks using multiple fallback strategies
+    const quoted = NIFTY50.map(inst => {
+      const q =
+        allQ[inst.key]                          ||  // exact match (pipe+ISIN)
+        allQ[inst.key.replace(/\|/g,":")]       ||  // colon+ISIN
+        allQ["NSE_EQ|"+inst.s]                  ||  // pipe+symbol
+        allQ["NSE_EQ:"+inst.s]                  ||  // colon+symbol
+        allQ["SYM:"+inst.s];                        // symbol from response data
+      if(q) return {...inst, _q: q};
+      return null;
+    }).filter(Boolean);
+
+    lg(`Stocks matched: ${quoted.length}/50`,"o");
     if(quoted.length === 0){
-      throw new Error("0 stocks have live quotes — check API connection and token. See log for key format.");
+      // Log all raw keys to help diagnose
+      const keysSample = Object.keys(rawQ).slice(0,5).join(", ");
+      throw new Error(`0/50 stocks matched. API key samples: [${keysSample}] | Expected like: ${NIFTY50[0].key}`);
     }
+
+    // Convenience: build allQ keyed by inst.key for downstream use
+    // (already done above via multi-format indexing)
 
     // ── STEP 4: Candles for top 20 by volume ──
     updateScanProgress("Step 4/5: Fetching candle history...");
     const today   = new Date().toISOString().split("T")[0];
     const from60  = new Date(Date.now() - 65*864e5).toISOString().split("T")[0];
-    const byVol   = [...quoted].sort((a,b) => (allQ[b.key]?.volume||0) - (allQ[a.key]?.volume||0));
+    const byVol   = [...quoted].sort((a,b) => (b._q?.volume||0) - (a._q?.volume||0));
     const tech    = {};
     let candleOK  = 0;
     for(let ci = 0; ci < Math.min(20, byVol.length); ci++){
@@ -1569,9 +1589,9 @@ async function triggerScan(){
 
     // Pre-compute sector map
     const secMap = {};
-    for(const inst of quoted){
-      const sec = getSector(inst.s);
-      const chg = getChgPct(allQ[inst.key]);
+    for(const item of quoted){
+      const sec = getSector(item.s);
+      const chg = getChgPct(item._q);
       if(!secMap[sec]) secMap[sec] = {g:0,c:0};
       if(chg > 0) secMap[sec].g++;
       secMap[sec].c++;
@@ -1579,8 +1599,9 @@ async function triggerScan(){
 
     // Score each stock
     const stocks = [];
-    for(const inst of quoted){
-      const q    = allQ[inst.key];
+    for(const item of quoted){
+      const inst = item;           // item has all NIFTY50 fields + _q
+      const q    = item._q;        // the actual quote data
       const ltp  = q.last_price;
       const high = q.ohlc?.high || ltp;
       const low  = q.ohlc?.low  || ltp;

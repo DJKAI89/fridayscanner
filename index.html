@@ -873,7 +873,7 @@ const FO_STOCK_LIST=[
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
 const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.4,iv:18,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50};
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.3,iv:15,oi:5,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50};
 let CFG = DEF; // start with DEF
 try{
   const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
@@ -2289,8 +2289,8 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
       if (oiChg <= -CFG.oi)   signals.push({l:"OI "+oiChg.toFixed(0)+"% Unwind",s:1});
       if (theta < -0.5)       signals.push({l:"Θ "+theta?.toFixed(2),     s:1});
       if (sp === atm)         signals.push({l:"ATM",                       s:1});
-      // Always include if delta is meaningful (even below threshold) to surface stock opts
-      if (!signals.length && absD >= 0.15 && oi > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
+      // Ensure ATM strike always has at least one signal (for visibility)
+      if (!signals.length && absD >= 0.10 && ltp > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
       if (!signals.length)    continue;
 
       // Entry / SL / Target

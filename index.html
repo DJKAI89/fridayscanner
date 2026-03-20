@@ -272,7 +272,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <!-- HEADER -->
 
 <div class="hdr">
-  <div style="display:flex;align-items:center;gap:10px">
+  <!-- Pre-login: show FRIDAY branding -->
+  <div id="hdr-logo" style="display:flex;align-items:center;gap:9px">
+    <div class="logo-ic"><span>F</span></div>
+    <div><div class="logo-txt">F.R.I.D.A.Y</div><div class="logo-sub">PROFESSIONAL NSE SCANNER</div></div>
+  </div>
+  <!-- Post-login: show hamburger + active page -->
+  <div id="hdr-nav" style="display:none;align-items:center;gap:10px">
     <button class="menu-btn" id="menu-btn" onclick="toggleMenu()" aria-label="Menu">
       <span></span><span></span><span></span>
     </button>
@@ -992,6 +998,9 @@ function clearToken(){
   clearTimers(); TOKEN="";
   document.getElementById("app").style.display="none";
   document.getElementById("hdr-ctrl").style.display="none";
+  document.getElementById("hdr-nav").style.display="none";
+  document.getElementById("hdr-logo").style.display="flex";
+  document.getElementById("nav-drawer").style.display="none";
   document.getElementById("token-gate").style.display="flex";
 }
 function handleTokenExpired(){
@@ -1002,7 +1011,9 @@ function handleTokenExpired(){
   localStorage.removeItem("friday_token_date");
   document.getElementById("app").style.display="none";
   document.getElementById("hdr-ctrl").style.display="none";
-  // Show token gate with expiry message
+  document.getElementById("hdr-nav").style.display="none";
+  document.getElementById("hdr-logo").style.display="flex";
+  document.getElementById("nav-drawer").style.display="none";
   document.getElementById("token-gate").style.display="flex";
   // Pre-fill a message in the token textarea
   const ta = document.getElementById("token-input");
@@ -1028,6 +1039,9 @@ function boot(){
   document.getElementById("hdr-ctrl").style.display="flex";
   document.getElementById("nav-drawer").style.display="flex";
   document.getElementById("nav-overlay").style.display="block";
+  // Swap header: hide logo, show hamburger
+  document.getElementById("hdr-logo").style.display="none";
+  document.getElementById("hdr-nav").style.display="flex";
   // Reset launch button in case it was in loading state
   const launchBtn=document.querySelector("#token-gate .btn-g");
   if(launchBtn){launchBtn.disabled=false;launchBtn.textContent="▶ Launch Scanner";}
@@ -3071,9 +3085,9 @@ function getMarketStatus(){
   const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
   let msg = "";
   if(!open){
-    if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed · Showing last scan data`;
+    if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed`;
     else if(h<9||(h===9&&m<15)) msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
-    else                         msg = "🔔 NSE Market Closed · Showing last scan data";
+    else                         msg = "🔔 NSE Market Closed";
   }
   return {open, msg};
 }

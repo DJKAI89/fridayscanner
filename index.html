@@ -43,6 +43,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 /* SLIDE DRAWER */
 #nav-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:900;opacity:0;pointer-events:none;transition:opacity .25s}
 #nav-overlay.visible{opacity:1;pointer-events:auto}
+#nav-overlay[style*=“display:none”]{display:none!important}
 #nav-drawer{position:fixed;top:0;left:0;width:260px;max-width:80vw;height:100dvh;background:#fff;z-index:901;transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:4px 0 24px rgba(0,0,0,.12)}
 #nav-drawer.open{transform:translateX(0)}
 .nav-hdr{padding:18px 16px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:10px;background:linear-gradient(135deg,#f0fdf4,#eff6ff)}
@@ -236,8 +237,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
 <!-- SLIDE MENU OVERLAY + DRAWER -->
 
-<div id="nav-overlay" onclick="closeMenu()"></div>
-<div id="nav-drawer">
+<div id="nav-overlay" onclick="closeMenu()" style="display:none"></div>
+<div id="nav-drawer" style="display:none">
   <div class="nav-hdr">
     <div class="nav-logo-ic"><span>F</span></div>
     <div><div class="nav-logo-txt">F.R.I.D.A.Y</div><div class="nav-logo-sub">PROFESSIONAL NSE SCANNER</div></div>
@@ -1021,10 +1022,12 @@ function updateTokenInfo(){
   if(el) el.textContent="✅ Token saved on: "+date;
 }
 function boot(){
-  // Hide token gate, show app
+  // Hide token gate, show app + nav
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
   document.getElementById("hdr-ctrl").style.display="flex";
+  document.getElementById("nav-drawer").style.display="flex";
+  document.getElementById("nav-overlay").style.display="block";
   // Reset launch button in case it was in loading state
   const launchBtn=document.querySelector("#token-gate .btn-g");
   if(launchBtn){launchBtn.disabled=false;launchBtn.textContent="▶ Launch Scanner";}
@@ -3068,9 +3071,9 @@ function getMarketStatus(){
   const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
   let msg = "";
   if(!open){
-    if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed`;
+    if(day==="Sat"||day==="Sun") msg = `📅 ${day} — NSE Closed · Showing last scan data`;
     else if(h<9||(h===9&&m<15)) msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
-    else                         msg = "🔔 NSE Market Closed";
+    else                         msg = "🔔 NSE Market Closed · Showing last scan data";
   }
   return {open, msg};
 }

@@ -1338,8 +1338,14 @@ async function fetchQ(keys){
   for(const[k,v] of Object.entries(raw)) out[k.replace(/:/g,"|")]=v;
   return out;
 }
-async function fetchCandles(key,from,to){
-  const d=await withRetry(()=>apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/day/"+to+"/"+from),"candle:"+key.slice(0,20));
+// Historical candles: interval = "day","30minute","1minute","week"
+async function fetchCandles(key,from,to,interval="day"){
+  const d=await withRetry(()=>apiGet("/v2/historical-candle/"+encodeURIComponent(key)+"/"+interval+"/"+to+"/"+from),"candle:"+interval+":"+key.slice(0,20));
+  return d?.data?.candles||[];
+}
+// Intraday candles (today only): interval = "1minute" or "30minute"
+async function fetchIntraday(key,interval="30minute"){
+  const d=await withRetry(()=>apiGet("/v2/historical-candle/intraday/"+encodeURIComponent(key)+"/"+interval),"intraday:"+interval+":"+key.slice(0,20));
   return d?.data?.candles||[];
 }
 async function fetchOptions(key,expiry){
@@ -1716,13 +1722,162 @@ function calcOIWalls(chain) {
   return { callWall, putWall, callWallOI: maxCallOI, putWallOI: maxPutOI };
 }
 
-// ── SL/Target from ATR ──
-function autoSLTarget(ltp, high, low, atr) {
-  const v = atr || ltp * 0.02;
+// ═══════════════════════════════════════════════════════════════════
+// PDF: PROFESSIONAL ENTRY / SL / TARGET ENGINE
+// ═══════════════════════════════════════════════════════════════════
+
+// Fibonacci retracement levels from swing high/low
+function calcFibLevels(swingLow, swingHigh){
+  const range = swingHigh - swingLow;
+  if(range <= 0) return null;
   return {
-    target: +(ltp + v * 3.0).toFixed(2),   // ~4-6% upside via ATR×3
-    sl:     +(Math.max(low * 0.995, ltp - v * 1.5)).toFixed(2),
+    range,
+    swingLow, swingHigh,
+    fib236: +(swingHigh - range*0.236).toFixed(2),
+    fib382: +(swingHigh - range*0.382).toFixed(2),  // conservative entry
+    fib500: +(swingHigh - range*0.500).toFixed(2),  // moderate entry
+    fib618: +(swingHigh - range*0.618).toFixed(2),  // aggressive entry
+    fib786: +(swingHigh - range*0.786).toFixed(2),  // deep retracement SL
+    // Extension targets (from swing low as base)
+    ext618: +(swingHigh + range*0.618).toFixed(2),  // T1 extension
+    ext100: +(swingHigh + range*1.000).toFixed(2),  // T2 extension
+    ext162: +(swingHigh + range*1.618).toFixed(2),  // T3 extension
   };
+}
+
+// PDF METHOD: Professional Entry calculation
+// Priority: Fib50% retracement → Support + buffer → MA bounce → current LTP
+function calcProfessionalEntry(ltp, sr, atr, ma50, ma200){
+  const entries = [];
+
+  // Method 1: Fibonacci 50% retracement (if we have swing data)
+  if(sr?.swingL && sr?.swingH && sr.swingH > sr.swingL){
+    const fib = calcFibLevels(sr.swingL, sr.swingH);
+    if(fib){
+      // Best entry: 38.2% (conservative), 50% (moderate), 61.8% (aggressive)
+      entries.push({price: fib.fib382, method:"Fib 38.2%", quality:3});
+      entries.push({price: fib.fib500, method:"Fib 50%",   quality:4}); // preferred
+      entries.push({price: fib.fib618, method:"Fib 61.8%", quality:2});
+    }
+  }
+
+  // Method 2: Support + 0.5% buffer (PDF Method 2)
+  if(sr?.pivotS1 > 0){
+    entries.push({price: +(sr.pivotS1 * 1.005).toFixed(2), method:"S1+buf", quality:3});
+  }
+
+  // Method 3: MA bounce + 0.5% buffer (PDF Method 4)
+  if(ma50 > 0 && ltp > ma50 * 0.97 && ltp < ma50 * 1.03){
+    entries.push({price: +(ma50 * 1.005).toFixed(2), method:"50MA bounce", quality:3});
+  }
+  if(ma200 > 0 && ltp > ma200 * 0.97 && ltp < ma200 * 1.03){
+    entries.push({price: +(ma200 * 1.005).toFixed(2), method:"200MA bounce", quality:4});
+  }
+
+  // Method 4: ATR breakout entry (PDF Method 3)
+  if(sr?.pivotR1 > 0 && atr > 0){
+    const breakoutEntry = +(sr.pivotR1 + atr * 0.5).toFixed(2);
+    entries.push({price: breakoutEntry, method:"Breakout", quality:2});
+  }
+
+  // Pick best entry: prefer entries near LTP (within 3%), highest quality
+  const nearEntries = entries.filter(e => e.price > 0 && Math.abs((e.price-ltp)/ltp*100) <= 5);
+  if(nearEntries.length > 0){
+    // Sort by quality desc, then by closeness to LTP
+    nearEntries.sort((a,b) => b.quality - a.quality || Math.abs(a.price-ltp) - Math.abs(b.price-ltp));
+    return nearEntries[0];
+  }
+  // Fallback: current LTP (market price)
+  return {price: ltp, method:"Market", quality:1};
+}
+
+// PDF METHOD: Professional SL calculation
+// ATR-based (2.0×) verified against swing low
+function calcProfessionalSL(entry, sr, atr, swingL, low){
+  const v = atr || entry * 0.02;
+
+  // Method 1: ATR-based SL (PDF: 2.0× multiplier for moderate)
+  const atrSL = +(entry - v * 2.0).toFixed(2);
+
+  // Method 2: Swing low - 0.5% buffer (PDF Method 5)
+  const sl_swingLow = swingL > 0 ? +(swingL * 0.995).toFixed(2) : 0;
+
+  // Method 3: Pivot S1 - 0.5% buffer (PDF Method 2)
+  const sl_support = sr?.pivotS1 > 0 ? +(sr.pivotS1 * 0.995).toFixed(2) : 0;
+
+  // PDF rule: SL must be BELOW swing low (for long trades)
+  // Use the HIGHER of (ATR-SL, support-SL) but must be below swing low
+  let sl = atrSL;
+
+  // If swing low exists and ATR-SL is above it, use swing low - buffer
+  if(sl_swingLow > 0 && sl > sl_swingLow) sl = sl_swingLow;
+  if(sl_support  > 0 && sl > sl_support)  sl = sl_support;
+
+  // PDF checklist: not too tight (<1 ATR) and not too wide (>3 ATR)
+  const minSL = +(entry - v * 1.0).toFixed(2);  // 1 ATR min
+  const maxSL = +(entry - v * 3.0).toFixed(2);  // 3 ATR max
+  sl = Math.min(sl, minSL);   // not tighter than 1 ATR
+  sl = Math.max(sl, maxSL);   // not wider than 3 ATR
+
+  // Floor: never below day's low × 0.99
+  if(low > 0) sl = Math.max(sl, +(low * 0.99).toFixed(2));
+
+  return +sl.toFixed(2);
+}
+
+// PDF METHOD: Professional Targets (Fibonacci Extensions + Resistance)
+function calcProfessionalTargets(entry, sl, sr, atr){
+  const risk = entry - sl;  // risk amount per share
+  if(risk <= 0) risk = entry * 0.02;
+
+  // Method 1: Fibonacci Extension (PDF Method 1)
+  // T1 = entry + risk×0.618, T2 = entry + risk×1.0, T3 = entry + risk×1.618
+  const fibT1 = +(entry + risk * 0.618).toFixed(2);
+  const fibT2 = +(entry + risk * 1.000).toFixed(2);
+  const fibT3 = +(entry + risk * 1.618).toFixed(2);
+
+  // Method 2: R:R Based (PDF Method 2)
+  const rrT1  = +(entry + risk * 1.5).toFixed(2);   // 1.5:1
+  const rrT2  = +(entry + risk * 2.0).toFixed(2);   // 2:1
+  const rrT3  = +(entry + risk * 3.0).toFixed(2);   // 3:1
+
+  // Method 3: Resistance levels (PDF Method 3)
+  const r1    = sr?.pivotR1 || 0;
+  const r2    = sr?.pivotR2 || 0;
+  const w52H  = sr?.week52H || 0;
+
+  // Method 4: ATR-based (PDF Method 4): T1=2ATR, T2=3ATR, T3=5ATR
+  const v = atr || risk;
+  const atrT1 = +(entry + v * 2).toFixed(2);
+  const atrT2 = +(entry + v * 3).toFixed(2);
+  const atrT3 = +(entry + v * 5).toFixed(2);
+
+  // Build ordered targets: prefer resistance-aligned levels
+  // Conservative = min of (fibT1, rrT1, r1 if exists) — nearest realistic
+  const cons = r1 > entry ? Math.min(rrT1, r1) : rrT1;
+  // Moderate = 2:1 R:R or R2 resistance
+  const mod  = r2 > entry && r2 < rrT3 ? Math.min(rrT2, r2) : rrT2;
+  // Aggressive = 3:1 or Fib 1.618 extension
+  const agg  = Math.max(rrT3, fibT3);
+
+  // PDF Step 5: Verify R:R ≥ 1.5 minimum
+  const rrCons = risk > 0 ? (cons - entry) / risk : 0;
+  const rrMod  = risk > 0 ? (mod  - entry) / risk : 0;
+  const rrAgg  = risk > 0 ? (agg  - entry) / risk : 0;
+
+  return {
+    cons: +cons.toFixed(2), mod: +mod.toFixed(2), agg: +agg.toFixed(2),
+    fibT1, fibT2, fibT3, rrT1, rrT2, rrT3, atrT1, atrT2, atrT3,
+    rrCons: +rrCons.toFixed(2), rrMod: +rrMod.toFixed(2), rrAgg: +rrAgg.toFixed(2),
+    risk: +risk.toFixed(2)
+  };
+}
+
+// Backward-compatible autoSLTarget (used by scan loop — LTP as entry)
+function autoSLTarget(ltp, high, low, atr, sr){
+  const sl = calcProfessionalSL(ltp, sr||{}, atr, sr?.swingL||low, low);
+  const tgts = calcProfessionalTargets(ltp, sl, sr||{}, atr);
+  return { target: tgts.mod, sl, targets: tgts };
 }
 
 // ══════════════════════════════════════
@@ -2849,13 +3004,14 @@ async function lookupStock(){
     const ltp=q.last_price, high=q.ohlc?.high||ltp, low=q.ohlc?.low||ltp;
     const vol=q.volume||0, chgPct=getChgPct(q), delivPct=getDeliveryPct(q);
 
-    // Step 2: Candles
-    document.getElementById("lkp-progress").textContent="Loading 60-day candle history...";
+    // Step 2: Multi-timeframe candles
+    document.getElementById("lkp-progress").textContent="Loading daily candles (60 days)...";
     const today=new Date().toISOString().split("T")[0];
     const from60=new Date(Date.now()-65*864e5).toISOString().split("T")[0];
-    let tech={};
+    const from7 =new Date(Date.now()-10*864e5).toISOString().split("T")[0];
+    let tech={}, tf30={}, tf1={};
     try{
-      const candles=await fetchCandles(inst.key,from60,today);
+      const candles=await fetchCandles(inst.key,from60,today,"day");
       if(candles.length>=5){
         const closes=candles.map(c=>+c[4]).reverse();
         const rc=candles.slice(0,20);
@@ -2863,10 +3019,48 @@ async function lookupStock(){
         tech={rsi:calcRSI(closes),
               macdBull:closes.length>=35?(calcEMA(closes,12)-calcEMA(closes,26))>0:null,
               a50:isAboveMA(closes,50), a200:isAboveMA(closes,200),
+              ma50val: closes.length>=50?calcEMA(closes,50):0,
+              ma200val: closes.length>=200?calcEMA(closes,200):0,
               atr:calcATR(candles), patterns:detectPatterns(candles),
               avgVol20, sr:calcSR(candles), vwap:calcVWAP(candles)};
       }
-    }catch(e){lg("Lookup candle: "+e.message,"w");}
+    }catch(e){lg("Daily candles: "+e.message,"w");}
+
+    // 30-min historical candles (last 7 days)
+    document.getElementById("lkp-progress").textContent="Loading 30-min candles...";
+    try{
+      const c30=await fetchCandles(inst.key,from7,today,"30minute");
+      if(c30.length>=4){
+        const cl30=c30.map(c=>+c[4]).reverse();
+        tf30={rsi:calcRSI(cl30), macdBull:cl30.length>=35?(calcEMA(cl30,12)-calcEMA(cl30,26))>0:null,
+              atr:calcATR(c30), trend:cl30[cl30.length-1]>cl30[0]?"UP":"DOWN",
+              candles:c30};
+      }
+    }catch(e){lg("30min candles: "+e.message,"w");}
+
+    // Intraday 1-min candles (today only, only if market open)
+    if(isOpen()){
+      document.getElementById("lkp-progress").textContent="Loading intraday candles...";
+      try{
+        const c1=await fetchIntraday(inst.key,"1minute");
+        if(c1.length>=5){
+          const cl1=c1.map(c=>+c[4]).reverse();
+          // VWAP from intraday
+          let sumPV=0,sumV=0;
+          c1.forEach(c=>{const tp=(+c[2]+ +c[3]+ +c[4])/3;const v=+c[5]||0;sumPV+=tp*v;sumV+=v;});
+          tf1={rsi:calcRSI(cl1), vwap:sumV>0?+(sumPV/sumV).toFixed(2):0,
+               trend:cl1[cl1.length-1]>cl1[0]?"UP":"DOWN",
+               candles:c1};
+        }
+      }catch(e){lg("1min candles: "+e.message,"w");}
+    }
+
+    // Multi-timeframe confluence score
+    const mtfBullish = [
+      tech.macdBull===true, tech.a50===true, tech.a200===true,
+      tf30.trend==="UP", tf1.trend==="UP"
+    ].filter(Boolean).length;
+    const mtfScore = Math.round(mtfBullish / 5 * 100); // 0-100%
 
     // Step 3: Market context
     document.getElementById("lkp-progress").textContent="Fetching market context...";

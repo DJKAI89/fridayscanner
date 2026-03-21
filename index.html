@@ -259,12 +259,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
-    <button class="nav-item" id="nav-fiidii" onclick="switchTab('fiidii');closeMenu()">
-      <span class="nav-icon">🏦</span><span class="nav-label">FII / DII</span><span class="nav-badge" id="nb-fiidii">—</span>
-    </button>
-    <button class="nav-item" id="nav-earnings" onclick="switchTab('earnings');closeMenu()">
-      <span class="nav-icon">📅</span><span class="nav-label">Earnings</span><span class="nav-badge" id="nb-earnings">—</span>
-    </button>
     <button class="nav-item" id="nav-backtest" onclick="switchTab('backtest');closeMenu()">
       <span class="nav-icon">📊</span><span class="nav-label">Backtest</span>
     </button>
@@ -389,7 +383,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="pane" id="pane-lookup">
     <div style="padding:0 16px 16px">
 
-
+```
   <!-- Search bar -->
   <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
     <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">🔍 Analyse Any Stock</div>
@@ -448,57 +442,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
 </div>
+```
 
-  </div>
-
-  <!-- FII / DII -->
-
-  <div class="pane" id="pane-fiidii">
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <div style="font-size:13px;font-weight:800;color:#0f172a">🏦 FII / DII Activity</div>
-        <button class="btn btn-g" onclick="loadFIIDII()" style="padding:6px 12px;font-size:11px" id="fiidii-btn">↻ Refresh</button>
-      </div>
-      <div style="font-size:10px;color:#64748b">Institutional flow from NSE · Updated daily after 6 PM</div>
-    </div>
-    <div id="fiidii-loading" style="display:none;text-align:center;padding:30px"><div class="spin" style="margin:0 auto 10px"></div><div style="font-size:12px;color:#16a34a">Loading FII/DII data...</div></div>
-    <div id="fiidii-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px;margin-bottom:12px"></div>
-    <div id="fiidii-content" style="display:none">
-      <!-- Summary cards -->
-      <div class="stats-g" id="fiidii-stats" style="margin-bottom:12px"></div>
-      <!-- Chart bars -->
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:10px">📈 Net Flow (₹ Cr) — Last 10 Days</div>
-        <div id="fiidii-chart"></div>
-      </div>
-      <!-- Table -->
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
-        <div style="display:grid;grid-template-columns:100px 1fr 1fr 1fr;gap:8px;padding:9px 12px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:9px;font-weight:700;color:#64748b;letter-spacing:.5px">
-          <span>DATE</span><span style="text-align:right">FII NET (₹Cr)</span><span style="text-align:right">DII NET (₹Cr)</span><span style="text-align:right">SIGNAL</span>
-        </div>
-        <div id="fiidii-rows"></div>
-      </div>
-      <div style="font-size:9px;color:#94a3b8;margin-top:8px;padding:8px">Source: NSE India · FII = Foreign Institutional Investors · DII = Domestic Institutional Investors</div>
-    </div>
-  </div>
-
-  <!-- EARNINGS CALENDAR -->
-
-  <div class="pane" id="pane-earnings">
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <div style="font-size:13px;font-weight:800;color:#0f172a">📅 Earnings Calendar</div>
-        <button class="btn btn-g" onclick="loadEarnings()" style="padding:6px 12px;font-size:11px" id="earnings-btn">↻ Refresh</button>
-      </div>
-      <div style="font-size:10px;color:#64748b">Upcoming results · Avoid trading 2 days before earnings</div>
-    </div>
-    <div id="earnings-loading" style="display:none;text-align:center;padding:30px"><div class="spin" style="margin:0 auto 10px"></div><div style="font-size:12px;color:#16a34a">Loading earnings calendar...</div></div>
-    <div id="earnings-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;color:#dc2626;font-size:12px;margin-bottom:12px"></div>
-    <div id="earnings-content" style="display:none">
-      <div id="earnings-warning" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:#92400e;font-weight:600"></div>
-      <div id="earnings-list"></div>
-      <div style="font-size:9px;color:#94a3b8;margin-top:8px;padding:8px">Source: NSE India · Results dates subject to change · Always verify before trading</div>
-    </div>
   </div>
 
   <!-- BACKTEST -->
@@ -545,6 +490,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
       </div>
 
+```
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -644,7 +590,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
   </div>
 </div>
-
+```
 
   </div>
 </div>
@@ -1231,7 +1177,7 @@ function resetSettings(){
 // ══════════════════════════════════════
 // SLIDE MENU + NAVIGATION
 // ══════════════════════════════════════
-const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',fiidii:'🏦 FII / DII',earnings:'📅 Earnings',backtest:'📊 Backtest',settings:'⚙ Settings'};
+const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',backtest:'📊 Backtest',settings:'⚙ Settings'};
 
 function openMenu(){
   document.getElementById("nav-drawer").classList.add("open");
@@ -3237,218 +3183,6 @@ async function lookupStock(){
 
 function checkAlerts(){ /* removed */ }
 function requestNotifPermission(){ /* removed */ }
-
-// ══════════════════════════════════════
-// FII / DII DATA
-// ══════════════════════════════════════
-async function loadFIIDII(){
-  const btn=document.getElementById("fiidii-btn");
-  btn.disabled=true;
-  document.getElementById("fiidii-loading").style.display="block";
-  document.getElementById("fiidii-content").style.display="none";
-  document.getElementById("fiidii-error").style.display="none";
-  try{
-    // NSE FII/DII endpoint — needs session cookie, try via corsproxy
-    const url="https://www.nseindia.com/api/fiidiiTradeReact";
-    const proxied="https://corsproxy.io/?"+encodeURIComponent(url);
-    let data=null;
-    for(const fetchUrl of [proxied]){
-      try{
-        const res=await fetch(fetchUrl,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0"}});
-        if(!res.ok) continue;
-        const txt=await res.text();
-        let d=JSON.parse(txt);
-        if(d.contents) d=JSON.parse(d.contents);
-        if(Array.isArray(d)&&d.length) {data=d; break;}
-      }catch(e){}
-    }
-    if(!data) throw new Error("NSE API not accessible. NSE blocks browser requests. View at nseindia.com/reports/fii-dii");
-    renderFIIDII(data);
-    document.getElementById("fiidii-loading").style.display="none";
-    document.getElementById("fiidii-content").style.display="block";
-    // Update nav badge
-    const fiiToday=data[0];
-    const fiiNet=fiiToday?.buyValue-fiiToday?.sellValue||0;
-    const sign=fiiNet>=0?"+":"";
-    updateNavBadge("fiidii",sign+fmt(fiiNet/100,0)+"Cr");
-  }catch(e){
-    document.getElementById("fiidii-loading").style.display="none";
-    const errEl=document.getElementById("fiidii-error");
-    errEl.innerHTML=`<div style="font-weight:700;margin-bottom:6px">⚠ ${e.message}</div><a href="https://www.nseindia.com/reports/fii-dii" target="_blank" style="color:#1d4ed8;font-weight:600">📊 View on NSE Website ↗</a>`;
-    errEl.style.display="block";
-  }
-  btn.disabled=false;
-}
-
-function renderFIIDII(data){
-  // data: [{date, buyValue, sellValue, ...}] for FII and DII
-  // NSE returns array with objects — parse both FII and DII rows
-  // Group by date
-  const byDate={};
-  data.forEach(row=>{
-    const d=row.date||row.tradingDate||"";
-    if(!byDate[d]) byDate[d]={date:d,fiiNet:0,diiNet:0};
-    const cat=(row.category||"").toUpperCase();
-    const net=(+row.buyValue||0)-(+row.sellValue||0);
-    if(cat.includes("FII")||cat.includes("FPI")) byDate[d].fiiNet+=net;
-    if(cat.includes("DII")||cat.includes("MF")) byDate[d].diiNet+=net;
-  });
-  const days=Object.values(byDate).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,10);
-
-  // Summary stats
-  const totalFII=days.reduce((s,d)=>s+d.fiiNet,0);
-  const totalDII=days.reduce((s,d)=>s+d.diiNet,0);
-  const fiiBull=days.filter(d=>d.fiiNet>0).length;
-  document.getElementById("fiidii-stats").innerHTML=`
-    <div class="sc"><div class="sc-lbl">FII 10-DAY NET</div>
-      <div class="sc-val ${totalFII>=0?"up":"dn"}">${totalFII>=0?"+":""}₹${fmt(totalFII/100,0)}Cr</div>
-      <div class="sc-sub ${totalFII>=0?"up":"dn"}">${fiiBull}/10 days buying</div></div>
-    <div class="sc"><div class="sc-lbl">DII 10-DAY NET</div>
-      <div class="sc-val ${totalDII>=0?"up":"dn"}">${totalDII>=0?"+":""}₹${fmt(totalDII/100,0)}Cr</div>
-      <div class="sc-sub" style="color:#64748b">${10-fiiBull}/10 days offsetting FII</div></div>
-    <div class="sc"><div class="sc-lbl">FLOW SIGNAL</div>
-      <div class="sc-val ${fiiBull>=7?"up":fiiBull<=3?"dn":"am"}">${fiiBull>=7?"BULLISH":fiiBull<=3?"BEARISH":"MIXED"}</div>
-      <div class="sc-sub" style="color:#64748b">FII ${fiiBull>=7?"buying":"selling"} dominant</div></div>`;
-
-  // Chart bars
-  const maxAbs=Math.max(...days.map(d=>Math.max(Math.abs(d.fiiNet),Math.abs(d.diiNet))),1);
-  document.getElementById("fiidii-chart").innerHTML=days.map(d=>{
-    const fiiW=Math.abs(d.fiiNet)/maxAbs*100;
-    const diiW=Math.abs(d.diiNet)/maxAbs*100;
-    const dt=new Date(d.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    return`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <span style="font-size:9px;color:#64748b;width:40px;flex-shrink:0">${dt}</span>
-      <div style="flex:1">
-        <div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
-          <span style="font-size:8px;color:#64748b;width:22px">FII</span>
-          <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden">
-            <div style="height:100%;border-radius:4px;background:${d.fiiNet>=0?"#16a34a":"#dc2626"};width:${fiiW}%;float:${d.fiiNet>=0?"left":"right"}"></div>
-          </div>
-          <span style="font-size:8px;font-weight:600;color:${d.fiiNet>=0?"#16a34a":"#dc2626"};width:60px;text-align:right">${d.fiiNet>=0?"+":""}₹${fmt(d.fiiNet/100,0)}Cr</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:4px">
-          <span style="font-size:8px;color:#64748b;width:22px">DII</span>
-          <div style="flex:1;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden">
-            <div style="height:100%;border-radius:4px;background:${d.diiNet>=0?"#1d4ed8":"#f59e0b"};width:${diiW}%"></div>
-          </div>
-          <span style="font-size:8px;font-weight:600;color:${d.diiNet>=0?"#1d4ed8":"#f59e0b"};width:60px;text-align:right">${d.diiNet>=0?"+":""}₹${fmt(d.diiNet/100,0)}Cr</span>
-        </div>
-      </div>
-    </div>`;
-  }).join("");
-
-  // Table rows
-  document.getElementById("fiidii-rows").innerHTML=days.map(d=>{
-    const dt=new Date(d.date).toLocaleDateString("en-IN",{day:"2-digit",month:"short"});
-    const sig=d.fiiNet>500?"🟢 BUY":d.fiiNet<-500?"🔴 SELL":d.fiiNet>0?"🟡 MILD BUY":"🟡 MILD SELL";
-    return`<div style="display:grid;grid-template-columns:100px 1fr 1fr 1fr;gap:8px;padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:11px;align-items:center">
-      <span style="color:#64748b">${dt}</span>
-      <span style="text-align:right;font-weight:600;color:${d.fiiNet>=0?"#16a34a":"#dc2626"}">${d.fiiNet>=0?"+":""}₹${fmt(d.fiiNet/100,0)}Cr</span>
-      <span style="text-align:right;font-weight:600;color:${d.diiNet>=0?"#1d4ed8":"#f59e0b"}">${d.diiNet>=0?"+":""}₹${fmt(d.diiNet/100,0)}Cr</span>
-      <span style="text-align:right;font-size:10px">${sig}</span>
-    </div>`;
-  }).join("");
-}
-
-// ══════════════════════════════════════
-// EARNINGS CALENDAR
-// ══════════════════════════════════════
-async function loadEarnings(){
-  const btn=document.getElementById("earnings-btn");
-  btn.disabled=true;
-  document.getElementById("earnings-loading").style.display="block";
-  document.getElementById("earnings-content").style.display="none";
-  document.getElementById("earnings-error").style.display="none";
-  try{
-    const url="https://www.nseindia.com/api/event-calendar";
-    const proxied="https://corsproxy.io/?"+encodeURIComponent(url);
-    let data=null;
-    for(const fetchUrl of [proxied]){
-      try{
-        const res=await fetch(fetchUrl,{headers:{"Accept":"application/json","User-Agent":"Mozilla/5.0"}});
-        if(!res.ok) continue;
-        const txt=await res.text();
-        let d=JSON.parse(txt);
-        if(d.contents) d=JSON.parse(d.contents);
-        if(Array.isArray(d)&&d.length){data=d;break;}
-      }catch(e){}
-    }
-    if(!data) throw new Error("NSE earnings calendar not accessible. View at nseindia.com/companies-listing/corporate-filings-event-calendar");
-    renderEarnings(data);
-    document.getElementById("earnings-loading").style.display="none";
-    document.getElementById("earnings-content").style.display="block";
-  }catch(e){
-    document.getElementById("earnings-loading").style.display="none";
-    const errEl=document.getElementById("earnings-error");
-    errEl.innerHTML=`<div style="font-weight:700;margin-bottom:6px">⚠ ${e.message}</div><a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" style="color:#1d4ed8;font-weight:600;display:block;margin-bottom:8px">📅 View on NSE Website ↗</a><div style="font-size:10px;color:#64748b">Tip: Always check NSE website for upcoming results before trading</div>`;
-    errEl.style.display="block";
-  }
-  btn.disabled=false;
-}
-
-function renderEarnings(data){
-  const today=new Date(); today.setHours(0,0,0,0);
-  // Filter upcoming 30 days + last 7 days
-  const events=data.filter(e=>{
-    const d=new Date(e.date||e.bm_date||"");
-    return !isNaN(d) && d >= new Date(today-7*864e5) && d <= new Date(today.getTime()+30*864e5);
-  }).sort((a,b)=>new Date(a.date||a.bm_date)-new Date(b.date||b.bm_date));
-
-  // Warning: stocks with results in next 2 days
-  const warn=events.filter(e=>{
-    const d=new Date(e.date||e.bm_date);
-    const diff=(d-today)/864e5;
-    return diff>=0&&diff<=2;
-  });
-  const warnEl=document.getElementById("earnings-warning");
-  if(warn.length){
-    warnEl.innerHTML="⚠ Results in next 2 days — AVOID trading these: "+warn.map(e=>`<strong>${e.symbol||e.sm_symbol}</strong>`).join(", ");
-    warnEl.style.display="block";
-    updateNavBadge("earnings",warn.length+" soon");
-  } else {
-    warnEl.style.display="none";
-    updateNavBadge("earnings",events.length+" events");
-  }
-
-  if(!events.length){
-    document.getElementById("earnings-list").innerHTML='<div class="empty-state">No upcoming earnings in next 30 days</div>';
-    return;
-  }
-
-  // Group by date
-  const byDate={};
-  events.forEach(e=>{
-    const d=new Date(e.date||e.bm_date);
-    const key=d.toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short"});
-    if(!byDate[key]) byDate[key]={date:d,key,items:[]};
-    byDate[key].items.push(e);
-  });
-
-  document.getElementById("earnings-list").innerHTML=Object.values(byDate).map(grp=>{
-    const diff=Math.round((grp.date-today)/864e5);
-    const label=diff===0?"TODAY":diff===1?"TOMORROW":diff===-1?"YESTERDAY":`${diff>0?"+":""}${diff}d`;
-    const urgent=diff>=0&&diff<=2;
-    return`<div style="margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <span style="font-size:10px;font-weight:700;color:${urgent?"#dc2626":"#374151"}">${grp.key}</span>
-        <span style="font-size:9px;background:${urgent?"#fef2f2":"#f1f5f9"};color:${urgent?"#dc2626":"#64748b"};border-radius:10px;padding:1px 7px;font-weight:700">${label}</span>
-      </div>
-      ${grp.items.map(e=>{
-        const sym=e.symbol||e.sm_symbol||"";
-        const purpose=e.purpose||e.sm_isin||"Board Meeting/Results";
-        const inNifty=NIFTY50.some(n=>n.s===sym);
-        return`<div style="background:#fff;border:1px solid ${urgent?"#fecaca":"#e2e8f0"};border-radius:8px;padding:9px 12px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <span style="font-weight:800;color:#0f172a">${sym}</span>
-            ${inNifty?`<span style="font-size:8px;background:#dcfce7;color:#16a34a;border-radius:6px;padding:1px 5px;margin-left:4px;font-weight:700">N50</span>`:""}
-            <div style="font-size:9px;color:#64748b;margin-top:2px">${purpose}</div>
-          </div>
-          ${urgent?`<span style="font-size:9px;background:#fef2f2;color:#dc2626;border-radius:6px;padding:3px 8px;font-weight:700">⚠ AVOID TRADE</span>`:""}
-        </div>`;
-      }).join("")}
-    </div>`;
-  }).join("");
-}
 
 // ══════════════════════════════════════
 // BACKTESTING ENGINE

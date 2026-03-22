@@ -304,7 +304,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div id="token-gate">
   <div class="tc" style="max-width:460px">
 
-
+```
 <!-- Expiry banner -->
 <div id="token-exp-msg" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:11px;color:#991b1b;font-weight:600">
   ⚠ Token expired. Get a new one from Upstox Developer Portal.
@@ -346,7 +346,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div style="margin-top:12px;font-size:9px;color:#94a3b8;text-align:center;line-height:1.6">
   Token is saved on this device · Expires daily · Paste fresh token each morning
 </div>
-
+```
 
   </div>
 </div>
@@ -412,7 +412,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="pane" id="pane-lookup">
     <div style="padding:0 16px 16px">
 
-
+```
   <!-- Search bar -->
   <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
     <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">🔍 Analyse Any Stock</div>
@@ -471,6 +471,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
 </div>
+```
 
   </div>
 
@@ -522,6 +523,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
       </div>
 
+```
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -621,7 +623,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
   </div>
 </div>
-
+```
 
   </div>
 </div>
@@ -2210,20 +2212,13 @@ async function triggerScan(){
       }
     }catch(e){ lg("PCR skipped: "+e.message,"w"); }
 
-    // ── STEP 3: Build scan universe (CSV → all NSE EQ stocks, cached daily) ──
+    // ── STEP 3: Curated scan universe (hardcoded list only) ──
     updateScanProgress("Step 3/5: Loading stock universe...");
 
-    // Phase A: Get universe — try CSV first, fall back to hardcoded list
-    let scanList = NIFTY50; // always start with our curated list
-    try{
-      const csvUniverse = await getNSEUniverse(); // loads Upstox CSV, cached daily
-      if(csvUniverse.length > NIFTY50.length){
-        scanList = csvUniverse;
-        lg(`📋 Universe: ${csvUniverse.length} NSE EQ stocks from CSV`,"o");
-      }
-    }catch(e){ lg("CSV universe skipped — using curated list","w"); }
-
-    lg(`Scanning ${scanList.length} stocks in ${Math.ceil(scanList.length/50)} batches...`,"o");
+    // Scan only our curated list (NIFTY50 + Next50 + Top F&O stocks)
+    // This keeps scan fast and focused on liquid, high-quality stocks
+    const scanList = NIFTY50;
+    lg(`Scanning ${scanList.length} curated stocks...`,"o");
 
     // Phase B: Quote all stocks in batches of 50
     // fetchQ normalizes keys, so allQ[key] will match scanList[i].key format
@@ -3039,16 +3034,55 @@ async function lookupStock(){
   document.getElementById("lkp-error").style.display="none";
   document.getElementById("lkp-progress").textContent="Looking up "+sym+"...";
   try{
-    // Find instrument in known lists, or construct key
-    let inst = NIFTY50.find(i=>i.s===sym) || FO_STOCK_LIST.find(i=>i.s===sym)
-             || {key:"NSE_EQ|"+sym, s:sym, n:sym, sec:"NSE", fo:false};
+    // Step 1: Resolve instrument key
+    // Priority: hardcoded lists → NSE CSV universe → brute-force key attempts
+    document.getElementById("lkp-progress").textContent="Resolving instrument key...";
+    let inst = NIFTY50.find(i=>i.s===sym) || FO_STOCK_LIST.find(i=>i.s===sym);
 
-    // Step 1: Quote
+    if(!inst){
+      // Search NSE universe CSV (cached daily) — has ISIN-based keys for ALL NSE EQ stocks
+      try{
+        const universe = await getNSEUniverse();
+        const match = universe.find(i=>i.s===sym || i.s===sym.replace(/[&-]/g,""));
+        if(match) inst = {...match, fo:false};
+      }catch(e){ lg("Universe lookup: "+e.message,"w"); }
+    }
+
+    // Last resort: try symbol-based key (works for some stocks, fails for ISIN-keyed ones)
+    if(!inst) inst = {key:"NSE_EQ|"+sym, s:sym, n:sym, sec:"NSE", fo:false};
+
+    // Step 1b: Quote — try inst.key first, then brute-force all formats
     document.getElementById("lkp-progress").textContent="Fetching live quote...";
-    const qData = await fetchQ(inst.key);
-    const q = qData[inst.key] || qData["NSE_EQ:"+sym] || qData["NSE_EQ|"+sym]
-            || Object.values(qData)[0];
-    if(!q?.last_price) throw new Error(sym+" not found. Check the NSE symbol spelling.");
+    let qData={}, q=null;
+
+    // Try the resolved key first
+    try{
+      qData = await fetchQ(inst.key);
+      q = qData[inst.key] || qData[inst.key.replace(/\|/g,":")] || Object.values(qData)[0];
+    }catch(e){ lg("Quote attempt 1: "+e.message,"w"); }
+
+    // If not found and we used a symbol-based key, try NSE_INDEX too
+    if(!q?.last_price){
+      // Try fetching by trading symbol directly via OHLC endpoint
+      const altKeys = [
+        "NSE_EQ|"+sym,
+        "NSE_EQ:"+sym,
+        "BSE_EQ|"+sym,
+      ];
+      for(const ak of altKeys){
+        if(ak===inst.key) continue;
+        try{
+          const d = await fetchQ(ak);
+          const v = Object.values(d)[0];
+          if(v?.last_price){ q=v; inst={...inst, key:ak}; break; }
+        }catch(e){}
+      }
+    }
+
+    if(!q?.last_price) throw new Error(
+      sym+" not found. The stock exists on NSE but may not be in the instrument list yet. "+
+      "Try the exact NSE trading symbol (e.g. ICICIAMC not ICICI AMC)."
+    );
     const ltp=q.last_price, high=q.ohlc?.high||ltp, low=q.ohlc?.low||ltp;
     const vol=q.volume||0, chgPct=getChgPct(q), delivPct=getDeliveryPct(q);
 
@@ -3256,7 +3290,15 @@ async function runBacktest(){
   document.getElementById("bt-progress").textContent="Fetching 90-day candle history...";
   try{
     // Find instrument
-    let inst=NIFTY50.find(i=>i.s===sym)||FO_STOCK_LIST.find(i=>i.s===sym)||{key:"NSE_EQ|"+sym,s:sym,n:sym,sec:"NSE"};
+    let inst=NIFTY50.find(i=>i.s===sym)||FO_STOCK_LIST.find(i=>i.s===sym);
+    if(!inst){
+      try{
+        const universe=await getNSEUniverse();
+        const match=universe.find(i=>i.s===sym);
+        if(match) inst={...match,fo:false};
+      }catch(e){}
+    }
+    if(!inst) inst={key:"NSE_EQ|"+sym,s:sym,n:sym,sec:"NSE"};
 
     // Fetch 90 days of daily candles
     const today=new Date().toISOString().split("T")[0];

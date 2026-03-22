@@ -302,23 +302,78 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <!-- TOKEN GATE (first time only) -->
 
 <div id="token-gate">
-  <div class="tc">
-    <div id="token-exp-msg" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:11px;color:#991b1b;font-weight:600">
-      ⚠ Your Upstox token has expired. Paste your new token below to continue.
-    </div>
-    <h2>🔐 Launch F.R.I.D.A.Y</h2>
-    <div class="info-box blue">
-      <strong>⚠ Open via http:// not file://</strong><br>
-      <strong>PC/Mac:</strong> <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">python -m http.server 8080</code> → <code style="background:#dbeafe;padding:1px 4px;border-radius:3px">http://localhost:8080/friday-scanner.html</code><br>
-      <strong>Any device:</strong> Host free on <a href="https://pages.github.com" target="_blank" style="color:#1d4ed8;font-weight:700">GitHub Pages</a>
-    </div>
-    <div class="info-box green">
-      Your token is saved on this device. Next day, update it in <strong>⚙ Settings</strong> tab — no re-login needed.
-    </div>
-    <label>UPSTOX ACCESS TOKEN</label>
-    <textarea id="token-input" rows="3" placeholder="Paste your Upstox access token here...&#10;Get it from: developer.upstox.com → My Apps → Get Access Token"></textarea>
-    <div class="t-err" id="t-err">⚠ Token too short — paste the full token.</div>
-    <button class="btn btn-g" style="width:100%;margin-top:11px;padding:11px;font-size:13px" onclick="startWithToken()">▶ Launch Scanner</button>
+  <div class="tc" style="max-width:480px">
+
+```
+<!-- Expiry banner -->
+<div id="token-exp-msg" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:11px;color:#991b1b;font-weight:600">
+  ⚠ Token expired — click "Get Access Token" below to refresh.
+</div>
+
+<!-- Logo + title -->
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+  <div class="logo-ic" style="width:40px;height:40px;flex-shrink:0"><span style="font-size:16px">F</span></div>
+  <div>
+    <div style="font-size:17px;font-weight:800;color:#0f172a">F.R.I.D.A.Y</div>
+    <div style="font-size:9px;color:#94a3b8;letter-spacing:1.5px">PROFESSIONAL NSE SCANNER</div>
+  </div>
+</div>
+
+<!-- Step indicator -->
+<div id="gate-step1">
+  <h2 style="font-size:14px;font-weight:700;color:#374151;margin-bottom:12px">🔐 Connect Upstox Account</h2>
+
+  <div class="info-box blue" style="font-size:10px;margin-bottom:12px">
+    <strong>One-time setup</strong> · Your credentials are saved locally on this device only.<br>
+    Get your API keys from <a href="https://developer.upstox.com" target="_blank" style="color:#1d4ed8;font-weight:700">developer.upstox.com</a> → My Apps
+  </div>
+
+  <!-- Client ID -->
+  <label style="font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:3px">CLIENT ID</label>
+  <input id="oa-client-id" type="text" placeholder="Your Upstox App Client ID"
+    style="width:100%;border:1.5px solid #e2e8f0;border-radius:7px;padding:9px 12px;font-size:13px;font-family:monospace;outline:none;margin-bottom:10px"
+    onfocus="this.style.borderColor='#16a34a'" onblur="this.style.borderColor='#e2e8f0'">
+
+  <!-- Client Secret -->
+  <label style="font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:3px">CLIENT SECRET</label>
+  <input id="oa-client-secret" type="password" placeholder="Your Upstox App Client Secret"
+    style="width:100%;border:1.5px solid #e2e8f0;border-radius:7px;padding:9px 12px;font-size:13px;font-family:monospace;outline:none;margin-bottom:10px"
+    onfocus="this.style.borderColor='#16a34a'" onblur="this.style.borderColor='#e2e8f0'">
+
+  <!-- Redirect URL -->
+  <label style="font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:3px">REDIRECT URL</label>
+  <input id="oa-redirect" type="url" placeholder="https://yourapp.github.io/..."
+    style="width:100%;border:1.5px solid #e2e8f0;border-radius:7px;padding:9px 12px;font-size:13px;font-family:monospace;outline:none;margin-bottom:4px"
+    onfocus="this.style.borderColor='#16a34a'" onblur="this.style.borderColor='#e2e8f0'">
+  <div id="oa-redirect-hint" style="font-size:9px;color:#16a34a;margin-bottom:12px"></div>
+
+  <div class="t-err" id="t-err"></div>
+
+  <button class="btn btn-g" style="width:100%;padding:11px;font-size:13px;margin-top:4px" onclick="oauthStep1()">
+    🔑 Get Access Token →
+  </button>
+</div>
+
+<!-- Step 2: Waiting for code -->
+<div id="gate-step2" style="display:none;text-align:center;padding:10px 0">
+  <div style="font-size:40px;margin-bottom:12px">🔐</div>
+  <div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px">Authorise in Upstox</div>
+  <div style="font-size:11px;color:#64748b;margin-bottom:16px;line-height:1.6">
+    A new tab has opened with the Upstox login page.<br>
+    After you approve, you will be redirected back automatically.
+  </div>
+  <div id="gate-step2-status" style="font-size:12px;font-weight:700;color:#16a34a;margin-bottom:16px">⏳ Waiting for approval...</div>
+  <button class="btn btn-g" style="width:100%;margin-bottom:8px;font-size:12px" id="gate-reopen-btn" onclick="oauthReopenWindow()" style="display:none">↗ Reopen Upstox Login</button>
+  <button class="btn btn-s" style="font-size:11px" onclick="oauthReset()">← Start Over</button>
+</div>
+
+<!-- Step 3: Exchanging code -->
+<div id="gate-step3" style="display:none;text-align:center">
+  <div class="spin" style="margin:20px auto 12px"></div>
+  <div style="font-size:13px;font-weight:600;color:#374151" id="gate-step3-msg">Generating access token...</div>
+</div>
+```
+
   </div>
 </div>
 
@@ -479,18 +534,24 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="settings-g">
       <!-- Token -->
       <div class="setting-card" style="grid-column:1/-1">
-        <h4>🔐 Upstox Access Token</h4>
-        <div style="font-size:11px;color:#64748b;margin-bottom:8px">Token expires daily. Paste your new token here each morning. It's stored locally on this device only.</div>
-        <div id="token-saved-info" style="font-size:11px;font-weight:600;color:#16a34a;margin-bottom:6px"></div>
-        <textarea id="settings-token" class="token-area" rows="2" placeholder="Paste new Upstox access token..."></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-g" onclick="saveToken()">💾 Save Token</button>
-          <button class="btn btn-s" onclick="clearToken()">🗑 Clear & Logout</button>
-        </div>
-        <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
-      </div>
+        <h4>🔐 Upstox Connection</h4>
+        <div id="token-saved-info" style="font-size:11px;font-weight:600;color:#16a34a;margin-bottom:10px"></div>
 
 ```
+    <!-- Re-auth button — one click to refresh token using saved credentials -->
+    <button class="btn btn-g" style="width:100%;margin-bottom:8px" onclick="oauthReauth()">🔑 Refresh Access Token (Re-Authorise)</button>
+
+    <!-- Manual override -->
+    <div style="font-size:10px;font-weight:700;color:#374151;margin-bottom:4px">MANUAL TOKEN OVERRIDE</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:6px">Paste a manually obtained token if OAuth isn't working</div>
+    <textarea id="settings-token" class="token-area" rows="2" placeholder="Paste access token manually..."></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-g" onclick="saveToken()">💾 Use This Token</button>
+      <button class="btn btn-s" onclick="clearToken()">🗑 Clear & Logout</button>
+    </div>
+    <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
+  </div>
+
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -983,74 +1044,214 @@ let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
 
 // ══════════════════════════════════════
-// BOOT & TOKEN
+// BOOT & OAUTH ENGINE
 // ══════════════════════════════════════
-function startWithToken(){
-  const v=document.getElementById("token-input").value.trim();
-  const errEl=document.getElementById("t-err");
-  const btn=document.querySelector("#token-gate .btn-g");
+
+// ── OAuth state ──────────────────────────────────────
+let _oauthWinInterval = null;  // polls for auth code in redirect
+
+function oauthShowGate(){
+  document.getElementById("token-gate").style.display="flex";
+  document.getElementById("app").style.display="none";
+  document.getElementById("hdr-ctrl").style.display="none";
+  document.getElementById("hdr-nav").style.display="none";
+  document.getElementById("hdr-logo").style.display="flex";
+  document.getElementById("nav-drawer").style.display="none";
+}
+
+function oauthReset(){
+  // Stop any polling, go back to step 1
+  if(_oauthWinInterval) clearInterval(_oauthWinInterval);
+  _oauthWinInterval = null;
+  document.getElementById("gate-step1").style.display="block";
+  document.getElementById("gate-step2").style.display="none";
+  document.getElementById("gate-step3").style.display="none";
+  document.getElementById("t-err").style.display="none";
+}
+
+// Pre-fill redirect URL from current page
+function oauthPrefillRedirect(){
+  const el = document.getElementById("oa-redirect");
+  if(!el) return;
+  // Pre-fill with current page URL (without query params)
+  const url = window.location.origin + window.location.pathname;
+  el.value = localStorage.getItem("friday_redirect") || url;
+  document.getElementById("oa-redirect-hint").textContent = "Auto-filled: "+el.value;
+}
+
+// Step 1: Validate credentials → open Upstox auth URL
+function oauthStep1(){
+  const clientId = document.getElementById("oa-client-id").value.trim();
+  const secret   = document.getElementById("oa-client-secret").value.trim();
+  const redirect = document.getElementById("oa-redirect").value.trim();
+  const errEl    = document.getElementById("t-err");
   errEl.style.display="none";
-  if(!v||v.length<20){
-    errEl.textContent="⚠ Token too short — paste the full Upstox access token.";
-    errEl.style.display="block";
-    return;
-  }
-  // Show loading state on button
-  if(btn){btn.disabled=true;btn.textContent="⏳ Launching...";}
-  TOKEN=v;
-  localStorage.setItem("friday_token",v);
-  localStorage.setItem("friday_token_date",new Date().toDateString());
+
+  if(!clientId){ errEl.textContent="⚠ Client ID is required"; errEl.style.display="block"; return; }
+  if(!secret)  { errEl.textContent="⚠ Client Secret is required"; errEl.style.display="block"; return; }
+  if(!redirect || !redirect.startsWith("http")){ errEl.textContent="⚠ Redirect URL must start with http:// or https://"; errEl.style.display="block"; return; }
+
+  // Save credentials for token exchange and daily refresh
+  localStorage.setItem("friday_client_id",    clientId);
+  localStorage.setItem("friday_client_secret", secret);
+  localStorage.setItem("friday_redirect",      redirect);
+
+  // Build Upstox OAuth URL
+  const authUrl = "https://api.upstox.com/v2/login/authorization/dialog"
+    + "?response_type=code"
+    + "&client_id=" + encodeURIComponent(clientId)
+    + "&redirect_uri=" + encodeURIComponent(redirect);
+
+  // Show step 2
+  document.getElementById("gate-step1").style.display="none";
+  document.getElementById("gate-step2").style.display="block";
+
+  // Open auth URL — try popup first, fallback to same tab
+  let authWin = null;
+  try { authWin = window.open(authUrl, "_blank", "width=520,height=680"); } catch(e){}
+  if(!authWin){ window.location.href = authUrl; return; } // redirect whole tab
+
+  // Poll: if redirect URL matches current page, code will appear in opener
+  // OR user may land back on this page in same tab (if popup blocked)
+  _oauthWinInterval = setInterval(()=>{
+    // Check if code arrived in current page URL (same-tab redirect)
+    const code = new URLSearchParams(window.location.search).get("code");
+    if(code){ clearInterval(_oauthWinInterval); _oauthWinInterval=null; oauthExchangeCode(code); return; }
+    // Check if popup closed without giving code
+    if(authWin && authWin.closed){
+      clearInterval(_oauthWinInterval); _oauthWinInterval=null;
+      document.getElementById("gate-step2-status").textContent="⚠ Window closed. Click Start Over to retry.";
+    }
+  }, 800);
+}
+
+// Step 3: Exchange auth code for access token
+async function oauthExchangeCode(code){
+  // Clean code from URL so refresh doesn't re-trigger
+  window.history.replaceState({}, document.title, window.location.pathname);
+
+  document.getElementById("gate-step2").style.display="none";
+  document.getElementById("gate-step3").style.display="block";
+  document.getElementById("gate-step3-msg").textContent="Generating access token...";
+
+  const clientId = localStorage.getItem("friday_client_id")||"";
+  const secret   = localStorage.getItem("friday_client_secret")||"";
+  const redirect = localStorage.getItem("friday_redirect")||"";
+
+  // POST to Upstox token endpoint via corsproxy (required — CORS blocked from browser)
+  const tokenUrl = "https://api.upstox.com/v2/login/authorization/token";
+  const body = new URLSearchParams({
+    code, client_id: clientId, client_secret: secret,
+    redirect_uri: redirect, grant_type: "authorization_code"
+  });
+
   try{
-    boot();
+    let result = null;
+    for(const fetchUrl of [
+      tokenUrl,
+      "https://corsproxy.io/?"+encodeURIComponent(tokenUrl)
+    ]){
+      try{
+        const res = await fetch(fetchUrl, {
+          method:"POST",
+          headers:{"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"},
+          body: body.toString()
+        });
+        const txt = await res.text();
+        let d = JSON.parse(txt);
+        if(d.contents) d = JSON.parse(d.contents);
+        if(d.access_token){ result=d; break; }
+        if(d.error) throw new Error(d.error_description || d.error);
+      }catch(e){ if(e.message.includes("CORS")||e.message.includes("fetch")) continue; throw e; }
+    }
+    if(!result || !result.access_token) throw new Error("No access_token in response");
+
+    // Success — store token
+    TOKEN = result.access_token;
+    localStorage.setItem("friday_token",       TOKEN);
+    localStorage.setItem("friday_token_date",  new Date().toDateString());
+    localStorage.setItem("friday_token_expiry", result.expires_in
+      ? String(Date.now() + result.expires_in*1000)
+      : String(Date.now() + 86400000)); // default 24h
+
+    document.getElementById("gate-step3-msg").textContent="✅ Token generated! Launching...";
+    setTimeout(()=>boot(), 800);
+
   }catch(e){
-    // If boot fails, reset button and show error
-    if(btn){btn.disabled=false;btn.textContent="▶ Launch Scanner";}
-    errEl.textContent="⚠ Launch failed: "+e.message;
+    document.getElementById("gate-step3").style.display="none";
+    document.getElementById("gate-step1").style.display="block";
+    const errEl = document.getElementById("t-err");
+    errEl.textContent="⚠ Token exchange failed: "+e.message+". Check Client ID / Secret / Redirect URL.";
     errEl.style.display="block";
-    TOKEN="";
   }
 }
+
+// Check on page load if we've been redirected back with a code
+function oauthCheckRedirectCode(){
+  const code = new URLSearchParams(window.location.search).get("code");
+  if(!code) return false;
+  const clientId = localStorage.getItem("friday_client_id");
+  const secret   = localStorage.getItem("friday_client_secret");
+  const redirect = localStorage.getItem("friday_redirect");
+  if(!clientId || !secret || !redirect) return false; // credentials not saved
+  // Show gate in step 3 while we exchange
+  document.getElementById("token-gate").style.display="flex";
+  document.getElementById("gate-step1").style.display="none";
+  document.getElementById("gate-step3").style.display="block";
+  oauthExchangeCode(code);
+  return true;
+}
+
+// Daily token refresh — triggers re-auth flow automatically
+function oauthNeedsRefresh(){
+  const expiry = +localStorage.getItem("friday_token_expiry")||0;
+  return expiry > 0 && Date.now() > expiry;
+}
+
+function clearToken(){
+  if(!confirm("This will log you out and clear credentials. Continue?")) return;
+  localStorage.removeItem("friday_token");
+  localStorage.removeItem("friday_token_date");
+  localStorage.removeItem("friday_token_expiry");
+  clearTimers(); TOKEN="";
+  oauthShowGate();
+  oauthReset();
+}
+
+function handleTokenExpired(){
+  clearTimers(); TOKEN="";
+  localStorage.removeItem("friday_token");
+  localStorage.removeItem("friday_token_date");
+  localStorage.removeItem("friday_token_expiry");
+  oauthShowGate();
+  const banner = document.getElementById("token-exp-msg");
+  if(banner) banner.style.display="block";
+  // If credentials are saved, auto-trigger re-auth immediately — no form shown
+  const clientId = localStorage.getItem("friday_client_id");
+  const secret   = localStorage.getItem("friday_client_secret");
+  const redirect = localStorage.getItem("friday_redirect");
+  if(clientId && secret && redirect){
+    // Skip form, go straight to Upstox auth
+    oauthAutoReauth(clientId, secret, redirect);
+  } else {
+    // First time — show credential form
+    document.getElementById("gate-step1").style.display="block";
+  }
+}
+
+// Settings tab — still allow manual token paste as override
 function saveToken(){
   const v=document.getElementById("settings-token").value.trim();
   if(!v||v.length<20){showTokenMsg("⚠ Token too short","#dc2626");return;}
   TOKEN=v; localStorage.setItem("friday_token",v);
   localStorage.setItem("friday_token_date",new Date().toDateString());
+  localStorage.setItem("friday_token_expiry", String(Date.now()+86400000));
   document.getElementById("settings-token").value="";
   updateTokenInfo();
   showTokenMsg("✅ Token saved! Scanning with new token...","#16a34a");
   setTimeout(()=>triggerScan(),500);
 }
-function clearToken(){
-  if(!confirm("This will log you out. Continue?")) return;
-  localStorage.removeItem("friday_token");
-  localStorage.removeItem("friday_token_date");
-  clearTimers(); TOKEN="";
-  document.getElementById("app").style.display="none";
-  document.getElementById("hdr-ctrl").style.display="none";
-  document.getElementById("hdr-nav").style.display="none";
-  document.getElementById("hdr-logo").style.display="flex";
-  document.getElementById("nav-drawer").style.display="none";
-  document.getElementById("token-gate").style.display="flex";
-}
-function handleTokenExpired(){
-  // Token has expired — clear it and show the token gate immediately
-  clearTimers();
-  TOKEN="";
-  localStorage.removeItem("friday_token");
-  localStorage.removeItem("friday_token_date");
-  document.getElementById("app").style.display="none";
-  document.getElementById("hdr-ctrl").style.display="none";
-  document.getElementById("hdr-nav").style.display="none";
-  document.getElementById("hdr-logo").style.display="flex";
-  document.getElementById("nav-drawer").style.display="none";
-  document.getElementById("token-gate").style.display="flex";
-  // Pre-fill a message in the token textarea
-  const ta = document.getElementById("token-input");
-  if(ta){ ta.placeholder = "⚠ Your token expired. Paste your new Upstox access token here..."; ta.value=""; }
-  // Show expiry banner if it exists
-  const errEl = document.getElementById("token-exp-msg");
-  if(errEl) errEl.style.display="block";
-}
+
 function showTokenMsg(msg,color){
   const el=document.getElementById("token-save-msg");
   el.textContent=msg; el.style.color=color; el.style.display="block";
@@ -1059,7 +1260,10 @@ function showTokenMsg(msg,color){
 function updateTokenInfo(){
   const date=localStorage.getItem("friday_token_date")||"Unknown";
   const el=document.getElementById("token-saved-info");
-  if(el) el.textContent="✅ Token saved on: "+date;
+  if(el){
+    const clientId = localStorage.getItem("friday_client_id");
+    el.textContent = "✅ Token: "+date+(clientId?" · Client: "+clientId.slice(0,8)+"...":"");
+  }
 }
 function boot(){
   // Hide token gate, show app + nav
@@ -1100,17 +1304,39 @@ function boot(){
   }
 }
 window.onload=()=>{
-  // Always start hidden — show the right screen
+  // Always start hidden
   document.getElementById("app").style.display="none";
   document.getElementById("hdr-ctrl").style.display="none";
   document.getElementById("token-gate").style.display="none";
 
+  // Pre-fill redirect URL and any saved credentials
+  oauthPrefillRedirect();
+  const savedCid = localStorage.getItem("friday_client_id");
+  const savedSec = localStorage.getItem("friday_client_secret");
+  const savedRed = localStorage.getItem("friday_redirect");
+  if(savedCid){ const el=document.getElementById("oa-client-id"); if(el) el.value=savedCid; }
+  if(savedSec){ const el=document.getElementById("oa-client-secret"); if(el) el.value=savedSec; }
+  if(savedRed){ const el=document.getElementById("oa-redirect"); if(el){ el.value=savedRed; document.getElementById("oa-redirect-hint").textContent="Saved: "+savedRed; } }
+
+  // Check if Upstox redirected back with auth code
+  if(oauthCheckRedirectCode()) return;
+
   if(TOKEN && TOKEN.length > 20){
-    // Valid token saved — go straight to app
-    boot();
+    boot(); // valid token — go straight to app
   } else {
-    // No token — show login screen
+    // No token — check if we have saved credentials to auto-reauth
+    const savedCid2 = localStorage.getItem("friday_client_id");
+    const savedSec2 = localStorage.getItem("friday_client_secret");
+    const savedRed2 = localStorage.getItem("friday_redirect");
     document.getElementById("token-gate").style.display="flex";
+    if(savedCid2 && savedSec2 && savedRed2){
+      // Credentials exist — auto-trigger auth, skip the form
+      document.getElementById("gate-step1").style.display="none";
+      oauthAutoReauth(savedCid2, savedSec2, savedRed2);
+    } else {
+      // First time — show credential form
+      document.getElementById("gate-step1").style.display="block";
+    }
   }
 };
 
@@ -3182,6 +3408,67 @@ async function lookupStock(){
 }
 
 function checkAlerts(){ /* removed */ }
+
+// Auto re-auth using saved credentials — no form shown
+// Called on boot when token expired and credentials already saved
+let _oauthWin = null;
+function oauthAutoReauth(clientId, secret, redirect){
+  // Show step 2 (waiting screen) directly, no form
+  document.getElementById("gate-step1").style.display="none";
+  document.getElementById("gate-step2").style.display="block";
+  document.getElementById("gate-step3").style.display="none";
+  document.getElementById("gate-step2-status").textContent="⏳ Opening Upstox login...";
+
+  const authUrl = "https://api.upstox.com/v2/login/authorization/dialog"
+    + "?response_type=code"
+    + "&client_id=" + encodeURIComponent(clientId)
+    + "&redirect_uri=" + encodeURIComponent(redirect);
+
+  // Small delay so UI renders first
+  setTimeout(()=>{
+    try{ _oauthWin = window.open(authUrl,"_blank","width=540,height=700"); }catch(e){}
+    if(!_oauthWin){
+      // Popup blocked — show manual button
+      document.getElementById("gate-step2-status").textContent="⚠ Popup blocked — tap the button below";
+      const reopenBtn = document.getElementById("gate-reopen-btn");
+      if(reopenBtn){ reopenBtn.style.display="block"; reopenBtn.dataset.url=authUrl; }
+      return;
+    }
+    document.getElementById("gate-step2-status").textContent="⏳ Waiting for Upstox approval...";
+    _oauthWinInterval = setInterval(()=>{
+      const code = new URLSearchParams(window.location.search).get("code");
+      if(code){ clearInterval(_oauthWinInterval); _oauthWinInterval=null; oauthExchangeCode(code); return; }
+      if(_oauthWin && _oauthWin.closed){
+        clearInterval(_oauthWinInterval); _oauthWinInterval=null;
+        document.getElementById("gate-step2-status").textContent="⚠ Window closed without approving.";
+        const reopenBtn = document.getElementById("gate-reopen-btn");
+        if(reopenBtn){ reopenBtn.style.display="block"; reopenBtn.dataset.url=authUrl; }
+      }
+    }, 800);
+  }, 200);
+}
+
+function oauthReopenWindow(){
+  const btn = document.getElementById("gate-reopen-btn");
+  const url = btn?.dataset.url;
+  if(!url) return;
+  try{ _oauthWin = window.open(url,"_blank","width=540,height=700"); }catch(e){ window.location.href=url; }
+  document.getElementById("gate-step2-status").textContent="⏳ Waiting for Upstox approval...";
+}
+
+// Manual re-auth from Settings tab
+function oauthReauth(){
+  const clientId = localStorage.getItem("friday_client_id");
+  const secret   = localStorage.getItem("friday_client_secret");
+  const redirect = localStorage.getItem("friday_redirect");
+  if(!clientId || !secret || !redirect){
+    alert("No saved credentials. Please log out and reconnect.");
+    return;
+  }
+  clearTimers(); TOKEN="";
+  oauthShowGate();
+  oauthAutoReauth(clientId, secret, redirect);
+}
 function requestNotifPermission(){ /* removed */ }
 
 // ══════════════════════════════════════

@@ -185,6 +185,19 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 .ll{font-size:9px;font-family:monospace;margin-bottom:2px;word-break:break-all;color:#94a3b8}
 .ll.e{color:#f87171}.ll.o{color:#4ade80}.ll.w{color:#fbbf24}
 .disc{margin-top:16px;padding:9px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:7px;font-size:9px;color:#94a3b8;line-height:1.6}
+/* Stock search dropdown */
+.lkp-wrap{position:relative;flex:1}
+.lkp-dd{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1.5px solid #16a34a;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:500;max-height:260px;overflow-y:auto;display:none}
+.lkp-dd.open{display:block}
+.lkp-dd-item{padding:9px 13px;cursor:pointer;display:flex;align-items:center;gap:10px;border-bottom:1px solid #f1f5f9;transition:.1s}
+.lkp-dd-item:last-child{border-bottom:none}
+.lkp-dd-item:hover,.lkp-dd-item.active{background:#f0fdf4}
+.lkp-dd-sym{font-size:13px;font-weight:800;color:#0f172a;min-width:90px}
+.lkp-dd-name{font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lkp-dd-sec{font-size:9px;background:#e2e8f0;color:#64748b;border-radius:4px;padding:1px 5px;margin-left:auto;flex-shrink:0}
+.lkp-dd-empty{padding:12px;font-size:12px;color:#94a3b8;text-align:center}
+.lkp-q{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;color:#374151}
+.lkp-q:hover{background:#e2e8f0}
 .empty-state{background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:clamp(20px,8vw,40px);text-align:center;color:#94a3b8;font-size:12px}
 .opt-group-hdr{font-size:11px;font-weight:800;color:#374151;margin:14px 0 8px;padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px}
 
@@ -304,7 +317,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div id="token-gate">
   <div class="tc" style="max-width:460px">
 
-```
 <!-- Expiry banner -->
 <div id="token-exp-msg" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:11px;color:#991b1b;font-weight:600">
   ⚠ Token expired. Get a new one from Upstox Developer Portal.
@@ -346,7 +358,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div style="margin-top:12px;font-size:9px;color:#94a3b8;text-align:center;line-height:1.6">
   Token is saved on this device · Expires daily · Paste fresh token each morning
 </div>
-```
+
 
   </div>
 </div>
@@ -412,20 +424,25 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="pane" id="pane-lookup">
     <div style="padding:0 16px 16px">
 
-```
   <!-- Search bar -->
   <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px;margin-bottom:12px">
-    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:4px">🔍 Analyse Any Stock</div>
-    <div style="font-size:10px;color:#64748b;margin-bottom:10px">Enter NSE symbol · Full stock analysis + F&O options if eligible</div>
+    <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:2px">🔍 Analyse Any Stock</div>
+    <div style="font-size:10px;color:#64748b;margin-bottom:10px">Search by name or symbol · 500+ NSE stocks</div>
     <div style="display:flex;gap:8px">
-      <input id="lkp-sym" type="text" placeholder="e.g. RELIANCE, HDFCBANK, ITC..."
-        style="flex:1;border:1.5px solid #e2e8f0;border-radius:8px;padding:10px 13px;font-size:14px;font-weight:700;text-transform:uppercase;outline:none"
-        oninput="this.value=this.value.toUpperCase()"
-        onkeydown="if(event.key==='Enter')lookupStock()">
-      <button class="btn btn-g" id="lkp-btn" onclick="lookupStock()" style="padding:10px 18px;font-size:13px">Analyse ▶</button>
+      <div class="lkp-wrap">
+        <input id="lkp-sym" type="text" placeholder="Type stock name or symbol..."
+          autocomplete="off"
+          style="width:100%;border:1.5px solid #e2e8f0;border-radius:8px;padding:10px 13px;font-size:14px;font-weight:700;text-transform:uppercase;outline:none;transition:.15s"
+          oninput="lkpSearch(this.value)"
+          onfocus="lkpSearch(this.value)"
+          onkeydown="lkpKeyNav(event)"
+          onblur="setTimeout(()=>lkpCloseDD(),200)">
+        <div id="lkp-dd" class="lkp-dd"></div>
+      </div>
+      <button class="btn btn-g" id="lkp-btn" onclick="lookupStock()" style="padding:10px 18px;font-size:13px;flex-shrink:0">Analyse ▶</button>
     </div>
     <!-- Quick picks -->
-    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
+    <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:5px">
       <span style="font-size:9px;color:#94a3b8;align-self:center">Quick:</span>
       <button onclick="lkpQuick('RELIANCE')" class="lkp-q">RELIANCE</button>
       <button onclick="lkpQuick('HDFCBANK')" class="lkp-q">HDFCBANK</button>
@@ -434,6 +451,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <button onclick="lkpQuick('SBIN')" class="lkp-q">SBIN</button>
       <button onclick="lkpQuick('TATAMOTORS')" class="lkp-q">TATAMOTORS</button>
       <button onclick="lkpQuick('BAJFINANCE')" class="lkp-q">BAJFINANCE</button>
+      <button onclick="lkpQuick('ICICIBANK')" class="lkp-q">ICICIBANK</button>
+      <button onclick="lkpQuick('ICICIAMC')" class="lkp-q">ICICIAMC</button>
       <button onclick="lkpQuick('ITC')" class="lkp-q">ITC</button>
     </div>
   </div>
@@ -471,9 +490,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
 </div>
-```
-
-  </div>
+</div>
 
   <!-- BACKTEST -->
 
@@ -523,7 +540,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
       </div>
 
-```
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -623,7 +639,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
   </div>
 </div>
-```
 
   </div>
 </div>
@@ -2045,111 +2060,117 @@ let nseUniverseDate  = null;
 
 async function getNSEUniverse(){
   const todayStr = new Date().toDateString();
-  // Return from memory cache if same day
-  if(nseUniverseCache && nseUniverseDate === todayStr){
-    return nseUniverseCache;
-  }
-  // Try sessionStorage cache
+  if(nseUniverseCache && nseUniverseDate===todayStr) return nseUniverseCache;
+
+  // Try sessionStorage cache first
   try{
-    const cached = sessionStorage.getItem("nse_universe");
-    const cachedDate = sessionStorage.getItem("nse_universe_date");
-    if(cached && cachedDate === todayStr){
-      const parsed = JSON.parse(cached);
-      if(parsed.length > 100){
-        nseUniverseCache = parsed;
-        nseUniverseDate  = todayStr;
-        lg(`NSE universe from cache: ${parsed.length} stocks`);
-        return parsed;
-      }
+    const cached=sessionStorage.getItem("nse_universe");
+    const cDate=sessionStorage.getItem("nse_universe_date");
+    if(cached&&cDate===todayStr){
+      const p=JSON.parse(cached);
+      if(p.length>100){ nseUniverseCache=p; nseUniverseDate=todayStr; lg("NSE universe from cache: "+p.length); return p; }
     }
   }catch(e){}
 
-  // Fetch fresh from Upstox CSV
-  lg("Loading NSE instruments CSV from Upstox...");
-  try{
-    // Try direct fetch first (works on GitHub Pages / localhost)
-    const url = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz";
-    const proxied = "https://corsproxy.io/?" + encodeURIComponent(url);
-    let csvText = null;
+  lg("Fetching NSE instruments from Upstox...","o");
 
-    // Try via corsproxy (handles CORS + gzip decompression on proxy side)
-    for(const fetchUrl of [proxied, url]){
-      try{
-        const res = await fetch(fetchUrl);
-        if(!res.ok) continue;
-        const contentType = res.headers.get("content-type")||"";
-        // If proxy returns raw text/csv
-        if(contentType.includes("text") || contentType.includes("csv")){
-          csvText = await res.text();
+  // Try fetching the CSV.GZ via multiple proxies
+  // corsproxy.io automatically decompresses gzip and returns plain text
+  const csvUrl = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.csv.gz";
+  const proxies = [
+    "https://corsproxy.io/?"+encodeURIComponent(csvUrl),
+    "https://api.allorigins.win/raw?url="+encodeURIComponent(csvUrl),
+  ];
+
+  let universe = null;
+
+  for(const proxyUrl of proxies){
+    try{
+      lg("Trying: "+proxyUrl.slice(0,50)+"...");
+      const res = await fetch(proxyUrl);
+      if(!res.ok){ lg("HTTP "+res.status+" from proxy","w"); continue; }
+
+      let csvText = null;
+      const ct = res.headers.get("content-type")||"";
+
+      // If proxy returns plain text (decompressed)
+      if(ct.includes("text")||ct.includes("csv")||ct.includes("octet")){
+        const txt = await res.text();
+        // Check if it looks like CSV (starts with a header line)
+        if(txt.includes("instrument_key")||txt.includes("tradingsymbol")){
+          csvText = txt;
         } else {
-          // Try DecompressionStream for gzip
+          // Might be raw gzip bytes returned as text — try DecompressionStream
           try{
-            const blob = await res.blob();
-            const ds   = new DecompressionStream("gzip");
-            const piped = blob.stream().pipeThrough(ds);
-            const reader = piped.getReader();
-            const chunks = [];
-            while(true){
-              const {done, value} = await reader.read();
-              if(done) break;
-              chunks.push(value);
-            }
-            csvText = new TextDecoder().decode(
-              chunks.reduce((a,b)=>{const r=new Uint8Array(a.length+b.length);r.set(a);r.set(b,a.length);return r;}, new Uint8Array(0))
-            );
-          }catch(gz){
-            csvText = await res.clone().text(); // last resort raw text
-          }
+            const bytes = new TextEncoder().encode(txt);
+            const ds = new DecompressionStream("gzip");
+            const writer = ds.writable.getWriter();
+            writer.write(bytes); writer.close();
+            const reader = ds.readable.getReader();
+            const chunks=[];
+            while(true){ const {done,value}=await reader.read(); if(done)break; chunks.push(value); }
+            csvText = new TextDecoder().decode(chunks.reduce((a,b)=>{const r=new Uint8Array(a.length+b.length);r.set(a);r.set(b,a.length);return r;},new Uint8Array(0)));
+          }catch(gz){ lg("Decompress failed: "+gz.message,"w"); }
         }
-        if(csvText && csvText.length > 1000) break;
-      }catch(e){ lg("CSV fetch via "+fetchUrl.slice(0,40)+": "+e.message,"w"); }
-    }
+      } else {
+        // Binary response — decompress gzip
+        try{
+          const buf = await res.arrayBuffer();
+          const ds = new DecompressionStream("gzip");
+          const writer = ds.writable.getWriter();
+          writer.write(new Uint8Array(buf)); writer.close();
+          const reader = ds.readable.getReader();
+          const chunks=[];
+          while(true){ const {done,value}=await reader.read(); if(done)break; chunks.push(value); }
+          csvText = new TextDecoder().decode(chunks.reduce((a,b)=>{const r=new Uint8Array(a.length+b.length);r.set(a);r.set(b,a.length);return r;},new Uint8Array(0)));
+        }catch(gz){ lg("Binary decompress failed: "+gz.message,"w"); }
+      }
 
-    if(!csvText || csvText.length < 1000) throw new Error("CSV fetch failed");
+      if(!csvText||!csvText.includes("instrument_key")){ lg("No valid CSV from this proxy","w"); continue; }
+      lg("CSV loaded: "+csvText.length+" chars");
 
-    // Parse CSV — find header row
-    const lines = csvText.split("\n").filter(l=>l.trim());
-    const header = lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
-    const keyIdx  = header.indexOf("instrument_key");
-    const symIdx  = header.indexOf("tradingsymbol");
-    const nameIdx = header.indexOf("name");
-    const typeIdx = header.indexOf("instrument_type");
-    const exchIdx = header.indexOf("exchange");
+      // Parse CSV
+      const lines = csvText.split("\n").filter(l=>l.trim());
+      const header = lines[0].split(",").map(h=>h.trim().replace(/"/g,"").toLowerCase());
+      const ki=header.indexOf("instrument_key"), si=header.indexOf("tradingsymbol");
+      const ni=header.indexOf("name"), ti=header.indexOf("instrument_type"), ei=header.indexOf("exchange");
+      if(ki<0||si<0){ lg("CSV columns: "+header.join("|"),"w"); continue; }
 
-    if(keyIdx<0 || symIdx<0) throw new Error("CSV header missing instrument_key/tradingsymbol");
+      const parsed=[];
+      for(let i=1;i<lines.length;i++){
+        const cols=lines[i].split(",").map(c=>c.trim().replace(/^"|"$/g,""));
+        if(cols.length<Math.max(ki,si)+1) continue;
+        const itype=ti>=0?cols[ti]:"EQ";
+        const exch=ei>=0?cols[ei]:"NSE";
+        if(!["EQ","EQUITY"].includes(itype.toUpperCase())) continue;
+        if(ei>=0&&exch.toUpperCase()!=="NSE") continue;
+        const key=cols[ki], sym=cols[si];
+        if(!key||!sym||!key.startsWith("NSE_EQ")) continue;
+        parsed.push({key, s:sym, n:ni>=0?(cols[ni]||sym):sym, sec:"NSE"});
+      }
 
-    const universe = [];
-    for(let i=1;i<lines.length;i++){
-      // Split respecting possible quoted fields
-      const cols = lines[i].split(",").map(c=>c.trim().replace(/^"|"$/g,""));
-      const itype = typeIdx>=0 ? cols[typeIdx]||"" : "";
-      const exch  = exchIdx>=0 ? cols[exchIdx]||"" : "";
-      // Only NSE EQ (equity) stocks
-      if(itype.toUpperCase()!=="EQ" && itype.toUpperCase()!=="EQUITY") continue;
-      if(exch && exch.toUpperCase()!=="NSE") continue;
-      const key = cols[keyIdx]||"";
-      const sym = cols[symIdx]||"";
-      const name= nameIdx>=0 ? (cols[nameIdx]||sym) : sym;
-      if(!key || !sym) continue;
-      universe.push({key, s:sym, n:name, sec:"NSE"});
-    }
-
-    lg(`NSE CSV parsed: ${universe.length} EQ stocks`,"o");
-
-    // Cache it
-    nseUniverseCache = universe;
-    nseUniverseDate  = todayStr;
-    try{ sessionStorage.setItem("nse_universe", JSON.stringify(universe)); sessionStorage.setItem("nse_universe_date", todayStr); }catch(e){}
-    return universe;
-
-  }catch(e){
-    lg("NSE CSV failed ("+e.message+") — falling back to Nifty50","w");
-    // Fallback to hardcoded Nifty50 list
-    const fallback = NIFTY50.map(i=>({key:i.key, s:i.s, n:i.n, sec:i.sec}));
-    nseUniverseCache = fallback;
-    nseUniverseDate  = todayStr;
-    return fallback;
+      if(parsed.length>100){
+        universe=parsed;
+        lg("NSE universe: "+parsed.length+" EQ stocks","o");
+        break;
+      } else {
+        lg("Only "+parsed.length+" stocks parsed — trying next proxy","w");
+      }
+    }catch(e){ lg("Proxy error: "+e.message,"w"); }
   }
+
+  if(universe&&universe.length>100){
+    nseUniverseCache=universe; nseUniverseDate=todayStr;
+    try{ sessionStorage.setItem("nse_universe",JSON.stringify(universe)); sessionStorage.setItem("nse_universe_date",todayStr); }catch(e){}
+    return universe;
+  }
+
+  // Fallback: hardcoded lists combined
+  lg("CSV failed — using hardcoded list only","w");
+  const fallback=[...NIFTY50,...FO_STOCK_LIST].filter((v,i,a)=>a.findIndex(x=>x.s===v.s)===i)
+    .map(i=>({key:i.key,s:i.s,n:i.n,sec:i.sec||"NSE"}));
+  nseUniverseCache=fallback; nseUniverseDate=todayStr;
+  return fallback;
 }
 
 // ══════════════════════════════════════
@@ -3034,55 +3055,73 @@ async function lookupStock(){
   document.getElementById("lkp-error").style.display="none";
   document.getElementById("lkp-progress").textContent="Looking up "+sym+"...";
   try{
-    // Step 1: Resolve instrument key
-    // Priority: hardcoded lists → NSE CSV universe → brute-force key attempts
-    document.getElementById("lkp-progress").textContent="Resolving instrument key...";
-    let inst = NIFTY50.find(i=>i.s===sym) || FO_STOCK_LIST.find(i=>i.s===sym);
+    // Step 1: Resolve instrument key + fetch quote
+    document.getElementById("lkp-progress").textContent="Searching for "+sym+"...";
 
-    if(!inst){
-      // Search NSE universe CSV (cached daily) — has ISIN-based keys for ALL NSE EQ stocks
+    let inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(i=>i.s===sym) || FO_STOCK_LIST.find(i=>i.s===sym);
+    let q = null;
+
+    // If in hardcoded list, use its ISIN key directly
+    if(inst){
       try{
-        const universe = await getNSEUniverse();
-        const match = universe.find(i=>i.s===sym || i.s===sym.replace(/[&-]/g,""));
-        if(match) inst = {...match, fo:false};
-      }catch(e){ lg("Universe lookup: "+e.message,"w"); }
+        const d = await fetchQ(inst.key);
+        q = d[inst.key] || Object.values(d)[0];
+      }catch(e){ lg("Quote (hardcoded key): "+e.message,"w"); }
     }
 
-    // Last resort: try symbol-based key (works for some stocks, fails for ISIN-keyed ones)
-    if(!inst) inst = {key:"NSE_EQ|"+sym, s:sym, n:sym, sec:"NSE", fo:false};
-
-    // Step 1b: Quote — try inst.key first, then brute-force all formats
-    document.getElementById("lkp-progress").textContent="Fetching live quote...";
-    let qData={}, q=null;
-
-    // Try the resolved key first
-    try{
-      qData = await fetchQ(inst.key);
-      q = qData[inst.key] || qData[inst.key.replace(/\|/g,":")] || Object.values(qData)[0];
-    }catch(e){ lg("Quote attempt 1: "+e.message,"w"); }
-
-    // If not found and we used a symbol-based key, try NSE_INDEX too
+    // Not in hardcoded list OR quote failed — search NSE universe CSV for ISIN key
     if(!q?.last_price){
-      // Try fetching by trading symbol directly via OHLC endpoint
-      const altKeys = [
-        "NSE_EQ|"+sym,
-        "NSE_EQ:"+sym,
-        "BSE_EQ|"+sym,
+      document.getElementById("lkp-progress").textContent="Loading NSE instruments list...";
+      try{
+        const universe = await getNSEUniverse();
+        // getNSEUniverse logs whether it loaded from CSV or fell back
+        const match = universe.find(i=>
+          i.s===sym ||
+          i.s.toUpperCase()===sym ||
+          (i.n||"").toUpperCase().replace(/\s+/g,"")===sym
+        );
+        if(match){
+          inst = {...match, fo:false};
+          lg("Universe match: "+match.s+" → "+match.key,"o");
+          document.getElementById("lkp-progress").textContent="Fetching quote for "+sym+"...";
+          const d = await fetchQ(inst.key);
+          q = d[inst.key] || Object.values(d)[0];
+        }
+      }catch(e){ lg("Universe search: "+e.message,"w"); }
+    }
+
+    // Final fallback — try every possible key format for this symbol
+    if(!q?.last_price){
+      document.getElementById("lkp-progress").textContent="Trying alternate keys...";
+      const trialKeys = [
+        "NSE_EQ|"+sym, "NSE_EQ:"+sym,
+        "BSE_EQ|"+sym, "BSE_EQ:"+sym,
       ];
-      for(const ak of altKeys){
-        if(ak===inst.key) continue;
+      for(const tk of trialKeys){
         try{
-          const d = await fetchQ(ak);
+          const d = await fetchQ(tk);
           const v = Object.values(d)[0];
-          if(v?.last_price){ q=v; inst={...inst, key:ak}; break; }
+          if(v?.last_price){
+            q = v;
+            if(!inst) inst = {key:tk, s:sym, n:sym, sec:"NSE", fo:false};
+            else inst = {...inst, key:tk};
+            lg("Found via trial key: "+tk,"o");
+            break;
+          }
         }catch(e){}
       }
     }
 
-    if(!q?.last_price) throw new Error(
-      sym+" not found. The stock exists on NSE but may not be in the instrument list yet. "+
-      "Try the exact NSE trading symbol (e.g. ICICIAMC not ICICI AMC)."
-    );
+    if(!q?.last_price){
+      throw new Error(
+        sym+" not found on Upstox API. Please verify: "+
+        "1) The symbol is correct (e.g. ICICIAMC, HDFCAMC) "+
+        "2) The stock is listed on NSE "+
+        "3) Your token is valid"
+      );
+    }
+
+    if(!inst) inst = {key:"NSE_EQ|"+sym, s:sym, n:q.tradingsymbol||sym, sec:"NSE", fo:false};
     const ltp=q.last_price, high=q.ohlc?.high||ltp, low=q.ohlc?.low||ltp;
     const vol=q.volume||0, chgPct=getChgPct(q), delivPct=getDeliveryPct(q);
 

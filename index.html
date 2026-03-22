@@ -1106,23 +1106,11 @@ function oauthStep1(){
   document.getElementById("gate-step1").style.display="none";
   document.getElementById("gate-step2").style.display="block";
 
-  // Open auth URL — try popup first, fallback to same tab
-  let authWin = null;
-  try { authWin = window.open(authUrl, "_blank", "width=520,height=680"); } catch(e){}
-  if(!authWin){ window.location.href = authUrl; return; } // redirect whole tab
-
-  // Poll: if redirect URL matches current page, code will appear in opener
-  // OR user may land back on this page in same tab (if popup blocked)
-  _oauthWinInterval = setInterval(()=>{
-    // Check if code arrived in current page URL (same-tab redirect)
-    const code = new URLSearchParams(window.location.search).get("code");
-    if(code){ clearInterval(_oauthWinInterval); _oauthWinInterval=null; oauthExchangeCode(code); return; }
-    // Check if popup closed without giving code
-    if(authWin && authWin.closed){
-      clearInterval(_oauthWinInterval); _oauthWinInterval=null;
-      document.getElementById("gate-step2-status").textContent="⚠ Window closed. Click Start Over to retry.";
-    }
-  }, 800);
+  // Redirect entire page to Upstox — on return, window.onload handles ?code=
+  document.getElementById("gate-step1").style.display="none";
+  document.getElementById("gate-step2").style.display="block";
+  document.getElementById("gate-step2-status").textContent="⏳ Redirecting to Upstox...";
+  setTimeout(()=>{ window.location.href = authUrl; }, 500);
 }
 
 // Step 3: Exchange auth code for access token
@@ -1147,6 +1135,8 @@ async function oauthExchangeCode(code){
 
   try{
     let result = null;
+    let lastErr = "";
+    // Try direct first (may work on localhost), then corsproxy for GitHub Pages
     for(const fetchUrl of [
       tokenUrl,
       "https://corsproxy.io/?"+encodeURIComponent(tokenUrl)
@@ -1154,17 +1144,30 @@ async function oauthExchangeCode(code){
       try{
         const res = await fetch(fetchUrl, {
           method:"POST",
-          headers:{"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"},
+          headers:{
+            "Content-Type":"application/x-www-form-urlencoded",
+            "Accept":"application/json"
+          },
           body: body.toString()
         });
         const txt = await res.text();
-        let d = JSON.parse(txt);
-        if(d.contents) d = JSON.parse(d.contents);
+        let d;
+        try{ d = JSON.parse(txt); }catch(pe){ lastErr="Invalid JSON from server: "+txt.slice(0,80); continue; }
+        if(d.contents){ try{ d = JSON.parse(d.contents); }catch(e){} }
         if(d.access_token){ result=d; break; }
-        if(d.error) throw new Error(d.error_description || d.error);
-      }catch(e){ if(e.message.includes("CORS")||e.message.includes("fetch")) continue; throw e; }
+        // Upstox error response
+        lastErr = d.error_description || d.error || d.message || ("HTTP "+res.status+": "+txt.slice(0,120));
+        // Don't retry on auth errors (wrong credentials)
+        if(res.status===400||res.status===401) throw new Error(lastErr);
+      }catch(e){
+        if(e.message===lastErr) throw e; // auth error — don't retry
+        lastErr = e.message;
+        // Network/CORS error — try next proxy
+      }
     }
-    if(!result || !result.access_token) throw new Error("No access_token in response");
+    if(!result || !result.access_token){
+      throw new Error(lastErr || "Token exchange failed. Check Client ID, Secret and Redirect URL match your Upstox app exactly.");
+    }
 
     // Success — store token
     TOKEN = result.access_token;
@@ -1179,10 +1182,14 @@ async function oauthExchangeCode(code){
 
   }catch(e){
     document.getElementById("gate-step3").style.display="none";
+    document.getElementById("gate-step2").style.display="none";
     document.getElementById("gate-step1").style.display="block";
     const errEl = document.getElementById("t-err");
-    errEl.textContent="⚠ Token exchange failed: "+e.message+". Check Client ID / Secret / Redirect URL.";
+    errEl.textContent="⚠ "+e.message;
+    errEl.style.color="#dc2626";
     errEl.style.display="block";
+    // Scroll to top of gate
+    document.getElementById("token-gate").scrollTop=0;
   }
 }
 
@@ -3409,54 +3416,33 @@ async function lookupStock(){
 
 function checkAlerts(){ /* removed */ }
 
-// Auto re-auth using saved credentials — no form shown
-// Called on boot when token expired and credentials already saved
-let _oauthWin = null;
+// Auto re-auth — redirects ENTIRE PAGE to Upstox (not popup)
+// When Upstox redirects back, window.onload detects ?code= and exchanges it
 function oauthAutoReauth(clientId, secret, redirect){
-  // Show step 2 (waiting screen) directly, no form
-  document.getElementById("gate-step1").style.display="none";
-  document.getElementById("gate-step2").style.display="block";
-  document.getElementById("gate-step3").style.display="none";
-  document.getElementById("gate-step2-status").textContent="⏳ Opening Upstox login...";
-
   const authUrl = "https://api.upstox.com/v2/login/authorization/dialog"
     + "?response_type=code"
     + "&client_id=" + encodeURIComponent(clientId)
     + "&redirect_uri=" + encodeURIComponent(redirect);
 
-  // Small delay so UI renders first
-  setTimeout(()=>{
-    try{ _oauthWin = window.open(authUrl,"_blank","width=540,height=700"); }catch(e){}
-    if(!_oauthWin){
-      // Popup blocked — show manual button
-      document.getElementById("gate-step2-status").textContent="⚠ Popup blocked — tap the button below";
-      const reopenBtn = document.getElementById("gate-reopen-btn");
-      if(reopenBtn){ reopenBtn.style.display="block"; reopenBtn.dataset.url=authUrl; }
-      return;
-    }
-    document.getElementById("gate-step2-status").textContent="⏳ Waiting for Upstox approval...";
-    _oauthWinInterval = setInterval(()=>{
-      const code = new URLSearchParams(window.location.search).get("code");
-      if(code){ clearInterval(_oauthWinInterval); _oauthWinInterval=null; oauthExchangeCode(code); return; }
-      if(_oauthWin && _oauthWin.closed){
-        clearInterval(_oauthWinInterval); _oauthWinInterval=null;
-        document.getElementById("gate-step2-status").textContent="⚠ Window closed without approving.";
-        const reopenBtn = document.getElementById("gate-reopen-btn");
-        if(reopenBtn){ reopenBtn.style.display="block"; reopenBtn.dataset.url=authUrl; }
-      }
-    }, 800);
-  }, 200);
+  // Show step 2 briefly, then redirect
+  document.getElementById("gate-step1").style.display="none";
+  document.getElementById("gate-step2").style.display="block";
+  document.getElementById("gate-step3").style.display="none";
+  document.getElementById("gate-step2-status").textContent="⏳ Redirecting to Upstox...";
+
+  // Redirect whole page — on return, window.onload handles ?code=
+  setTimeout(()=>{ window.location.href = authUrl; }, 600);
 }
 
 function oauthReopenWindow(){
-  const btn = document.getElementById("gate-reopen-btn");
-  const url = btn?.dataset.url;
-  if(!url) return;
-  try{ _oauthWin = window.open(url,"_blank","width=540,height=700"); }catch(e){ window.location.href=url; }
-  document.getElementById("gate-step2-status").textContent="⏳ Waiting for Upstox approval...";
+  // Fallback — just redirect
+  const clientId = localStorage.getItem("friday_client_id");
+  const secret   = localStorage.getItem("friday_client_secret");
+  const redirect = localStorage.getItem("friday_redirect");
+  if(clientId && secret && redirect) oauthAutoReauth(clientId, secret, redirect);
 }
 
-// Manual re-auth from Settings tab
+// Manual re-auth from Settings tab (one-tap daily refresh)
 function oauthReauth(){
   const clientId = localStorage.getItem("friday_client_id");
   const secret   = localStorage.getItem("friday_client_secret");
@@ -3466,7 +3452,6 @@ function oauthReauth(){
     return;
   }
   clearTimers(); TOKEN="";
-  oauthShowGate();
   oauthAutoReauth(clientId, secret, redirect);
 }
 function requestNotifPermission(){ /* removed */ }

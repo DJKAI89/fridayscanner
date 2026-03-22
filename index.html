@@ -367,10 +367,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <button class="btn btn-s" style="font-size:11px" onclick="oauthReset()">← Start Over</button>
 </div>
 
-<!-- Step 3: Exchanging code -->
-<div id="gate-step3" style="display:none;text-align:center">
-  <div class="spin" style="margin:20px auto 12px"></div>
-  <div style="font-size:13px;font-weight:600;color:#374151" id="gate-step3-msg">Generating access token...</div>
+<!-- Step 3: Exchanging code / success -->
+<div id="gate-step3" style="display:none;text-align:center;padding:10px 0">
+  <div id="gate-step3-spinner" style="margin:20px auto 12px"><div class="spin" style="margin:0 auto"></div></div>
+  <div style="font-size:13px;font-weight:600;color:#374151;margin-bottom:16px" id="gate-step3-msg">Generating access token...</div>
+  <!-- Shown after success -->
+  <button id="gate-launch-btn" class="btn btn-g" style="display:none;width:100%;padding:13px;font-size:14px;margin-bottom:10px" onclick="boot()">
+    🚀 Launch FRIDAY
+  </button>
+  <!-- Shown if exchange fails — paste token manually -->
+  <div id="gate-manual-wrap" style="display:none;text-align:left">
+    <div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Token exchange blocked by browser. Paste your access token from the Upstox Developer Portal:</div>
+    <textarea id="gate-manual-token" rows="3" style="width:100%;border:1.5px solid #e2e8f0;border-radius:7px;padding:8px 11px;font-size:11px;font-family:monospace;outline:none;margin-bottom:8px" placeholder="Paste access token here..."></textarea>
+    <button class="btn btn-g" style="width:100%;padding:10px" onclick="gateManualToken()">Use This Token →</button>
+  </div>
 </div>
 ```
 
@@ -1115,82 +1125,100 @@ function oauthStep1(){
 
 // Step 3: Exchange auth code for access token
 async function oauthExchangeCode(code){
-  // Clean code from URL so refresh doesn't re-trigger
+  // Strip code from URL immediately so page reload doesn't re-trigger
   window.history.replaceState({}, document.title, window.location.pathname);
 
   document.getElementById("gate-step2").style.display="none";
   document.getElementById("gate-step3").style.display="block";
-  document.getElementById("gate-step3-msg").textContent="Generating access token...";
+  document.getElementById("gate-step3-spinner").style.display="block";
+  document.getElementById("gate-step3-msg").textContent="Exchanging code for access token...";
+  document.getElementById("gate-launch-btn").style.display="none";
+  document.getElementById("gate-manual-wrap").style.display="none";
 
   const clientId = localStorage.getItem("friday_client_id")||"";
   const secret   = localStorage.getItem("friday_client_secret")||"";
   const redirect = localStorage.getItem("friday_redirect")||"";
 
-  // POST to Upstox token endpoint via corsproxy (required — CORS blocked from browser)
+  if(!clientId || !secret){ showManualTokenInput("No saved credentials — paste token manually"); return; }
+
   const tokenUrl = "https://api.upstox.com/v2/login/authorization/token";
-  const body = new URLSearchParams({
-    code, client_id: clientId, client_secret: secret,
-    redirect_uri: redirect, grant_type: "authorization_code"
-  });
+  const bodyStr  = new URLSearchParams({
+    code, client_id:clientId, client_secret:secret,
+    redirect_uri:redirect, grant_type:"authorization_code"
+  }).toString();
 
-  try{
-    let result = null;
-    let lastErr = "";
-    // Try direct first (may work on localhost), then corsproxy for GitHub Pages
-    for(const fetchUrl of [
-      tokenUrl,
-      "https://corsproxy.io/?"+encodeURIComponent(tokenUrl)
-    ]){
-      try{
-        const res = await fetch(fetchUrl, {
-          method:"POST",
-          headers:{
-            "Content-Type":"application/x-www-form-urlencoded",
-            "Accept":"application/json"
-          },
-          body: body.toString()
-        });
-        const txt = await res.text();
-        let d;
-        try{ d = JSON.parse(txt); }catch(pe){ lastErr="Invalid JSON from server: "+txt.slice(0,80); continue; }
-        if(d.contents){ try{ d = JSON.parse(d.contents); }catch(e){} }
-        if(d.access_token){ result=d; break; }
-        // Upstox error response
-        lastErr = d.error_description || d.error || d.message || ("HTTP "+res.status+": "+txt.slice(0,120));
-        // Don't retry on auth errors (wrong credentials)
-        if(res.status===400||res.status===401) throw new Error(lastErr);
-      }catch(e){
-        if(e.message===lastErr) throw e; // auth error — don't retry
-        lastErr = e.message;
-        // Network/CORS error — try next proxy
-      }
-    }
-    if(!result || !result.access_token){
-      throw new Error(lastErr || "Token exchange failed. Check Client ID, Secret and Redirect URL match your Upstox app exactly.");
-    }
+  let result = null, lastErr = "";
 
-    // Success — store token
+  // Try 3 proxies — CORS blocks direct POST from browser on GitHub Pages
+  const proxies = [
+    tokenUrl,
+    "https://corsproxy.io/?"+encodeURIComponent(tokenUrl),
+    "https://api.allorigins.win/raw?url="+encodeURIComponent(tokenUrl),
+  ];
+
+  for(const url of proxies){
+    document.getElementById("gate-step3-msg").textContent="Trying exchange ("+(proxies.indexOf(url)+1)+"/3)...";
+    try{
+      const res = await fetch(url, {
+        method:"POST",
+        headers:{"Content-Type":"application/x-www-form-urlencoded","Accept":"application/json"},
+        body: bodyStr
+      });
+      const txt = await res.text();
+      let d; try{ d=JSON.parse(txt); }catch(e){ lastErr="Bad response: "+txt.slice(0,60); continue; }
+      if(d.contents){ try{ d=JSON.parse(d.contents); }catch(e){} }
+      if(d.access_token){ result=d; break; }
+      lastErr = d.error_description||d.error||d.message||("HTTP "+res.status);
+      if(res.status===400||res.status===401) break; // wrong creds — no point retrying
+    }catch(e){ lastErr=e.message; }
+  }
+
+  if(result?.access_token){
+    // ── SUCCESS ──
     TOKEN = result.access_token;
     localStorage.setItem("friday_token",       TOKEN);
     localStorage.setItem("friday_token_date",  new Date().toDateString());
-    localStorage.setItem("friday_token_expiry", result.expires_in
-      ? String(Date.now() + result.expires_in*1000)
-      : String(Date.now() + 86400000)); // default 24h
+    localStorage.setItem("friday_token_expiry", String(Date.now()+(result.expires_in||86400)*1000));
 
-    document.getElementById("gate-step3-msg").textContent="✅ Token generated! Launching...";
-    setTimeout(()=>boot(), 800);
+    document.getElementById("gate-step3-spinner").style.display="none";
+    document.getElementById("gate-step3-msg").textContent="✅ Token ready!";
+    document.getElementById("gate-launch-btn").style.display="block";
 
-  }catch(e){
-    document.getElementById("gate-step3").style.display="none";
-    document.getElementById("gate-step2").style.display="none";
-    document.getElementById("gate-step1").style.display="block";
-    const errEl = document.getElementById("t-err");
-    errEl.textContent="⚠ "+e.message;
-    errEl.style.color="#dc2626";
-    errEl.style.display="block";
-    // Scroll to top of gate
-    document.getElementById("token-gate").scrollTop=0;
+    // Auto-boot after 1s — but button stays visible as fallback
+    setTimeout(()=>{
+      if(document.getElementById("token-gate").style.display!=="none") boot();
+    }, 1200);
+
+  } else {
+    // ── EXCHANGE FAILED (CORS or bad creds) ──
+    showManualTokenInput(lastErr || "Token exchange failed");
   }
+}
+
+// Show manual paste fallback when CORS blocks token exchange
+function showManualTokenInput(reason){
+  document.getElementById("gate-step3-spinner").style.display="none";
+  document.getElementById("gate-step3-msg").textContent="⚠ "+reason;
+  document.getElementById("gate-step3-msg").style.color="#dc2626";
+  document.getElementById("gate-manual-wrap").style.display="block";
+}
+
+// User manually pastes token as fallback
+function gateManualToken(){
+  const v = (document.getElementById("gate-manual-token").value||"").trim();
+  if(!v||v.length<20){
+    document.getElementById("gate-step3-msg").textContent="⚠ Token too short — paste the full token";
+    return;
+  }
+  TOKEN = v;
+  localStorage.setItem("friday_token",       TOKEN);
+  localStorage.setItem("friday_token_date",  new Date().toDateString());
+  localStorage.setItem("friday_token_expiry", String(Date.now()+86400000));
+  document.getElementById("gate-manual-wrap").style.display="none";
+  document.getElementById("gate-step3-msg").textContent="✅ Token saved!";
+  document.getElementById("gate-step3-msg").style.color="#16a34a";
+  document.getElementById("gate-launch-btn").style.display="block";
+  setTimeout(()=>{ if(document.getElementById("token-gate").style.display!=="none") boot(); }, 800);
 }
 
 // Check on page load if we've been redirected back with a code
@@ -1273,6 +1301,7 @@ function updateTokenInfo(){
   }
 }
 function boot(){
+  try{
   // Hide token gate, show app + nav
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
@@ -1308,6 +1337,15 @@ function boot(){
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("dash-stocks").style.display="block";
     document.getElementById("mkt-closed").style.display="block";
+  }
+  }catch(bootErr){
+    // If boot fails, show token gate with error message
+    console.error("boot() error:", bootErr);
+    document.getElementById("token-gate").style.display="flex";
+    document.getElementById("gate-step3").style.display="none";
+    document.getElementById("gate-step1").style.display="block";
+    document.getElementById("t-err").textContent="⚠ Launch error: "+bootErr.message;
+    document.getElementById("t-err").style.display="block";
   }
 }
 window.onload=()=>{

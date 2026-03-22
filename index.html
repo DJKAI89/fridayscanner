@@ -358,7 +358,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div style="margin-top:12px;font-size:9px;color:#94a3b8;text-align:center;line-height:1.6">
   Token is saved on this device · Expires daily · Paste fresh token each morning
 </div>
-
   </div>
 </div>
 
@@ -489,7 +488,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
 </div>
-
   </div>
 
   <!-- BACKTEST -->
@@ -539,7 +537,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         </div>
         <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
       </div>
-
+      
+      
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -639,6 +638,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
   </div>
 </div>
+
 
   </div>
 </div>
@@ -3438,7 +3438,8 @@ async function lookupStock(){
             const pcr2=ceOI>0?+(peOI/ceOI).toFixed(2):1;
             const maxPain2=calcMaxPain(chain);
             const oiWalls2=calcOIWalls(chain);
-            const picks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,nBull,vix);
+            const allPicks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,nBull,vix);
+            const picks=allPicks.filter(p=>p.confidence>=CFG.minOptConf);
             const mp2dist=maxPain2&&ltp?((maxPain2-ltp)/ltp*100).toFixed(1):null;
             document.getElementById("lkp-fo-stats").innerHTML=
               `<div class="sc"><div class="sc-lbl">${sym} LTP</div><div class="sc-val ${clr(chgPct)}">₹${fmt(ltp,0)}</div><div class="sc-sub ${clr(chgPct)}">${chgPct>=0?"+":""}${chgPct.toFixed(2)}%</div></div>`+
@@ -3446,10 +3447,10 @@ async function lookupStock(){
               (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+ 
               (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+ 
               (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
-            document.getElementById("lkp-fo-badge").textContent="F&O · "+picks.length+" signals · Exp "+expiry;
+            document.getElementById("lkp-fo-badge").textContent="F&O · "+picks.length+" signals ≥"+CFG.minOptConf+"% conf · Exp "+expiry;
             document.getElementById("lkp-fo-cards").innerHTML=picks.length
               ?picks.map((p,i)=>optCard(p,i)).join("")
-              :'<div style="font-size:11px;color:#64748b;padding:8px">No signals at current thresholds. Try lowering delta/OI in ⚙ Settings.</div>';
+              :'<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥'+CFG.minOptConf+'%. Lower Options Min Confidence in ⚙ Settings.</div>';
           }
         }
       }catch(e){

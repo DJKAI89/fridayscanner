@@ -2950,7 +2950,7 @@ function optCard(p,i){
     </div>
     <!-- Capital Required -->
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
-      <div><div style="font-size:7px;color:#64748b;margin-bottom:2px">CAPITAL REQUIRED</div><div style="font-size:16px;font-weight:800;color:#0f172a">₹${fmt(p.amtRequired,0)}</div><div style="font-size:9px;color:#64748b">${p.lot} lots × ₹${fmt(p.entry)} premium</div></div>
+      <div><div style="font-size:7px;color:#64748b;margin-bottom:2px">CAPITAL REQUIRED</div><div style="font-size:16px;font-weight:800;color:#0f172a">₹${fmt(p.amtRequired,0)}</div><div style="font-size:9px;color:#64748b">${p.lot} Qantity × ₹${fmt(p.entry)} premium</div></div>
       <div style="text-align:right"><div style="font-size:7px;color:#64748b;margin-bottom:2px">MAX PROFIT</div><div style="font-size:13px;font-weight:700;color:#16a34a">+₹${fmt(p.maxProfit,0)}</div><div style="font-size:9px;color:#dc2626">Max Loss: −₹${fmt(p.maxLoss,0)}</div></div>
     </div>
     <!-- Trade setup: Entry, SL, Target -->
@@ -2977,7 +2977,7 @@ function optCard(p,i){
       <div class="cbox neutral"><div class="cb-l">SIGNAL SCORE</div><div class="cb-v am">${p.score}/9</div><div class="cb-s" style="color:#64748b">${p.signals.length} triggers</div></div>
     </div>
     <div class="c-inds">${p.signals.map(s=>`<span class="ind ok">${s.l}</span>`).join("")}</div>
-    <div class="c-why ${rc}">${p.type==="CE"?"📈 Call":"📉 Put"} on ${p.und} · Strike ${p.strike}. Capital: ₹${fmt(p.amtRequired,0)} for ${p.lot} lots. Max profit ₹${fmt(p.maxProfit,0)} if target hit. SL at ₹${fmt(p.sl)} limits loss to ₹${fmt(p.maxLoss,0)}.</div>
+    <div class="c-why ${rc}">${p.type==="CE"?"📈 Call":"📉 Put"} on ${p.und} · Strike ${p.strike}. Capital: ₹${fmt(p.amtRequired,0)} for ${p.lot} Quantities. Max profit ₹${fmt(p.maxProfit,0)} if target hit. SL at ₹${fmt(p.sl)} limits loss to ₹${fmt(p.maxLoss,0)}.</div>
   </div>`;
 }
 

@@ -3755,7 +3755,7 @@ async function refreshMarketStatus(){
     // Upstox response fields:
     // data.market_status: "open" | "closed" | "pre_open" | "end_of_day"
     // data.exchange_status: "market_open" | "market_closed" | "holiday" etc.
-    const status = (data.market_status||"").toLowerCase();
+    const status = (data.status||"").toLowerCase();
     const exStatus = (data.exchange_status||"").toLowerCase();
     const open = status === "open" || status === "normal_open";
 

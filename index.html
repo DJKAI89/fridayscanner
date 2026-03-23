@@ -2402,11 +2402,14 @@ async function triggerScan(){
       const pot   = calcPotential(ltp, target, sl, numInds, preRec);
       const rec   = getRec(conf, pot.base, risk, pot.rr);
       const passes = conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr;
-
-      stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
+      
+      if(passes)
+      {
+       stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
         target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP});
+      }
     }
 
     // Log score distribution so user can see why stocks pass/fail

@@ -358,6 +358,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div style="margin-top:12px;font-size:9px;color:#94a3b8;text-align:center;line-height:1.6">
   Token is saved on this device · Expires daily · Paste fresh token each morning
 </div>
+
   </div>
 </div>
 
@@ -379,7 +380,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
       <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-stocks"></div>
-      <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Conf≥65% · Pot≥8% · Risk&lt;50% · R:R≥1.5 · Sorted by Expected Value</span></div>
+      <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Loading filters...</span></div>
       <div class="cards-g" id="cards-stocks"></div>
       <div class="disc">⚠ AI-assisted analysis from FRIDAY's professional engine. Not SEBI-registered advice. Always do your own research.</div>
     </div>
@@ -537,8 +538,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
         </div>
         <div id="token-save-msg" style="font-size:11px;margin-top:6px;display:none"></div>
       </div>
-      
-      
+
   <!-- Professional Filters -->
   <div class="setting-card">
     <h4>📊 Stock Professional Filters</h4>
@@ -557,13 +557,14 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
 
     <!-- Formula display -->
-    <div style="background:#0f172a;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-family:monospace;font-size:10px;line-height:1.9;color:#94a3b8">
-      <div style="color:#4ade80;font-weight:700;margin-bottom:4px">PRO_ConfidenceCalculator.cs</div>
-      <span style="color:#fbbf24">Confidence</span> = (<span style="color:#60a5fa">Signal</span> × 35%) + (<span style="color:#a78bfa">Market</span> × 25%) + (<span style="color:#34d399">Volume</span> × 20%) + (<span style="color:#f472b6">PriceAction</span> × 20%)<br>
-      <span style="color:#60a5fa">Signal</span>      = 7 indicators [RSI·MACD·50MA·200MA·Volume·NearSupport·Pattern] → 5+ = 90pts<br>
-      <span style="color:#a78bfa">Market</span>      = avg(VIX score + PCR score + NIFTY direction + Sector strength)<br>
-      <span style="color:#34d399">Volume</span>      = vol/avgVol ratio → ≥2× = 100, ≥1.2× = 70, &lt;1× = 30<br>
-      <span style="color:#f472b6">PriceAction</span> = Bullish pattern = 80, Bearish = 30, Doji = 50, None = 45
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
+      <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center">
+        <span style="font-weight:700;color:#f59e0b">Signal 35%</span><span>7 indicators — RSI · MACD · 50MA · 200MA · Volume · Near Support · Pattern (5+ = 90 pts)</span>
+        <span style="font-weight:700;color:#3b82f6">Market 25%</span><span>VIX score + PCR score + Nifty direction + Sector strength</span>
+        <span style="font-weight:700;color:#10b981">Volume 20%</span><span>vol ÷ avgVol — ≥2× = 95 pts · ≥1.2× = 70 pts · below avg = 30 pts</span>
+        <span style="font-weight:700;color:#ec4899">Pattern 20%</span><span>Bullish engulfing / Hammer / Morning Star = high · Bearish = low · None = neutral</span>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -638,7 +639,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
   </div>
 </div>
-
 
   </div>
 </div>
@@ -1122,6 +1122,9 @@ function boot(){
   loadSettingsUI();
   updateTokenInfo();
   startTimers();
+  // Update filter label immediately with current settings
+  const subEl = document.getElementById("stocks-sub");
+  if(subEl) subEl.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
   updateMarketClosedBanner();
   refreshMarketStatus().then(()=>updateMarketClosedBanner());
   setTimeout(()=>loadPortfolio(),1000);
@@ -1199,6 +1202,9 @@ function saveSettings(){
   CFG._v = CFG_VERSION; // version stamp
   localStorage.setItem("friday_cfg",JSON.stringify(CFG));
   clearTimers(); startTimers();
+  // Update filter label with new settings
+  const subEl2 = document.getElementById("stocks-sub");
+  if(subEl2) subEl2.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
   alert("✅ Settings saved! Timers restarted.");
 }
 function resetSettings(){
@@ -2808,8 +2814,8 @@ function renderStockCards(picks,totalScanned,containerId){
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
   const cardContainerId = containerId || "cards-stocks";
   if(!containerId){
-    document.getElementById("stocks-sub").textContent=`Confidence≥${CFG.minStockConf}% · Potential≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · Sorted by Confidence`;
-    document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signals`;
+    document.getElementById("stocks-sub").textContent=`Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
+    document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signal${picks.length===1?"":"s"}`;
   }
   const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
   const filteredPicks=picks;
@@ -2875,7 +2881,7 @@ function renderStockCards(picks,totalScanned,containerId){
       </div>
       <div class="c-why ${rc}">${p.rec==="STRONG BUY"?"🔥":p.rec==="BUY"?"✅":p.rec==="MODERATE"?"⚡":"👀"} ${p.numInds}/7 indicators. R:R ${p.pot.rr}:1, Win ~${p.pot.wr}%, EV ${p.pot.ev>=0?"+":""}${p.pot.ev.toFixed(2)}%. ${p.rsi?"RSI "+p.rsi+".":""} ${p.macdBull?"MACD bullish.":""}</div>
     </div>`;
-  }).join(""):`<div class="empty-state">No picks pass filters · Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}<br>Scanned ${totalScanned||50} stocks · Try lowering in ⚙ Settings.</div>`;
+  }).join(""):`<div class="empty-state">No picks pass current filters<br><span style="font-size:11px;color:#64748b">Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}</span><br><span style="font-size:10px">Scanned ${totalScanned||50} stocks · Lower thresholds in ⚙ Settings</span></div>`;
 }
 
 function renderStatsOptions(idxGroups){

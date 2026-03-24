@@ -2507,7 +2507,9 @@ async function loadOptions(force=true){
       const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
       const nQ2  = mktD["NSE_INDEX|Nifty 50"];
       const vQ2  = mktD["NSE_INDEX|India VIX"];
-      if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.open || nQ2.last_price);
+      //if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.open || nQ2.last_price);
+      
+      if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.close || nQ2.last_price);
       if(vQ2) optVix = vQ2.last_price || 15;
       lg(`Options market context: ${optNiftyBullish?"BULLISH":"BEARISH"} VIX=${optVix.toFixed(1)}`);
     }catch(e){ lg("Opts market ctx: "+e.message,"w"); }

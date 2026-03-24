@@ -1504,7 +1504,15 @@ function detectPatterns(candles){
 
 // PRO formulas
 function interpVIX(v){return v>25?{txt:"Panic",sc:20}:v>20?{txt:"High",sc:40}:v>15?{txt:"Normal",sc:70}:{txt:"Low",sc:90};}
-function interpPCR(p){return p>1.2?{txt:"Very Bullish",sc:90}:p>0.8?{txt:"Bullish",sc:70}:p>0.6?{txt:"Neutral",sc:50}:{txt:"Bearish",sc:30};}
+//function interpPCR(p){return p>1.2?{txt:"Very Bullish",sc:90}:p>0.8?{txt:"Bullish",sc:70}:p>0.6?{txt:"Neutral",sc:50}:{txt:"Bearish",sc:30};}
+
+function interpPCR(p){
+  if(p >= 1.5) return {txt:"Extreme Bullish", bias:"wait_or_put", sc:80};
+  if(p >= 1.2) return {txt:"Bullish", bias:"call", sc:75};
+  if(p >= 0.9) return {txt:"Neutral", bias:"no_trade", sc:50};
+  if(p >= 0.7) return {txt:"Bearish", bias:"put", sc:35};
+  return {txt:"Extreme Bearish", bias:"wait_or_call", sc:65};
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // PRO_ConfidenceCalculator.cs — EXACT PORT FROM C# SOURCE

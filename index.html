@@ -2419,11 +2419,11 @@ async function triggerScan(){
     });
     lg(`Score distribution: ${JSON.stringify(confBuckets)} (threshold: ${CFG.minStockConf}%)`);
     lg(`Passes check: pot>=${CFG.pot}%=${stocks.filter(s=>s.pot.base>=CFG.pot).length}, risk<${CFG.risk}%=${stocks.filter(s=>s.risk<CFG.risk).length}, rr>=${CFG.rr}=${stocks.filter(s=>s.pot.rr>=CFG.rr).length}, conf>=${CFG.minStockConf}%=${stocks.filter(s=>s.conf>=CFG.minStockConf).length}`);
-
     let picks = stocks.filter(s=>s.passes).sort((a,b)=>b.conf-a.conf).slice(0,12);
     // If no picks pass all filters, show best available with a warning
     if(picks.length === 0 && stocks.length > 0){
-      const best = [...stocks].sort((a,b)=>b.conf-a.conf).slice(0,5);
+      //const best = [...stocks].sort((a,b)=>b.conf-a.conf).slice(0,5);
+      const best = [...stocks].filter(s=>s.conf>=CFG.minStockConf).sort((a,b)=>b.conf-a.conf).slice(0,5);
       picks = best.map(s=>({...s, passes:false, _fallback:true}));
       lg(`⚠ 0 stocks passed all filters → showing top 5 by confidence. Relax thresholds in ⚙ Settings.`,"w");
     }

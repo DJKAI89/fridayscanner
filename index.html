@@ -1685,11 +1685,18 @@ function interpVIX(v) {
        : v > 18 ? {txt:"Elevated",sc:45} : v > 15 ? {txt:"Normal",sc:70}
        : v > 12 ? {txt:"Low Vol",sc:85}  : {txt:"Complacency",sc:90};
 }
-function interpPCR(p) {
+//function interpPCR(p) {
   // C# InterpretPCR
-  return p > 1.3 ? {txt:"Very Bullish",sc:90} : p > 1.1 ? {txt:"Bullish",sc:75}
-       : p >= 0.9 ? {txt:"Neutral",sc:50}      : p >= 0.7 ? {txt:"Bearish",sc:30}
-       : {txt:"Very Bearish",sc:15};
+  //return p > 1.3 ? {txt:"Very Bullish",sc:90} : p > 1.1 ? {txt:"Bullish",sc:75}
+     //  : p >= 0.9 ? {txt:"Neutral",sc:50}      : p >= 0.7 ? {txt:"Bearish",sc:30}
+    //   : {txt:"Very Bearish",sc:15};
+//}
+function interpPCR(p){
+  if(p >= 1.5) return {txt:"Very Bullish", bias:"wait_or_put", sc:80};
+  if(p >= 1.2) return {txt:"Bullish", bias:"call", sc:75};
+  if(p >= 0.9) return {txt:"Neutral", bias:"no_trade", sc:50};
+  if(p >= 0.7) return {txt:"Bearish", bias:"put", sc:35};
+  return {txt:"Very Bearish", bias:"wait_or_call", sc:65};
 }
 
 // ─────────────────────────────────────────────────────────────

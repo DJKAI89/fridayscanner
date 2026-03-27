@@ -272,6 +272,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
+
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -586,7 +587,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 </div>
 
 <button class="btn btn-g" style="width:100%;margin-top:12px" onclick="saveSettings()">💾 Save Confidence Filters</button>
-
 
   </div>
 
@@ -2411,16 +2411,25 @@ async function loadOptions(force=true){
 
     // ── Fetch market direction for options context ──
     let optNiftyBullish = true;  // default
+    let optNiftyChgPct  = 0;     // % change today
     let optVix = 15;
     try{
       const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
       const nQ2  = mktD["NSE_INDEX|Nifty 50"];
       const vQ2  = mktD["NSE_INDEX|India VIX"];
-      //if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.open || nQ2.last_price);
-      
-      if(nQ2) optNiftyBullish = nQ2.last_price >= (nQ2.ohlc?.close || nQ2.last_price);
       if(vQ2) optVix = vQ2.last_price || 15;
-      lg(`Options market context: ${optNiftyBullish?"BULLISH":"BEARISH"} VIX=${optVix.toFixed(1)}`);
+      if(nQ2){
+        // Use net_change (most reliable) — negative = bearish
+        const netChg = nQ2.net_change != null ? nQ2.net_change
+                     : (nQ2.ohlc?.close ? nQ2.last_price - nQ2.ohlc.close : 0);
+        optNiftyChgPct = nQ2.last_price > 0 ? (netChg / nQ2.last_price) * 100 : 0;
+        // Bearish if net change < -0.3% (meaningful move, not noise)
+        optNiftyBullish = optNiftyChgPct > -0.3;
+      }
+      const dirStr = optNiftyBullish
+        ? (optNiftyChgPct > 0.5 ? "STRONGLY BULLISH" : "MILD BULLISH")
+        : (optNiftyChgPct < -1  ? "STRONGLY BEARISH" : "MILD BEARISH");
+      lg(`Options market context: ${dirStr} (${optNiftyChgPct.toFixed(2)}%) VIX=${optVix.toFixed(1)}`);
     }catch(e){ lg("Opts market ctx: "+e.message,"w"); }
 
     // ─ INDEX OPTIONS: Nifty, BankNifty, Sensex, FinNifty ─
@@ -2507,7 +2516,7 @@ async function loadOptions(force=true){
 
     // Summary stats: all index spots
     const allSpots=groups.filter(g=>g.type==="index");
-    renderStatsOptions(allSpots);
+    renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
     renderOptionsGroups(groups);
 
     lastOptScan=getIST();
@@ -2532,51 +2541,52 @@ async function loadOptions(force=true){
 // niftyBullish: true=market up, false=market down
 // vix: India VIX level
 function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix) {
-  const absD  = Math.abs(delta);
-  const isCE  = optType === "CE";
-  // Is this option aligned with market direction?
-  // CE is directionally correct in bullish market; PE in bearish
+  const absD = Math.abs(delta);
+  const isCE = optType === "CE";
+  // Aligned = option direction matches market trend
   const aligned = (isCE && niftyBullish) || (!isCE && !niftyBullish);
 
+  // ── GATE: Counter-trend options are capped at 40% max confidence ──
+  // A CALL in a falling market or PUT in a rising market = low conviction
+  // We still show them but clearly signal they are against the trend
+  if(!aligned) return Math.min(40, Math.round(
+    Math.abs(delta)*30 + Math.min(oiChg,0)*0.3 + 25
+  ));
+
+  // ── All scores below apply ONLY to trend-aligned options ──
+
   // ── Delta score (30%) ──
-  const deltaScore = absD >= 0.7 ? 90 : absD >= 0.5 ? 75 : absD >= 0.3 ? 55 : absD >= 0.15 ? 40 : 25;
+  const deltaScore = absD >= 0.7 ? 90 : absD >= 0.5 ? 78 : absD >= 0.3 ? 60 : absD >= 0.15 ? 42 : 25;
 
-  // ── IV score (20%) — moderate IV is ideal ──
-  const ivScore = iv >= 50 ? 25 : iv >= 35 ? 45 : iv >= 20 ? 70 : iv >= 12 ? 80 : 55;
+  // ── IV score (20%) — moderate IV best for buying options ──
+  // High IV = expensive premium = bad for buyers
+  const ivScore = iv >= 60 ? 20 : iv >= 40 ? 35 : iv >= 25 ? 60 : iv >= 15 ? 80 : 55;
 
-  // ── OI change score (25%) — direction-aware ──
-  // OI buildup in aligned direction = conviction; opposite = resistance
-  const oiScore = oiChg >= 30 ? 90 : oiChg >= 15 ? 72 : oiChg >= 5 ? 57
-                : oiChg >= 0  ? 45 : oiChg >= -10 ? 35 : 20;
+  // ── OI change score (25%) — buildup in trend direction = conviction ──
+  const oiScore = oiChg >= 40 ? 95 : oiChg >= 25 ? 82 : oiChg >= 10 ? 68
+                : oiChg >= 0  ? 50 : oiChg >= -10 ? 35 : 20;
 
-  // ── Moneyness score (15%) ──
+  // ── Moneyness (15%) — slight OTM is best for directional plays ──
   const moneyness = spot > 0 ? Math.abs((strike - spot) / spot * 100) : 10;
-  const atmScore  = moneyness <= 1 ? 95 : moneyness <= 3 ? 82 : moneyness <= 6 ? 65
-                  : moneyness <= 10 ? 48 : 30;
+  const atmScore  = moneyness <= 1 ? 90 : moneyness <= 3 ? 80 : moneyness <= 6 ? 65
+                  : moneyness <= 10 ? 45 : 25;
 
-  // ── Theta score (10%) ──
-  const thetaScore = theta < -5 ? 30 : theta < -1 ? 50 : theta < -0.3 ? 68 : 82;
+  // ── Theta (10%) — lower theta decay = better for buyers ──
+  const thetaScore = theta < -10 ? 20 : theta < -3 ? 40 : theta < -1 ? 62 : theta < -0.3 ? 75 : 85;
 
-  // ── Signal quality bonus (up to 15 pts) ──
-  const sigBonus = Math.min(15, signals.filter(s=>s.s>=2).length * 7);
+  // ── Signal bonus (up to 12 pts) ──
+  const sigBonus = Math.min(12, signals.filter(s=>s.s>=2).length * 6);
 
   let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus;
 
-  // ── Market direction adjustment ──
-  // Aligned with trend: +10 to +15 pts
-  // Against trend: -15 to -25 pts (should rarely surface in results)
-  if (aligned) {
-    raw += 10;
-    // Extra boost if market strongly trending (VIX normal = conviction)
-    if (vix < 18) raw += 5;
-  } else {
-    // Counter-trend option: significant confidence penalty
-    raw -= 20;
-  }
+  // ── Trend strength boost ──
+  // Strongly aligned (market clearly trending in option direction)
+  if(vix < 18) raw += 5;  // low VIX = clean trend = higher conviction
 
-  // ── VIX penalty for ALL options in panic market ──
-  if (vix > 28) raw -= 15;      // Panic — all options very risky
-  else if (vix > 22) raw -= 8;  // High fear
+  // ── VIX penalty — high volatility hurts option buyers (premium is expensive) ──
+  if(vix > 30) raw -= 20;       // panic spike
+  else if(vix > 25) raw -= 12;  // very high fear
+  else if(vix > 20) raw -= 6;   // elevated fear
 
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
@@ -2622,15 +2632,19 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
       const confidence = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix);
 
       // Market-direction-aware action
-      // In bullish market: CE=opportunity, PE=hedge/sell
-      // In bearish market: PE=opportunity, CE=avoid/sell
-      let action = "WATCH";
-      const isCE = optType === "CE";
+      const isCE   = optType === "CE";
       const aligned = (isCE && niftyBullish) || (!isCE && !niftyBullish);
-      if (aligned && absD >= CFG.delta && oiChg >= 5)  action = "BUY";   // with-trend + delta + OI buildup
-      else if (aligned && absD >= CFG.delta)            action = "BUY";   // with-trend + delta
-      else if (!aligned && absD >= CFG.delta && oiChg >= CFG.oi) action = "SELL"; // counter-trend unwind
-      else if (iv >= CFG.iv && oiChg <= -CFG.oi)       action = "SELL";  // IV crush / OI unwinding
+      let action = "WATCH";
+      if(!aligned){
+        // Counter-trend: only show SELL (unwinding of wrong-direction OI)
+        if(absD >= CFG.delta && oiChg <= -CFG.oi) action = "SELL";
+        // else stays WATCH — never BUY a counter-trend option
+      } else {
+        // With-trend: BUY if delta + OI buildup confirm
+        if(absD >= CFG.delta && oiChg >= 5)  action = "BUY";
+        else if(absD >= CFG.delta)            action = "BUY";
+      }
+      if(iv >= CFG.iv && oiChg <= -CFG.oi) action = "SELL"; // IV crush regardless
 
       picks.push({
         strike: sp, type: optType, entry, sl, tgt, rr,
@@ -2796,7 +2810,25 @@ function renderStockCards(picks,totalScanned,containerId){
   }).join(""):`<div class="empty-state">No picks pass current filters<br><span style="font-size:11px;color:#64748b">Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}</span><br><span style="font-size:10px">Scanned ${totalScanned||50} stocks · Lower thresholds in ⚙ Settings</span></div>`;
 }
 
-function renderStatsOptions(idxGroups){
+function renderStatsOptions(idxGroups, niftyBull, chgPct, vix){
+  // Market direction warning banner
+  const chg = chgPct || 0;
+  const bull = niftyBull !== undefined ? niftyBull : true;
+  const absChg = Math.abs(chg);
+  let dirBanner = "";
+  if(absChg > 0.5){
+    const strong = absChg > 1.5;
+    const color  = bull ? "#16a34a" : "#dc2626";
+    const bg     = bull ? "#f0fdf4" : "#fef2f2";
+    const border = bull ? "#bbf7d0" : "#fecaca";
+    const icon   = bull ? "📈" : "📉";
+    const txt    = bull
+      ? `${icon} Market is ${strong?"STRONGLY ":""}BULLISH today (${chg>=0?"+":""}${chg.toFixed(2)}%) — CALL options aligned with trend`
+      : `${icon} Market is ${strong?"STRONGLY ":""}BEARISH today (${chg.toFixed(2)}%) — PUT options aligned with trend · CALL signals capped at 40%`;
+    dirBanner = `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 13px;margin-bottom:12px;font-size:11px;font-weight:700;color:${color}">${txt}</div>`;
+  }
+  document.getElementById("options-body").insertAdjacentHTML("afterbegin", dirBanner);
+
   // 2×2 grid on mobile, 4 across on wider screens
   document.getElementById("stats-options").style.gridTemplateColumns="repeat(auto-fill,minmax(min(calc(50% - 5px),200px),1fr))";
   document.getElementById("stats-options").innerHTML=idxGroups.map(g=>{

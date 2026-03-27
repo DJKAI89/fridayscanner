@@ -272,12 +272,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
-
-```
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
-```
 
   </nav>
   <div class="nav-footer">
@@ -477,7 +474,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <div id="lkp-results" style="display:none">
 
-```
 <!-- ── SECTION 1: Stock Analysis ── -->
 <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:6px">
   <span style="background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px">1</span>
@@ -495,7 +491,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="lkp-fo-stats" class="stats-g" style="margin-bottom:8px"></div>
   <div id="lkp-fo-cards" class="cards-g"></div>
 </div>
-```
 
   </div>
 
@@ -543,7 +538,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
 
-```
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -592,7 +586,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 </div>
 
 <button class="btn btn-g" style="width:100%;margin-top:12px" onclick="saveSettings()">💾 Save Confidence Filters</button>
-```
+
 
   </div>
 
@@ -862,6 +856,14 @@ const STOCKS=[
 const NIFTY50=STOCKS.filter(s=>s.scan);
 const FO_STOCK_LIST=STOCKS.filter(s=>s.lot>0);
 const INST_MAP={}; NIFTY50.forEach(i=>INST_MAP[i.key]=i);
+
+// Index options underlyings (for F&O Options tab)
+const INDEX_OPTS=[
+  {key:"NSE_INDEX|Nifty 50",      name:"NIFTY",     step:50,  lot:75},
+  {key:"NSE_INDEX|Nifty Bank",    name:"BANKNIFTY",  step:100, lot:30},
+  {key:"BSE_INDEX|SENSEX",        name:"SENSEX",     step:100, lot:20},
+  {key:"NSE_INDEX|Nifty Fin Service",name:"FINNIFTY", step:50,  lot:65},
+];
 
 // ══════════════════════════════════════
 // STATE

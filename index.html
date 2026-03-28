@@ -2409,28 +2409,46 @@ async function loadOptions(force=true){
   try{
     const groups=[];
 
-    // ── Fetch market direction for options context ──
-    let optNiftyBullish = true;  // default
-    let optNiftyChgPct  = 0;     // % change today
-    let optVix = 15;
-    try{
-      const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
-      const nQ2  = mktD["NSE_INDEX|Nifty 50"];
-      const vQ2  = mktD["NSE_INDEX|India VIX"];
-      if(vQ2) optVix = vQ2.last_price || 15;
-      if(nQ2){
-        // Use net_change (most reliable) — negative = bearish
+    // ── Step 1: Fetch market direction — REQUIRED before scan ──
+    // If this fails we cannot produce reliable signals, so we throw
+    updateOptProgress("Fetching Nifty direction + VIX...");
+    let optNiftyBullish, optNiftyChgPct, optVix;
+
+    // Retry up to 3 times — this MUST succeed for deterministic results
+    let mktFetched = false;
+    for(let attempt=1; attempt<=3; attempt++){
+      try{
+        const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
+        const nQ2  = mktD["NSE_INDEX|Nifty 50"];
+        const vQ2  = mktD["NSE_INDEX|India VIX"];
+        if(!nQ2?.last_price) throw new Error("Nifty quote missing");
+        optVix = vQ2?.last_price || 15;
+
+        // Use net_change for direction — most reliable field in Upstox
         const netChg = nQ2.net_change != null ? nQ2.net_change
-                     : (nQ2.ohlc?.close ? nQ2.last_price - nQ2.ohlc.close : 0);
+                     : (nQ2.ohlc?.close ? nQ2.last_price - nQ2.ohlc.close
+                     : nQ2.ohlc?.open  ? nQ2.last_price - nQ2.ohlc.open : 0);
         optNiftyChgPct = nQ2.last_price > 0 ? (netChg / nQ2.last_price) * 100 : 0;
-        // Bearish if net change < -0.3% (meaningful move, not noise)
-        optNiftyBullish = optNiftyChgPct > -0.3;
+        // Neutral zone ±0.3% = treat as neutral (no strong directional bias)
+        optNiftyBullish = optNiftyChgPct >= -0.3;
+
+        const dirStr = optNiftyChgPct > 1   ? "STRONGLY BULLISH ↑↑"
+                     : optNiftyChgPct > 0.3 ? "BULLISH ↑"
+                     : optNiftyChgPct > -0.3? "NEUTRAL ↔"
+                     : optNiftyChgPct > -1  ? "BEARISH ↓"
+                     :                        "STRONGLY BEARISH ↓↓";
+        lg(`✅ Market: ${dirStr} (${optNiftyChgPct.toFixed(2)}%) VIX=${optVix.toFixed(1)} → ${optNiftyBullish?"CALLS":"PUTS"} aligned`,"o");
+        mktFetched = true;
+        break;
+      }catch(e){
+        lg(`Market ctx attempt ${attempt}/3: ${e.message}`,"w");
+        if(attempt < 3) await sleep(1500);
       }
-      const dirStr = optNiftyBullish
-        ? (optNiftyChgPct > 0.5 ? "STRONGLY BULLISH" : "MILD BULLISH")
-        : (optNiftyChgPct < -1  ? "STRONGLY BEARISH" : "MILD BEARISH");
-      lg(`Options market context: ${dirStr} (${optNiftyChgPct.toFixed(2)}%) VIX=${optVix.toFixed(1)}`);
-    }catch(e){ lg("Opts market ctx: "+e.message,"w"); }
+    }
+    if(!mktFetched) throw new Error(
+      "Cannot fetch Nifty market direction after 3 attempts. "+
+      "This prevents unreliable signals. Check your internet and retry."
+    );
 
     // ─ INDEX OPTIONS: Nifty, BankNifty, Sensex, FinNifty ─
     for(const und of INDEX_OPTS){
@@ -2546,14 +2564,13 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // Aligned = option direction matches market trend
   const aligned = (isCE && niftyBullish) || (!isCE && !niftyBullish);
 
-  // ── GATE: Counter-trend options are capped at 40% max confidence ──
-  // A CALL in a falling market or PUT in a rising market = low conviction
-  // We still show them but clearly signal they are against the trend
-  if(!aligned) return Math.min(40, Math.round(
-    Math.abs(delta)*30 + Math.min(oiChg,0)*0.3 + 25
-  ));
+  // ── Direction multiplier ──
+  // Counter-trend options get a strong penalty but are NOT completely hidden.
+  // This keeps results deterministic — same data always = same score.
+  // The UI will clearly label them as "Against Trend".
+  const dirMult = aligned ? 1.0 : 0.45;  // counter-trend = 45% of normal score
 
-  // ── All scores below apply ONLY to trend-aligned options ──
+  // ── All scores below apply to all options; dirMult applied at end ──
 
   // ── Delta score (30%) ──
   const deltaScore = absD >= 0.7 ? 90 : absD >= 0.5 ? 78 : absD >= 0.3 ? 60 : absD >= 0.15 ? 42 : 25;
@@ -2587,6 +2604,9 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   if(vix > 30) raw -= 20;       // panic spike
   else if(vix > 25) raw -= 12;  // very high fear
   else if(vix > 20) raw -= 6;   // elevated fear
+
+  // Apply direction multiplier — counter-trend signals are significantly discounted
+  raw = raw * dirMult;
 
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
@@ -2646,17 +2666,20 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
       }
       if(iv >= CFG.iv && oiChg <= -CFG.oi) action = "SELL"; // IV crush regardless
 
+      const trendAligned = (optType==="CE" && niftyBullish) || (optType==="PE" && !niftyBullish);
       picks.push({
         strike: sp, type: optType, entry, sl, tgt, rr,
         iv, delta, theta, oi, oiChg, action, signals,
         score: signals.reduce((a, s) => a + s.s, 0),
         confidence, atm: sp === atm, spot, expiry, und: name,
-        lot, amtRequired, maxLoss, maxProfit
+        lot, amtRequired, maxLoss, maxProfit,
+        trendAligned, // true = with market direction
+        trendDir: niftyBullish ? "BULLISH" : "BEARISH",
       });
     }
   }
   // Sort by confidence DESC
-  return picks.sort((a, b) => b.confidence - a.confidence).slice(0, 10);
+  return picks.sort((a, b) => b.confidence - a.confidence);  // no slice — filtered by minOptConf in renderOptionsGroups
 }
 
 // ══════════════════════════════════════
@@ -2860,20 +2883,43 @@ function renderOptionsGroups(groups){
   const stkGroups=groups.filter(g=>g.type==="stock");
 
   // Flatten and sort ALL picks by confidence desc
+  // Split: with-trend vs counter-trend
   const allIdxPicks=idxGroups.flatMap(g=>g.picks).filter(p=>p.confidence>=CFG.minOptConf).sort((a,b)=>b.confidence-a.confidence);
   const allStkPicks=stkGroups.flatMap(g=>g.picks).filter(p=>p.confidence>=CFG.minOptConf).sort((a,b)=>b.confidence-a.confidence);
-  const totalAll=allIdxPicks.length+allStkPicks.length;
+
+  const idxAligned    = allIdxPicks.filter(p=>p.trendAligned);
+  const idxCounter    = allIdxPicks.filter(p=>!p.trendAligned);
+  const stkAligned    = allStkPicks.filter(p=>p.trendAligned);
+  const stkCounter    = allStkPicks.filter(p=>!p.trendAligned);
+  const totalAll      = allIdxPicks.length + allStkPicks.length;
+  const totalAligned  = idxAligned.length + stkAligned.length;
+  const totalCounter  = idxCounter.length + stkCounter.length;
 
   let html="";
-  if(allIdxPicks.length){
-    html+=`<div class="opt-group-hdr">📊 Index Options — ${allIdxPicks.length} signals · conf≥${CFG.minOptConf}% · sorted by confidence</div><div class="cards-g">`;
-    allIdxPicks.forEach((p,i)=>{html+=optCard(p,i);});
+  // ── With-trend signals (primary) ──
+  if(idxAligned.length){
+    html+=`<div class="opt-group-hdr" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">✅ Index Options — ${idxAligned.length} WITH-TREND signals · conf≥${CFG.minOptConf}% · sorted by confidence</div><div class="cards-g">`;
+    idxAligned.forEach((p,i)=>{html+=optCard(p,i);});
     html+="</div>";
   }
-  if(allStkPicks.length){
-    html+=`<div class="opt-group-hdr" style="margin-top:16px">📈 Stock Options — ${allStkPicks.length} signals · conf≥${CFG.minOptConf}% · sorted by confidence</div><div class="cards-g">`;
-    allStkPicks.forEach((p,i)=>{html+=optCard(p,i);});
+  if(stkAligned.length){
+    html+=`<div class="opt-group-hdr" style="margin-top:16px;background:#f0fdf4;border-color:#bbf7d0;color:#15803d">✅ Stock Options — ${stkAligned.length} WITH-TREND signals · sorted by confidence</div><div class="cards-g">`;
+    stkAligned.forEach((p,i)=>{html+=optCard(p,i);});
     html+="</div>";
+  }
+  // ── Counter-trend signals (secondary, clearly separated) ──
+  if(totalCounter > 0){
+    html+=`<div class="opt-group-hdr" style="margin-top:20px;background:#fffbeb;border-color:#fde68a;color:#92400e">⚠ COUNTER-TREND — ${totalCounter} signals going AGAINST market direction · Lower confidence scores applied</div>`;
+    if(idxCounter.length){
+      html+=`<div style="margin-top:8px;font-size:10px;font-weight:700;color:#92400e;margin-bottom:6px">Index Options Against Trend</div><div class="cards-g">`;
+      idxCounter.forEach((p,i)=>{html+=optCard(p,i);});
+      html+="</div>";
+    }
+    if(stkCounter.length){
+      html+=`<div style="margin-top:8px;font-size:10px;font-weight:700;color:#92400e;margin-bottom:6px">Stock Options Against Trend</div><div class="cards-g">`;
+      stkCounter.forEach((p,i)=>{html+=optCard(p,i);});
+      html+="</div>";
+    }
   }
   if(!totalAll) html=`<div class="empty-state">No option signals meet confidence threshold (≥${CFG.minOptConf}%). Lower it in ⚙ Settings → Minimum Confidence Filters.</div>`;
   body.innerHTML=html;
@@ -2887,6 +2933,7 @@ function optCard(p,i){
   return`<div class="card ${rc}" style="animation-delay:${i*.03}s">
     <span class="c-rec ${rc}">${p.action}</span>
     ${p.atm?`<span style="position:absolute;top:11px;right:72px;background:#eff6ff;color:#1d4ed8;font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px">ATM</span>`:""}
+    ${!p.trendAligned?`<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:4px 10px;margin-bottom:8px;font-size:9px;font-weight:700;color:#92400e">⚠ AGAINST TREND — Market is ${p.trendDir}. This option is counter-directional. Lower confidence applies.</div>`:""}
     <div class="c-head">
       <div class="c-sym">${p.und} ${p.strike} ${p.type} <span style="font-size:10px;font-weight:700;color:${p.confidence>=CFG.minOptConf?"#16a34a":p.confidence>=(CFG.minOptConf-15)?"#d97706":"#dc2626"}">${p.confidence}% conf</span></div>
       <div class="c-name">${p.type==="CE"?"📈 Call":"📉 Put"} · Lot ${p.lot} · Spot ₹${fmt(p.spot,0)} · Exp ${p.expiry}</div>

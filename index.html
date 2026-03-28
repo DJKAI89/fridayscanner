@@ -1195,10 +1195,14 @@ function startTimers(){
       el.textContent = mins+":"+secs;
       el.className = "cdown-v"+(scanSecs<30?" urg":"");
       el.style.color = "";
+      const lblEl2 = document.getElementById("cdown-lbl");
+      if(lblEl2) lblEl2.textContent = "NEXT SCAN";
     } else {
       el.textContent = "OFF";
       el.className = "cdown-v";
       el.style.color = "#dc2626";
+      const lblEl = document.getElementById("cdown-lbl");
+      if(lblEl) lblEl.textContent = "MARKET CLOSED";
     }
     updateRefreshInfo();
   }, 1000);
@@ -1396,16 +1400,10 @@ function detectPatterns(candles){
 }
 
 // PRO formulas
-function interpVIX(v){return v>25?{txt:"Panic",sc:20}:v>20?{txt:"High",sc:40}:v>15?{txt:"Normal",sc:70}:{txt:"Low",sc:90};}
+// interpVIX defined below (PRO version)
 //function interpPCR(p){return p>1.2?{txt:"Very Bullish",sc:90}:p>0.8?{txt:"Bullish",sc:70}:p>0.6?{txt:"Neutral",sc:50}:{txt:"Bearish",sc:30};}
 
-function interpPCR(p){
-  if(p >= 1.5) return {txt:"Extreme Bullish", bias:"wait_or_put", sc:80};
-  if(p >= 1.2) return {txt:"Bullish", bias:"call", sc:75};
-  if(p >= 0.9) return {txt:"Neutral", bias:"no_trade", sc:50};
-  if(p >= 0.7) return {txt:"Bearish", bias:"put", sc:35};
-  return {txt:"Extreme Bearish", bias:"wait_or_call", sc:65};
-}
+// interpPCR defined below (PRO version)
 
 // ═══════════════════════════════════════════════════════════════════════
 // PRO_ConfidenceCalculator.cs — EXACT PORT FROM C# SOURCE
@@ -1482,7 +1480,7 @@ function calcRisk(ltp, sl, target, atr, vix) {
   // C# CalculatePositionRisk: SL distance bands × R:R multiplier
   const slPct = ltp > 0 && sl > 0 ? Math.abs((ltp - sl) / ltp) * 100 : 4;
   let posRisk = slPct < 2 ? 10 : slPct < 4 ? 20 : slPct < 6 ? 35 : slPct < 10 ? 50 : 70;
-  const rr = (sl > 0 && ltp > sl) ? (target - ltp) / (ltp - sl) : 1;
+  const rr = (sl > 0 && ltp > sl && ltp !== sl) ? (target - ltp) / (ltp - sl) : 0.5; // 0.5 = poor RR when no valid SL
   if (rr >= 3.0)      posRisk *= 0.70;  // Excellent R:R reduces risk
   else if (rr >= 2.0) posRisk *= 0.85;  // Good R:R
   else if (rr < 1.0)  posRisk *= 1.30;  // Poor R:R increases risk
@@ -1529,7 +1527,7 @@ function calcPotential(ltp, target, sl, numInds, rec) {
   // Conservative = entry + (entry-sl)×1.5  (risk-based)
   // Moderate     = target
   // Aggressive   = entry + (entry-sl)×4.0
-  const riskAmt = sl > 0 ? ltp - sl : ltp * 0.03;
+  const riskAmt = (sl > 0 && ltp > sl) ? ltp - sl : ltp * 0.03; // guard: never negative
   const cons = +(ltp + riskAmt * 1.5).toFixed(2);
   const mod  = +target.toFixed(2);
   const agg  = +(ltp + riskAmt * 4.0).toFixed(2);
@@ -2107,10 +2105,15 @@ async function triggerScan(){
     const idxD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
     const nQ = idxD["NSE_INDEX|Nifty 50"], bQ = idxD["NSE_INDEX|Nifty Bank"], vQ = idxD["NSE_INDEX|India VIX"];
     const vix   = vQ?.last_price || 15;
-    const nLtp  = nQ?.last_price || 0, nChgPct = getChgPct(nQ);
-    const nBull = nLtp >= (nQ?.ohlc?.open || nLtp);
+    const nLtp  = nQ?.last_price || 0;
+    const nChgPct = getChgPct(nQ); // used for display %; actual direction from net_change below
+    // Use net_change for direction — consistent across all tabs
+    const nNetChg = nQ?.net_change != null ? nQ.net_change
+                  : (nQ?.ohlc?.open ? nLtp - nQ.ohlc.open : 0);
+    const nChgPctActual = nLtp > 0 ? (nNetChg / nLtp) * 100 : 0;
+    const nBull = nChgPctActual > -0.3; // bearish only if clearly negative (>0.3% down)
     const {txt:vixTxt, sc:vixSc} = interpVIX(vix);
-    lg(`✅ Nifty ₹${fmt(nLtp,0)} | VIX ${vix.toFixed(1)} (${vixTxt}) | Market: ${nBull?"BULLISH":"BEARISH"}`,"o");
+    lg(`✅ Nifty ₹${fmt(nLtp,0)} ${nNetChg>=0?"+":""}${nNetChg.toFixed(2)} pts (${nChgPctActual.toFixed(2)}%) | VIX ${vix.toFixed(1)} (${vixTxt}) | Market: ${nBull?"BULLISH":"BEARISH"}`,"o");
 
     // ── Sector index performance ──
     // Fetch key Nifty sector indices to compute real sector strength
@@ -2600,10 +2603,14 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // Strongly aligned (market clearly trending in option direction)
   if(vix < 18) raw += 5;  // low VIX = clean trend = higher conviction
 
-  // ── VIX penalty — high volatility hurts option buyers (premium is expensive) ──
-  if(vix > 30) raw -= 20;       // panic spike
-  else if(vix > 25) raw -= 12;  // very high fear
-  else if(vix > 20) raw -= 6;   // elevated fear
+  // ── VIX impact — high VIX = expensive premium for buyers ──
+  // For aligned options: slight penalty (premium expensive but direction is right)
+  // For counter-trend: already penalized by dirMult
+  if(vix > 30) raw -= 15;       // panic: very expensive premium
+  else if(vix > 25) raw -= 8;   // high fear: elevated premium
+  else if(vix > 20) raw -= 4;   // slightly elevated
+  // Low VIX bonus: cheap premium + clear trend
+  else if(vix < 14) raw += 5;
 
   // Apply direction multiplier — counter-trend signals are significantly discounted
   raw = raw * dirMult;
@@ -2615,7 +2622,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
   const picks = [];
   for (const row of chain) {
     const sp = row.strike_price;
-    if (!spot || Math.abs(sp - atm) > spot * 0.12) continue; // ±12% of spot
+    if (!spot || Math.abs(sp - atm) > spot * 0.15) continue; // ±15% of spot (wider for low-priced stocks)
     for (const [side, optType] of [["call_options", "CE"], ["put_options", "PE"]]) {
       const opt = row[side]; if (!opt) continue;
       const md = opt.market_data, gr = opt.option_greeks;
@@ -3523,10 +3530,23 @@ async function lookupStock(){
               (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+
               (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+
               (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
-            document.getElementById("lkp-fo-badge").textContent="F&O · "+picks.length+" signals ≥"+CFG.minOptConf+"% conf · Exp "+expiry;
-            document.getElementById("lkp-fo-cards").innerHTML=picks.length
-              ?picks.map((p,i)=>optCard(p,i)).join("")
-              :'<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥'+CFG.minOptConf+'%. Lower Options Min Confidence in ⚙ Settings.</div>';
+            const _aligned = picks.filter(p=>p.trendAligned);
+            const _counter = picks.filter(p=>!p.trendAligned);
+            const _dirLabel = optBullForStock ? "📈 BULLISH" : "📉 BEARISH";
+            document.getElementById("lkp-fo-badge").textContent=`${_dirLabel} · ${_aligned.length} with-trend · ${_counter.length} counter · Exp ${expiry}`;
+            let _foHtml = "";
+            if(_aligned.length){
+              _foHtml += `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;font-weight:700;color:#15803d">✅ ${_aligned.length} WITH-TREND signal${_aligned.length===1?"":"s"}</div>`;
+              _foHtml += `<div class="cards-g">${_aligned.map((p,i)=>optCard(p,i)).join("")}</div>`;
+            }
+            if(_counter.length){
+              _foHtml += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin:${_aligned.length?"12px":"0"} 0 8px;font-size:10px;font-weight:700;color:#92400e">⚠ ${_counter.length} COUNTER-TREND — against market direction</div>`;
+              _foHtml += `<div class="cards-g">${_counter.map((p,i)=>optCard(p,i)).join("")}</div>`;
+            }
+            if(!picks.length){
+              _foHtml = `<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥${CFG.minOptConf}%. Lower Options Min Confidence in ⚙ Settings.</div>`;
+            }
+            document.getElementById("lkp-fo-cards").innerHTML=_foHtml;
           }
         }
       }catch(e){
@@ -3650,11 +3670,20 @@ function isOpen(){
 // Local time fallback (no API) — used on first call before cache is ready
 function _localIsOpen(){
   const now = new Date();
-  const h = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false});
-  const m = +now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
-  const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+  // Get IST time components reliably
+  const istStr = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",
+    hour:"2-digit",minute:"2-digit",weekday:"short",hour12:false});
+  // Parse: "Mon, 09:37" format
+  const parts = istStr.split(", ");
+  const day = parts[0];
+  const timeParts = (parts[1]||"00:00").split(":");
+  const h = parseInt(timeParts[0],10) % 24; // handle 24→0
+  const m = parseInt(timeParts[1],10);
   if(day==="Sat"||day==="Sun") return false;
-  return (h>9||(h===9&&m>=15))&&(h<15||(h===15&&m<=30));
+  // NSE Equity: 9:15 AM to 3:30 PM IST
+  const afterOpen  = (h > 9) || (h === 9 && m >= 15);
+  const beforeClose= (h < 15) || (h === 15 && m <= 30);
+  return afterOpen && beforeClose;
 }
 
 // Fetch market status from Upstox API and update cache
@@ -3684,7 +3713,10 @@ async function refreshMarketStatus(){
     // data.exchange_status: "market_open" | "market_closed" | "holiday" etc.
     const status = (data.status||"").toLowerCase();
     const exStatus = (data.exchange_status||"").toLowerCase();
-    const open = status === "open" || status === "normal_open";
+    // Upstox market_status values: "open", "normal_open", "pre_open",
+    // "closed", "end_of_day", "pre_open_nifty"
+    const open = status === "open" || status === "normal_open" ||
+                 status === "market_open" || exStatus === "market_open";
 
     let msg = "";
     if(!open){

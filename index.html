@@ -3429,17 +3429,34 @@ async function lookupStock(){
     ].filter(Boolean).length;
     const mtfScore = Math.round(mtfBullish / 5 * 100); // 0-100%
 
-    // Step 3: Market context
+    // Step 3: Market context — use net_change (reliable) not close comparison
     document.getElementById("lkp-progress").textContent="Fetching market context...";
-    let vix=15,vixSc=70,pcrSc=50,nBull=true;
+    let vix=15,vixSc=70,pcrSc=50,nBull=true,nChgPct=0;
     try{
       const mD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
       const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
       const vQ2=mD["NSE_INDEX|India VIX"]||mD["NSE_INDEX:India VIX"];
       if(vQ2) vix=vQ2.last_price||15;
-      if(nQ2) nBull=nQ2.last_price>=(nQ2.ohlc?.close||nQ2.last_price);
+      if(nQ2){
+        // Use net_change — same reliable method as F&O tab
+        const netChg=nQ2.net_change!=null?nQ2.net_change
+                    :(nQ2.ohlc?.open?nQ2.last_price-nQ2.ohlc.open:0);
+        nChgPct=nQ2.last_price>0?(netChg/nQ2.last_price)*100:0;
+        nBull=nChgPct>-0.3; // bearish only if clearly negative
+      }
       vixSc=interpVIX(vix).sc;
-    }catch(e){}
+      lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% → ${nBull?"BULLISH":"BEARISH"} VIX=${vix.toFixed(1)}`);
+    }catch(e){ lg("Market ctx: "+e.message,"w"); }
+
+    // Also factor in the stock's own trend — if stock is strongly down, treat as bearish for options
+    // This prevents showing BUY CALL on a stock that is -4% on the day
+    const stockChgPct = chgPct || 0;
+    // Combined signal: stock must agree with market for BUY CALL signal
+    // If stock is down >1% AND nifty is down → definitively bearish for this stock's options
+    const stockBull = stockChgPct > -0.5;
+    // For options direction: stock-level direction takes priority over index
+    const optBullForStock = stockBull && nBull;
+    lg(`Analyse options direction: stock ${stockChgPct.toFixed(2)}% + Nifty ${nChgPct.toFixed(2)}% → ${optBullForStock?"CALL":"PUT"} aligned`);
 
     // Step 4: Score
     const patterns=tech.patterns||{}, sr=tech.sr||{};
@@ -3485,14 +3502,26 @@ async function lookupStock(){
             const pcr2=ceOI>0?+(peOI/ceOI).toFixed(2):1;
             const maxPain2=calcMaxPain(chain);
             const oiWalls2=calcOIWalls(chain);
-            const allPicks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,nBull,vix);
+            const allPicks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix);
             const picks=allPicks.filter(p=>p.confidence>=CFG.minOptConf);
             const mp2dist=maxPain2&&ltp?((maxPain2-ltp)/ltp*100).toFixed(1):null;
+            // Direction banner for Analyse tab
+            const _bull = optBullForStock;
+            const _dirColor = _bull ? "#15803d" : "#dc2626";
+            const _dirBg    = _bull ? "#f0fdf4"  : "#fef2f2";
+            const _dirBord  = _bull ? "#bbf7d0"  : "#fecaca";
+            const _dirIcon  = _bull ? "📈" : "📉";
+            const _dirTxt   = _bull
+              ? `${_dirIcon} BULLISH — CALL options aligned with trend (Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct>=0?"+":""}${stockChgPct.toFixed(2)}%)`
+              : `${_dirIcon} BEARISH — PUT options aligned with trend · CALL signals penalised (Nifty ${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct.toFixed(2)}%)`;
+            const _dirBanner = `<div style="background:${_dirBg};border:1px solid ${_dirBord};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:11px;font-weight:700;color:${_dirColor};grid-column:1/-1">${_dirTxt}</div>`;
+
             document.getElementById("lkp-fo-stats").innerHTML=
+              _dirBanner+
               `<div class="sc"><div class="sc-lbl">${sym} LTP</div><div class="sc-val ${clr(chgPct)}">₹${fmt(ltp,0)}</div><div class="sc-sub ${clr(chgPct)}">${chgPct>=0?"+":""}${chgPct.toFixed(2)}%</div></div>`+
               `<div class="sc"><div class="sc-lbl">PCR</div><div class="sc-val ${pcr2>1?"up":pcr2>0.7?"am":"dn"}">${pcr2}</div><div class="sc-sub">${interpPCR(pcr2).txt}</div></div>`+
-              (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+ 
-              (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+ 
+              (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+
+              (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+
               (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
             document.getElementById("lkp-fo-badge").textContent="F&O · "+picks.length+" signals ≥"+CFG.minOptConf+"% conf · Exp "+expiry;
             document.getElementById("lkp-fo-cards").innerHTML=picks.length

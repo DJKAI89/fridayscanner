@@ -254,7 +254,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div id="nav-drawer" style="display:none">
   <div class="nav-hdr">
     <div class="nav-logo-ic"><span>F</span></div>
-    <div><div class="nav-logo-txt">F.R.I.D.A.Y</div><div class="nav-logo-sub">PROFESSIONAL NSE SCANNER</div></div>
+    <div><div class="nav-logo-txt" id="nav-user-name">F.R.I.D.A.Y</div><div class="nav-logo-sub" id="nav-user-sub">PROFESSIONAL NSE SCANNER</div></div>
   </div>
   <!-- Market status in menu -->
   <div class="nav-mkt" id="nav-mkt-status" style="color:#16a34a">● Market status loading...</div>
@@ -492,7 +492,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="lkp-fo-stats" class="stats-g" style="margin-bottom:8px"></div>
   <div id="lkp-fo-cards" class="cards-g"></div>
 </div>
-
   </div>
 
 </div>
@@ -932,6 +931,8 @@ function clearToken(){
   if(!confirm("Log out and clear token?")) return;
   localStorage.removeItem("friday_token");
   localStorage.removeItem("friday_token_date");
+  localStorage.removeItem("friday_user_name");
+  localStorage.removeItem("friday_user_id");
   clearTimers(); TOKEN="";
   document.getElementById("app").style.display="none";
   document.getElementById("hdr-ctrl").style.display="none";
@@ -941,6 +942,11 @@ function clearToken(){
   document.getElementById("token-gate").style.display="flex";
   const ta=document.getElementById("token-input");
   if(ta) ta.value="";
+  // Reset nav header to default
+  const _nEl2=document.getElementById("nav-user-name");
+  const _sEl2=document.getElementById("nav-user-sub");
+  if(_nEl2) _nEl2.textContent="F.R.I.D.A.Y";
+  if(_sEl2) _sEl2.textContent="PROFESSIONAL NSE SCANNER";
 }
 
 function handleTokenExpired(){
@@ -992,6 +998,47 @@ async function loadClosedMarketStats(){
      <span style="font-size:10px;color:#94a3b8">Stats show last session data · Scan auto-starts Mon–Fri at 9:15 AM IST</span></div>`;
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Fetch Upstox user profile and update nav header
+// ─────────────────────────────────────────────────────────────
+async function fetchAndShowUserProfile(){
+  try{
+    const d = await apiGet("/v2/user/profile");
+    const user = d?.data;
+    if(!user) return;
+
+    // Upstox fields: user_name, email, mobile_no, broker, user_id
+    const name  = user.user_name || user.name || user.email?.split("@")[0] || "Trader";
+    const email = user.email || "";
+    const phone = user.mobile_no ? "📱 "+user.mobile_no.replace(/(\d{2})\d{6}(\d{2})/, "$1xxxxxx$2") : "";
+    const id    = user.user_id || user.client_id || "";
+
+    // Update nav drawer header
+    const nameEl = document.getElementById("nav-user-name");
+    const subEl  = document.getElementById("nav-user-sub");
+    if(nameEl) nameEl.textContent = name;
+    if(subEl)  subEl.textContent  = id ? "ID: "+id+" · NSE" : (email || "PROFESSIONAL NSE SCANNER");
+
+    // Store for use elsewhere
+    localStorage.setItem("friday_user_name", name);
+    localStorage.setItem("friday_user_id",   id);
+    lg("✅ User: "+name+(id?" ("+id+")":""),"o");
+
+  }catch(e){
+    lg("User profile: "+e.message,"w");
+    // Restore from cache if API failed
+    const cached = localStorage.getItem("friday_user_name");
+    if(cached){
+      const nameEl = document.getElementById("nav-user-name");
+      if(nameEl) nameEl.textContent = cached;
+      const idEl = document.getElementById("nav-user-sub");
+      const cachedId = localStorage.getItem("friday_user_id");
+      if(idEl&&cachedId) idEl.textContent = "ID: "+cachedId+" · NSE";
+    }
+  }
+}
+
 function boot(){
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
@@ -1005,6 +1052,16 @@ function boot(){
   loadSettingsUI();
   updateTokenInfo();
   startTimers();
+  // Load cached name instantly, then refresh from API
+  const _cachedName = localStorage.getItem("friday_user_name");
+  const _cachedId   = localStorage.getItem("friday_user_id");
+  if(_cachedName){
+    const _nEl = document.getElementById("nav-user-name");
+    const _sEl = document.getElementById("nav-user-sub");
+    if(_nEl) _nEl.textContent = _cachedName;
+    if(_sEl&&_cachedId) _sEl.textContent = "ID: "+_cachedId+" · NSE";
+  }
+  fetchAndShowUserProfile(); // async — updates when ready
   // Update filter label immediately with current settings
   const subEl = document.getElementById("stocks-sub");
   if(subEl) subEl.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
@@ -1019,7 +1076,7 @@ function boot(){
   } else {
     const status=getMarketStatus();
     lg("Market closed: "+status.msg,"w");
-    setStatus("live","Closed");
+    setStatus("scan","Closed"); // amber dot when market closed
     document.getElementById("loading-stocks").style.display="none";
     document.getElementById("dash-stocks").style.display="block";
     document.getElementById("mkt-closed").style.display="block";
@@ -1197,12 +1254,14 @@ function startTimers(){
       el.style.color = "";
       const lblEl2 = document.getElementById("cdown-lbl");
       if(lblEl2) lblEl2.textContent = "NEXT SCAN";
+      if(document.getElementById("stxt").textContent==="Closed") setStatus("live","Live");
     } else {
       el.textContent = "OFF";
       el.className = "cdown-v";
       el.style.color = "#dc2626";
       const lblEl = document.getElementById("cdown-lbl");
       if(lblEl) lblEl.textContent = "MARKET CLOSED";
+      setStatus("scan","Closed"); // keep amber dot while market closed
     }
     updateRefreshInfo();
   }, 1000);
@@ -2484,7 +2543,10 @@ async function loadOptions(force=true){
         const oiWalls = calcOIWalls(chain);
 
         const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix);
-        groups.push({name:und.name,spot,spotChg,spotPts,pcr,expiry,picks,type:"index",maxPain,oiWalls});
+        const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf);
+        const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
+        const counterCount=filteredPicks.filter(p=>!p.trendAligned).length;
+        groups.push({name:und.name,spot,spotChg,spotPts,pcr,expiry,picks,filteredPicks,alignedCount,counterCount,type:"index",maxPain,oiWalls});
       }catch(e){lg(und.name+" err: "+e.message,"w");}
     }
 
@@ -2869,14 +2931,16 @@ function renderStatsOptions(idxGroups, niftyBull, chgPct, vix){
     const mpColor=mpDist&&+mpDist<0?"dn":mpDist&&+mpDist>0?"up":"am";
     const cw=g.oiWalls?.callWall||0, pw=g.oiWalls?.putWall||0;
     return`<div class="sc" style="min-width:0;overflow:hidden">
-      <div class="sc-lbl">${g.name} SPOT · LIVE</div>
+      <div class="sc-lbl">${g.name} SPOT · ${isOpen()?"LIVE":"LAST CLOSE"}</div>
       <div class="sc-val ${color}" id="opt-spot-${g.name}" data-prev="${g.spot}" style="font-size:clamp(14px,4vw,20px)">₹${fmt(g.spot,0)}</div>
       <div class="sc-sub ${color}" id="opt-pts-${g.name}">${sign}${fmt(pts,2)} pts</div>
       <div class="sc-note" style="margin-top:5px;line-height:1.6;font-size:9px">
         PCR <span class="${pc}" style="font-weight:700">${g.pcr}</span>
         ${mp?` · 🎯<span class="${mpColor}">${mpDist>0?"+":""}${mpDist}%</span>`:""}
         ${cw?`<br>📵₹${fmt(cw,0)} · 🛡₹${fmt(pw,0)}`:""}
-        <br><span style="color:#16a34a;font-weight:600">${g.picks.length} signals</span> · ↻ ${CFG.tick}s
+        <br><span style="color:#16a34a;font-weight:600">${g.alignedCount||0} with-trend</span>
+        ${g.counterCount?`· <span style="color:#d97706;font-weight:600">${g.counterCount} counter</span>`:""}
+        <span style="color:#94a3b8"> · ≥${CFG.minOptConf}% conf · ↻ ${CFG.tick}s</span>
       </div>
     </div>`;
   }).join("");

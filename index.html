@@ -272,7 +272,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
-
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -3581,9 +3580,7 @@ async function lookupStock(){
               </span>
             </div>`;
           lg(sym+": no expiries found","w");
-          // still show section (don't hide it)
-          return; // exit try block cleanly — finally will run
-        }
+        } else {
 
         const expiry = expiries[0];
         const chain  = await fetchOptions(foInst.key, expiry);
@@ -3598,8 +3595,7 @@ async function lookupStock(){
               <span style="color:#94a3b8;font-size:10px">Market may be closed or chain not yet populated.</span>
             </div>`;
           lg(sym+": empty chain for "+expiry,"w");
-          return;
-        }
+        } else {
 
         // ── Chain loaded successfully — render ──
         const step    = ltp<200?5:ltp<500?10:ltp<2000?20:ltp<5000?50:100;
@@ -3651,6 +3647,9 @@ async function lookupStock(){
           _foHtml = `<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥${CFG.minOptConf}%. Lower Options Min Confidence in ⚙ Settings.</div>`;
         }
         document.getElementById("lkp-fo-cards").innerHTML=_foHtml;
+
+        } // end else (chain.length)
+        } // end else (expiries.length)
 
       }catch(e){
         // Always clear loading state on error — never leave "Loading options chain..." stuck

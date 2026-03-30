@@ -1394,30 +1394,50 @@ async function fetchExpiries(key){
 function pickBestExpiry(expiries){
   if(!expiries||!expiries.length) return null;
 
-  // Today's date in IST (YYYY-MM-DD)
-  const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-  // Current IST hour
-  const istHour  = +new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}) % 24;
-  const istMin   = +new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+  // ── Get precise IST time using hard clock (NOT isOpen() which can be stale) ──
+  const now    = new Date();
+  const istToday = now.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}); // "YYYY-MM-DD"
 
-  // Market is "active" if open or pre-close (before 3:30 PM)
-  const marketActive = isOpen() || (istHour === 15 && istMin <= 30);
+  // Parse IST hours+minutes directly from locale string for accuracy
+  const istTimeStr = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",
+    hour:"2-digit", minute:"2-digit", hour12:false});
+  const [istH, istM] = istTimeStr.split(":").map(Number);
+  const istHour = istH % 24;
+
+  // NSE trading window: 9:15 AM to 3:30 PM IST (hard time, not API-dependent)
+  const afterOpen   = (istHour > 9) || (istHour === 9  && istM >= 15);
+  const beforeClose = (istHour < 15) || (istHour === 15 && istM <= 30);
+  const mktOpenNow  = afterOpen && beforeClose;
+
+  // Weekend check
+  const dayName = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+  const isWeekend = (dayName === "Sat" || dayName === "Sun");
+
+  // Market is truly active only on weekdays during trading hours
+  const tradingNow = mktOpenNow && !isWeekend;
+
+  lg(`pickBestExpiry: IST ${String(istHour).padStart(2,"0")}:${String(istM).padStart(2,"0")} ${dayName} → trading=${tradingNow} today=${istToday}`);
 
   // Filter: only keep expiries >= today
   const future = expiries.filter(e => e >= istToday);
-  if(!future.length) return expiries[expiries.length-1]; // fallback: last available
+  if(!future.length) return expiries[expiries.length-1]; // all past → return last
 
-  // If market is active → nearest expiry is fine (including today if it's expiry day)
-  if(marketActive) return future[0];
+  // ── If market is actively trading → today's expiry is still valid ──
+  if(tradingNow) return future[0];
 
-  // Market is CLOSED:
-  // If nearest expiry IS today → it has expired for the day, skip to next
-  if(future[0] === istToday && future.length > 1){
-    lg(`Expiry ${future[0]} is today and market is closed → using next expiry: ${future[1]}`,"o");
-    return future[1];
+  // ── Market closed / after hours / weekend ──
+  // If nearest expiry IS today → contracts have expired, skip to next
+  if(future[0] === istToday){
+    if(future.length > 1){
+      lg(`Expiry ${future[0]} = today and market closed → next expiry: ${future[1]}`,"o");
+      return future[1];
+    }
+    // Only today's expiry available — still return it (best we can do)
+    lg(`Expiry ${future[0]} = today (market closed) — no next expiry available, using today`,"w");
+    return future[0];
   }
 
-  // Otherwise use nearest future expiry
+  // Nearest future expiry is after today → safe to use
   return future[0];
 }
 
@@ -2729,6 +2749,14 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
       const md = opt.market_data, gr = opt.option_greeks;
       if (!md?.ltp || md.ltp < 0.5) continue;
       const ltp = md.ltp, delta = gr?.delta || 0, iv = gr?.iv || 0, theta = gr?.theta || 0;
+
+      // ── Reject stale / expired option data ──
+      // IV = 0 means no implied volatility — option is not being priced (expired or illiquid)
+      // Delta = ±1.0 exactly on a non-deep-ITM option = stale/expired Greeks
+      // These appear when today is the expiry day and market is closed
+      const absD0 = Math.abs(delta);
+      if(iv === 0 && absD0 > 0.95) continue;  // expired: IV=0, delta at max
+      if(iv === 0 && ltp < 1)      continue;  // expired: no IV, worthless premium
       const oi = md?.oi || 0, prevOI = md?.prev_oi || oi;
       const oiChg = prevOI > 0 ? ((oi - prevOI) / prevOI * 100) : 0;
       const absD = Math.abs(delta);

@@ -492,6 +492,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="lkp-fo-stats" class="stats-g" style="margin-bottom:8px"></div>
   <div id="lkp-fo-cards" class="cards-g"></div>
 </div>
+
   </div>
 
 </div>
@@ -3560,61 +3561,107 @@ async function lookupStock(){
       document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#7c3aed;padding:8px">Loading options chain...</div>';
       document.getElementById("lkp-progress").textContent="Loading F&O chain for "+sym+"...";
       try{
-        const foInst=FO_STOCK_LIST.find(f=>f.s===sym)||NIFTY50.find(i=>i.s===sym)||inst;
-        const expiries=await fetchExpiries(foInst.key);
-        if(expiries.length){
-          const expiry=expiries[0];
-          const chain=await fetchOptions(foInst.key,expiry);
-          if(chain.length){
-            const step=ltp<200?5:ltp<500?10:ltp<2000?20:ltp<5000?50:100;
-            const atm=Math.round(ltp/step)*step;
-            const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
-            const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
-            const pcr2=ceOI>0?+(peOI/ceOI).toFixed(2):1;
-            const maxPain2=calcMaxPain(chain);
-            const oiWalls2=calcOIWalls(chain);
-            const allPicks=scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix);
-            const picks=allPicks.filter(p=>p.confidence>=CFG.minOptConf);
-            const mp2dist=maxPain2&&ltp?((maxPain2-ltp)/ltp*100).toFixed(1):null;
-            // Direction banner for Analyse tab
-            const _bull = optBullForStock;
-            const _dirColor = _bull ? "#15803d" : "#dc2626";
-            const _dirBg    = _bull ? "#f0fdf4"  : "#fef2f2";
-            const _dirBord  = _bull ? "#bbf7d0"  : "#fecaca";
-            const _dirIcon  = _bull ? "📈" : "📉";
-            const _dirTxt   = _bull
-              ? `${_dirIcon} BULLISH — CALL options aligned with trend (Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct>=0?"+":""}${stockChgPct.toFixed(2)}%)`
-              : `${_dirIcon} BEARISH — PUT options aligned with trend · CALL signals penalised (Nifty ${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct.toFixed(2)}%)`;
-            const _dirBanner = `<div style="background:${_dirBg};border:1px solid ${_dirBord};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:11px;font-weight:700;color:${_dirColor};grid-column:1/-1">${_dirTxt}</div>`;
+        // Resolve F&O instrument — prefer FO_STOCK_LIST (has lot size), fall back to inst
+        const foInst = FO_STOCK_LIST.find(f=>f.s===sym)
+                    || NIFTY50.find(i=>i.s===sym)
+                    || inst;
+        lg("F&O key: "+foInst.key+" lot:"+(foInst.lot||1));
 
-            document.getElementById("lkp-fo-stats").innerHTML=
-              _dirBanner+
-              `<div class="sc"><div class="sc-lbl">${sym} LTP</div><div class="sc-val ${clr(chgPct)}">₹${fmt(ltp,0)}</div><div class="sc-sub ${clr(chgPct)}">${chgPct>=0?"+":""}${chgPct.toFixed(2)}%</div></div>`+
-              `<div class="sc"><div class="sc-lbl">PCR</div><div class="sc-val ${pcr2>1?"up":pcr2>0.7?"am":"dn"}">${pcr2}</div><div class="sc-sub">${interpPCR(pcr2).txt}</div></div>`+
-              (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+
-              (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+
-              (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
-            const _aligned = picks.filter(p=>p.trendAligned);
-            const _counter = picks.filter(p=>!p.trendAligned);
-            const _dirLabel = optBullForStock ? "📈 BULLISH" : "📉 BEARISH";
-            document.getElementById("lkp-fo-badge").textContent=`${_dirLabel} · ${_aligned.length} with-trend · ${_counter.length} counter · Exp ${expiry}`;
-            let _foHtml = "";
-            if(_aligned.length){
-              _foHtml += `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;font-weight:700;color:#15803d">✅ ${_aligned.length} WITH-TREND signal${_aligned.length===1?"":"s"}</div>`;
-              _foHtml += `<div class="cards-g">${_aligned.map((p,i)=>optCard(p,i)).join("")}</div>`;
-            }
-            if(_counter.length){
-              _foHtml += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin:${_aligned.length?"12px":"0"} 0 8px;font-size:10px;font-weight:700;color:#92400e">⚠ ${_counter.length} COUNTER-TREND — against market direction</div>`;
-              _foHtml += `<div class="cards-g">${_counter.map((p,i)=>optCard(p,i)).join("")}</div>`;
-            }
-            if(!picks.length){
-              _foHtml = `<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥${CFG.minOptConf}%. Lower Options Min Confidence in ⚙ Settings.</div>`;
-            }
-            document.getElementById("lkp-fo-cards").innerHTML=_foHtml;
-          }
+        const expiries = await fetchExpiries(foInst.key);
+
+        // ── Handle: no expiries available ──
+        if(!expiries.length){
+          document.getElementById("lkp-fo-stats").innerHTML="";
+          document.getElementById("lkp-fo-badge").textContent="F&O — No active expiry found";
+          document.getElementById("lkp-fo-cards").innerHTML=
+            `<div style="font-size:11px;color:#64748b;padding:8px">
+              No option contracts found for ${sym}.<br>
+              <span style="color:#94a3b8;font-size:10px">
+                This stock may not have active F&O contracts this expiry, or the instrument key may need updating.
+              </span>
+            </div>`;
+          lg(sym+": no expiries found","w");
+          // still show section (don't hide it)
+          return; // exit try block cleanly — finally will run
         }
+
+        const expiry = expiries[0];
+        const chain  = await fetchOptions(foInst.key, expiry);
+
+        // ── Handle: empty chain ──
+        if(!chain.length){
+          document.getElementById("lkp-fo-stats").innerHTML="";
+          document.getElementById("lkp-fo-badge").textContent=`F&O · Exp ${expiry} · No chain data`;
+          document.getElementById("lkp-fo-cards").innerHTML=
+            `<div style="font-size:11px;color:#64748b;padding:8px">
+              Options chain is empty for ${sym} (Exp: ${expiry}).<br>
+              <span style="color:#94a3b8;font-size:10px">Market may be closed or chain not yet populated.</span>
+            </div>`;
+          lg(sym+": empty chain for "+expiry,"w");
+          return;
+        }
+
+        // ── Chain loaded successfully — render ──
+        const step    = ltp<200?5:ltp<500?10:ltp<2000?20:ltp<5000?50:100;
+        const atm     = Math.round(ltp/step)*step;
+        const ceOI    = chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
+        const peOI    = chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
+        const pcr2    = ceOI>0 ? +(peOI/ceOI).toFixed(2) : 1;
+        const maxPain2= calcMaxPain(chain);
+        const oiWalls2= calcOIWalls(chain);
+        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix);
+        const picks   = allPicks.filter(p=>p.confidence>=CFG.minOptConf);
+        const mp2dist = maxPain2&&ltp ? ((maxPain2-ltp)/ltp*100).toFixed(1) : null;
+
+        // Direction banner
+        const _bull     = optBullForStock;
+        const _dirColor = _bull ? "#15803d" : "#dc2626";
+        const _dirBg    = _bull ? "#f0fdf4"  : "#fef2f2";
+        const _dirBord  = _bull ? "#bbf7d0"  : "#fecaca";
+        const _dirIcon  = _bull ? "📈" : "📉";
+        const _dirTxt   = _bull
+          ? `${_dirIcon} BULLISH — CALL options aligned with trend (Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct>=0?"+":""}${stockChgPct.toFixed(2)}%)`
+          : `${_dirIcon} BEARISH — PUT options aligned with trend · CALL signals penalised (Nifty ${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct.toFixed(2)}%)`;
+        const _dirBanner = `<div style="background:${_dirBg};border:1px solid ${_dirBord};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:11px;font-weight:700;color:${_dirColor};grid-column:1/-1">${_dirTxt}</div>`;
+
+        document.getElementById("lkp-fo-stats").innerHTML=
+          _dirBanner+
+          `<div class="sc"><div class="sc-lbl">${sym} LTP</div><div class="sc-val ${clr(chgPct)}">₹${fmt(ltp,0)}</div><div class="sc-sub ${clr(chgPct)}">${chgPct>=0?"+":""}${chgPct.toFixed(2)}%</div></div>`+
+          `<div class="sc"><div class="sc-lbl">PCR</div><div class="sc-val ${pcr2>1?"up":pcr2>0.7?"am":"dn"}">${pcr2}</div><div class="sc-sub">${interpPCR(pcr2).txt}</div></div>`+
+          (maxPain2?`<div class="sc"><div class="sc-lbl">MAX PAIN</div><div class="sc-val am">₹${fmt(maxPain2,0)}</div><div class="sc-sub ${+mp2dist<0?"dn":"up"}">${+mp2dist>0?"+":""}${mp2dist}%</div></div>`:"")+
+          (oiWalls2.callWall?`<div class="sc"><div class="sc-lbl">CALL WALL</div><div class="sc-val dn">₹${fmt(oiWalls2.callWall,0)}</div></div>`:"")+
+          (oiWalls2.putWall?`<div class="sc"><div class="sc-lbl">PUT WALL</div><div class="sc-val up">₹${fmt(oiWalls2.putWall,0)}</div></div>`:"");
+
+        // Split aligned / counter
+        const _aligned  = picks.filter(p=>p.trendAligned);
+        const _counter  = picks.filter(p=>!p.trendAligned);
+        const _dirLabel = optBullForStock ? "📈 BULLISH" : "📉 BEARISH";
+        document.getElementById("lkp-fo-badge").textContent=`${_dirLabel} · ${_aligned.length} with-trend · ${_counter.length} counter · Exp ${expiry}`;
+
+        let _foHtml = "";
+        if(_aligned.length){
+          _foHtml += `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;margin-bottom:8px;font-size:10px;font-weight:700;color:#15803d">✅ ${_aligned.length} WITH-TREND signal${_aligned.length===1?"":"s"}</div>`;
+          _foHtml += `<div class="cards-g">${_aligned.map((p,i)=>optCard(p,i)).join("")}</div>`;
+        }
+        if(_counter.length){
+          _foHtml += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin:${_aligned.length?"12px":"0"} 0 8px;font-size:10px;font-weight:700;color:#92400e">⚠ ${_counter.length} COUNTER-TREND — against market direction</div>`;
+          _foHtml += `<div class="cards-g">${_counter.map((p,i)=>optCard(p,i)).join("")}</div>`;
+        }
+        if(!picks.length){
+          _foHtml = `<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥${CFG.minOptConf}%. Lower Options Min Confidence in ⚙ Settings.</div>`;
+        }
+        document.getElementById("lkp-fo-cards").innerHTML=_foHtml;
+
       }catch(e){
-        document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#dc2626;padding:8px">Options error: '+e.message+'</div>';
+        // Always clear loading state on error — never leave "Loading options chain..." stuck
+        document.getElementById("lkp-fo-stats").innerHTML="";
+        document.getElementById("lkp-fo-badge").textContent="F&O — Error loading chain";
+        document.getElementById("lkp-fo-cards").innerHTML=
+          `<div style="font-size:11px;color:#dc2626;padding:8px">
+            Options error: ${e.message}<br>
+            <span style="color:#94a3b8;font-size:10px">Check log (🔍) for details. Token may need refresh.</span>
+          </div>`;
+        lg(sym+" F&O: "+e.message,"e");
       }
     } else {
       foSec.style.display="none";

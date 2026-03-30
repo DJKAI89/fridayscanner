@@ -272,6 +272,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
+
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -1384,6 +1385,42 @@ async function fetchExpiries(key){
   return(d?.data||[]).map(e=>e.expiry||e).filter(Boolean).sort();
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// Pick the best expiry given market state
+// - Market OPEN today: use nearest expiry (may include today if it's expiry day)
+// - Market CLOSED / after hours: skip today if it's expiry, use next
+// ─────────────────────────────────────────────────────────────
+function pickBestExpiry(expiries){
+  if(!expiries||!expiries.length) return null;
+
+  // Today's date in IST (YYYY-MM-DD)
+  const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  // Current IST hour
+  const istHour  = +new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false}) % 24;
+  const istMin   = +new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+
+  // Market is "active" if open or pre-close (before 3:30 PM)
+  const marketActive = isOpen() || (istHour === 15 && istMin <= 30);
+
+  // Filter: only keep expiries >= today
+  const future = expiries.filter(e => e >= istToday);
+  if(!future.length) return expiries[expiries.length-1]; // fallback: last available
+
+  // If market is active → nearest expiry is fine (including today if it's expiry day)
+  if(marketActive) return future[0];
+
+  // Market is CLOSED:
+  // If nearest expiry IS today → it has expired for the day, skip to next
+  if(future[0] === istToday && future.length > 1){
+    lg(`Expiry ${future[0]} is today and market is closed → using next expiry: ${future[1]}`,"o");
+    return future[1];
+  }
+
+  // Otherwise use nearest future expiry
+  return future[0];
+}
+
 // ══════════════════════════════════════
 // TECHNICAL CALCULATIONS
 // ══════════════════════════════════════
@@ -2200,7 +2237,7 @@ async function triggerScan(){
     try{
       const exp = await fetchExpiries("NSE_INDEX|Nifty 50");
       if(exp.length){
-        const ch = await fetchOptions("NSE_INDEX|Nifty 50", exp[0]);
+        const ch = await fetchOptions("NSE_INDEX|Nifty 50", pickBestExpiry(exp));
         const ceOI = ch.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0), 0);
         const peOI = ch.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0), 0);
         pcr = ceOI > 0 ? +(peOI/ceOI).toFixed(2) : 1;
@@ -2531,9 +2568,10 @@ async function loadOptions(force=true){
 
         const expiries=await fetchExpiries(und.key);
         if(!expiries.length){lg(und.name+": no expiries","w");continue;}
-        const expiry=expiries[0];
+        const expiry=pickBestExpiry(expiries);
+        if(!expiry){lg(und.name+": no valid expiry","w");continue;}
         const chain=await fetchOptions(und.key,expiry);
-        lg(`${und.name}: ${chain.length} strikes (exp ${expiry}) spot ${fmt(spot,0)}`);
+        lg(`${und.name}: exp ${expiry} ${chain.length} strikes (exp ${expiry}) spot ${fmt(spot,0)}`);
 
         const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
@@ -2580,7 +2618,8 @@ async function loadOptions(force=true){
 
         const expiries=await fetchExpiries(inst.key);
         if(!expiries.length){lg(inst.s+": no expiries","w");continue;}
-        const expiry=expiries[0];
+        const expiry=pickBestExpiry(expiries);
+        if(!expiry){lg(inst.s+": no valid expiry","w");continue;}
 
         updateOptProgress(`${inst.s}: loading chain...`);
         const chain=await fetchOptions(inst.key,expiry);
@@ -3567,9 +3606,10 @@ async function lookupStock(){
         lg("F&O key: "+foInst.key+" lot:"+(foInst.lot||1));
 
         const expiries = await fetchExpiries(foInst.key);
+        const expiry  = pickBestExpiry(expiries);
 
         // ── Handle: no expiries available ──
-        if(!expiries.length){
+        if(!expiries.length || !expiry){
           document.getElementById("lkp-fo-stats").innerHTML="";
           document.getElementById("lkp-fo-badge").textContent="F&O — No active expiry found";
           document.getElementById("lkp-fo-cards").innerHTML=
@@ -3582,7 +3622,7 @@ async function lookupStock(){
           lg(sym+": no expiries found","w");
         } else {
 
-        const expiry = expiries[0];
+        // expiry already set by pickBestExpiry above
         const chain  = await fetchOptions(foInst.key, expiry);
 
         // ── Handle: empty chain ──

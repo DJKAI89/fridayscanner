@@ -272,9 +272,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
+
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
+
   </nav>
   <div class="nav-footer">
     <div id="nav-refresh-info">Stocks: — · Options: — · Portfolio: —</div>
@@ -536,6 +538,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
+
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -1656,6 +1659,148 @@ function calcPotential(ltp, target, sl, numInds, rec) {
 }
 
 // ── GetProfessionalRecommendation (PRO_AnalysisService) ──
+
+// ─────────────────────────────────────────────────────────────
+// REVERSAL DETECTION ENGINE
+// Returns: {type, strength, reason, signalCount}
+// type: "BULLISH_REVERSAL" | "BEARISH_REVERSAL" | "NONE"
+// strength: "STRONG" | "MODERATE" | "WEAK"
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// ENTRY TRIGGER CALCULATOR
+// Returns the ideal entry trigger — price that CONFIRMS the move
+// vs current LTP (which is just where it is now)
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// SIGNAL STRENGTH BADGE
+// STRONG:   5+ indicators + conf≥70%
+// MODERATE: 3-4 indicators OR conf 55-70%
+// WEAK:     1-2 indicators AND conf<55%
+// ─────────────────────────────────────────────────────────────
+function getSignalStrength(numInds, conf, reversal){
+  const revBoost = reversal?.type !== "NONE" ? 1 : 0; // reversal adds 1 to effective count
+  const eff = numInds + revBoost;
+  if(eff >= 5 && conf >= 70) return {label:"STRONG",  color:"#16a34a", bg:"#dcfce7", border:"#86efac"};
+  if(eff >= 3 || conf >= 55) return {label:"MODERATE", color:"#d97706", bg:"#fef3c7", border:"#fcd34d"};
+  return                            {label:"WEAK",     color:"#dc2626", bg:"#fee2e2", border:"#fca5a5"};
+}
+
+function calcEntryTrigger(ltp, high, sr, atr, rec, vwap, chgPct){
+  const a = atr || ltp * 0.015; // fallback: 1.5% ATR
+  let trigger = null, method = "", note = "";
+
+  if(rec === "STRONG BUY" || rec === "BUY" || rec === "MODERATE"){
+    // Method 1: Break above yesterday's high + small buffer (momentum confirmation)
+    if(high > ltp * 1.001){
+      trigger = +(high * 1.003).toFixed(2); // 0.3% above day high
+      method = "Break above Day High";
+      note = "Wait for close above ₹"+trigger.toFixed(0);
+    }
+    // Method 2: Break above Pivot R1 (if within 3% of LTP)
+    if(sr?.pivotR1 > 0 && sr.pivotR1 > ltp && (sr.pivotR1-ltp)/ltp*100 < 3){
+      if(!trigger || sr.pivotR1 < trigger){
+        trigger = +(sr.pivotR1 * 1.002).toFixed(2);
+        method = "Break above Pivot R1";
+        note = "R1 at ₹"+sr.pivotR1.toFixed(0)+" — trigger on break";
+      }
+    }
+    // Method 3: ATR-based breakout entry (price + 0.5 ATR from current)
+    if(!trigger){
+      trigger = +(ltp + a * 0.5).toFixed(2);
+      method = "ATR Breakout";
+      note = "Entry on +0.5 ATR move";
+    }
+    // Method 4: If near VWAP, trigger on break above VWAP
+    if(vwap > 0 && Math.abs((ltp-vwap)/ltp*100) < 1.5 && vwap > ltp){
+      trigger = +(vwap * 1.002).toFixed(2);
+      method = "Break above VWAP";
+      note = "VWAP at ₹"+vwap.toFixed(0)+" — institutional level";
+    }
+
+    // If price is already above potential trigger, use market (gap up)
+    if(trigger && trigger <= ltp * 1.001){
+      return {trigger: ltp, method: "Market (already triggered)", note: "Price above trigger — act now", alreadyTriggered: true};
+    }
+    return {trigger: trigger||ltp, method, note, alreadyTriggered: false};
+  }
+
+  // For WATCH/AVOID — just show market
+  return {trigger: ltp, method: "Market", note: "", alreadyTriggered: false};
+}
+
+function detectReversal(ltp, rsi, patterns, sr, vix, pcr, nBull, chgPct, atr, high, low){
+  const signals = [];
+  let bullRev = 0, bearRev = 0;
+
+  // ── 1. RSI Extremes ──
+  if(rsi != null){
+    if(rsi <= 25)      { bullRev += 3; signals.push("RSI Extreme Oversold ("+rsi+")"); }
+    else if(rsi <= 32) { bullRev += 2; signals.push("RSI Oversold ("+rsi+")"); }
+    if(rsi >= 75)      { bearRev += 3; signals.push("RSI Extreme Overbought ("+rsi+")"); }
+    else if(rsi >= 68) { bearRev += 2; signals.push("RSI Overbought ("+rsi+")"); }
+  }
+
+  // ── 2. PCR Extreme (contrarian) ──
+  // Very high PCR = too many puts = bearish crowd = bullish reversal likely
+  // Very low PCR  = too many calls = bullish crowd = bearish reversal likely
+  if(pcr > 0){
+    if(pcr >= 1.5)  { bullRev += 3; signals.push("PCR Extreme Bearish ("+pcr+" — crowd too bearish)"); }
+    else if(pcr >= 1.3){ bullRev += 2; signals.push("PCR High ("+pcr+")"); }
+    if(pcr <= 0.5)  { bearRev += 3; signals.push("PCR Extreme Bullish ("+pcr+" — crowd too bullish)"); }
+    else if(pcr <= 0.65){ bearRev += 2; signals.push("PCR Low ("+pcr+")"); }
+  }
+
+  // ── 3. Candlestick reversal patterns ──
+  if(patterns){
+    if(patterns.hammer && !nBull)        { bullRev += 3; signals.push("Hammer (bullish reversal candle)"); }
+    if(patterns.morningStar && !nBull)   { bullRev += 4; signals.push("Morning Star (strong reversal)"); }
+    if(patterns.bullishEngulfing && !nBull){ bullRev += 3; signals.push("Bullish Engulfing"); }
+    if(patterns.shootingStar && nBull)   { bearRev += 3; signals.push("Shooting Star (bearish reversal candle)"); }
+    if(patterns.eveningStar && nBull)    { bearRev += 4; signals.push("Evening Star (strong reversal)"); }
+    if(patterns.bearishEngulfing && nBull){ bearRev += 3; signals.push("Bearish Engulfing"); }
+  }
+
+  // ── 4. Price near key S/R levels ──
+  if(sr && ltp > 0){
+    const nearS1 = sr.pivotS1 > 0 && Math.abs((ltp - sr.pivotS1)/ltp*100) < 1.5;
+    const nearS2 = sr.pivotS2 > 0 && Math.abs((ltp - sr.pivotS2)/ltp*100) < 1.5;
+    const near52L= sr.week52L > 0 && Math.abs((ltp - sr.week52L)/ltp*100) < 2;
+    const nearR1 = sr.pivotR1 > 0 && Math.abs((ltp - sr.pivotR1)/ltp*100) < 1.5;
+    const near52H= sr.week52H > 0 && Math.abs((ltp - sr.week52H)/ltp*100) < 2;
+
+    if(nearS1 || nearS2) { bullRev += 2; signals.push("Price at Pivot Support"); }
+    if(near52L)          { bullRev += 3; signals.push("Price near 52-Week Low (extreme support)"); }
+    if(nearR1)           { bearRev += 2; signals.push("Price at Pivot Resistance"); }
+    if(near52H)          { bearRev += 3; signals.push("Price near 52-Week High (extreme resistance)"); }
+  }
+
+  // ── 5. VIX context ──
+  // High VIX = fear peak = potential bullish reversal
+  if(vix > 25)     { bullRev += 2; signals.push("VIX High Fear ("+vix.toFixed(1)+") — panic often marks bottoms"); }
+  else if(vix < 12){ bearRev += 1; signals.push("VIX Very Low ("+vix.toFixed(1)+") — complacency risk"); }
+
+  // ── 6. Price action: big down day near support = exhaustion ──
+  if(chgPct != null){
+    if(chgPct <= -3 && sr?.pivotS1 > 0){ bullRev += 2; signals.push("Large down day near support (exhaustion)"); }
+    if(chgPct >= 3  && sr?.pivotR1 > 0){ bearRev += 2; signals.push("Large up day near resistance (exhaustion)"); }
+  }
+
+  // ── Determine output ──
+  const maxRev = Math.max(bullRev, bearRev);
+  if(maxRev < 4) return {type:"NONE", strength:"", signalCount:0, signals:[], bullScore:bullRev, bearScore:bearRev};
+
+  const type = bullRev >= bearRev ? "BULLISH_REVERSAL" : "BEARISH_REVERSAL";
+  const strength = maxRev >= 9 ? "STRONG" : maxRev >= 6 ? "MODERATE" : "WEAK";
+  // Only relevant signals for the winning direction
+  const revSignals = bullRev >= bearRev
+    ? signals.filter(s => !s.includes("bearish") && !s.includes("Bearish") && !s.includes("Overbought") && !s.includes("too bullish") && !s.includes("Resistance") && !s.includes("52-Week High") && !s.includes("Evening") && !s.includes("Shooting") && !s.includes("PCR Low"))
+    : signals.filter(s => !s.includes("bullish") && !s.includes("Bullish") && !s.includes("Oversold") && !s.includes("too bearish") && !s.includes("Support") && !s.includes("52-Week Low") && !s.includes("Morning") && !s.includes("Hammer") && !s.includes("PCR High") && !s.includes("PCR Extreme Bear"));
+
+  return {type, strength, signalCount: revSignals.length, signals: revSignals, bullScore: bullRev, bearScore: bearRev};
+}
+
 function getRec(conf, pot, risk, rr) {
   // C# GetProfessionalRecommendation (exact thresholds)
   if (conf >= 80 && pot >= 15 && risk <= 30 && rr >= 2.5) return "STRONG BUY";
@@ -2430,10 +2575,12 @@ async function triggerScan(){
       const rec   = getRec(conf, pot.base, risk, pot.rr);
       const passes = conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr;
       
+      const reversal     = detectReversal(ltp, t.rsi, patterns, sr, vix, pcr, nBull, chgPct, t.atr, high, low);
+      const entryTrigger = calcEntryTrigger(ltp, high, sr, t.atr, rec, t.vwap||0, chgPct);
        stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
-        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP});
+        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger});
       
     }
 
@@ -2912,14 +3059,63 @@ function renderStockCards(picks,totalScanned,containerId){
       <div class="c-rank">${i+1}</div>
       <span class="c-rec ${rc}">${p.rec}</span>
       <div class="c-head"><div class="c-sym">${p.s} <span style="font-size:9px;color:#94a3b8;font-weight:400">${p.sec}</span></div><div class="c-name">${p.n}</div></div>
+
+      <!-- ── FEATURE 3: Signal Strength Badge ── -->
+      ${(()=>{
+        const str = getSignalStrength(p.numInds, p.conf, p.reversal);
+        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+          <span style="background:${str.bg};color:${str.color};border:1px solid ${str.border};border-radius:12px;padding:3px 10px;font-size:10px;font-weight:800;letter-spacing:.5px">${str.label} SIGNAL</span>
+          <span style="font-size:9px;color:#64748b">${p.numInds}/7 indicators</span>
+        </div>`;
+      })()}
+
+      <!-- ── FEATURE 1: Reversal Banner (if detected) ── -->
+      ${(()=>{
+        const rev = p.reversal;
+        if(!rev || rev.type === "NONE") return "";
+        const isBull = rev.type === "BULLISH_REVERSAL";
+        const bg     = isBull ? "#f0fdf4" : "#fef2f2";
+        const border = isBull ? "#86efac" : "#fca5a5";
+        const color  = isBull ? "#15803d" : "#dc2626";
+        const icon   = isBull ? "🔄📈" : "🔄📉";
+        const label  = `${icon} ${rev.strength} ${isBull?"BULLISH":"BEARISH"} REVERSAL SIGNAL`;
+        const reasons = rev.signals.slice(0,3).join(" · ");
+        return `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:7px 10px;margin-bottom:8px;font-size:10px;color:${color}">
+          <div style="font-weight:800;margin-bottom:2px">${label}</div>
+          <div style="font-weight:500;opacity:.85">${reasons}</div>
+        </div>`;
+      })()}
+
       <!-- LTP live -->
       <div class="c-metrics cm2" style="gap:1px;margin-bottom:6px">
         <div class="cbox neutral"><div class="cb-l">LTP · LIVE</div><div class="cb-v ltp-live ${clr(p.chgPct)}" data-sym="${p.s}">₹${fmt(p.ltp)}</div><div class="cb-s ${clr(p.chgPct)}">${p.chgPct>=0?"▲":"▼"}${Math.abs(p.chgPct).toFixed(2)}%</div></div>
         <div class="cbox neutral"><div class="cb-l">R:R | WIN RATE</div><div class="cb-v am">${p.pot.rr}:1</div><div class="cb-s" style="color:#64748b">Win ~${p.pot.wr}%</div></div>
       </div>
-      <!-- Trade setup: Entry, SL, Target -->
+
+      <!-- ── FEATURE 2: Entry Trigger Price ── -->
+      ${(()=>{
+        const et = p.entryTrigger;
+        if(!et) return "";
+        const triggered = et.alreadyTriggered;
+        const bg  = triggered ? "#f0fdf4" : "#eff6ff";
+        const brd = triggered ? "#86efac" : "#93c5fd";
+        const col = triggered ? "#15803d" : "#1d4ed8";
+        const status = triggered
+          ? `<span style="background:#16a34a;color:#fff;border-radius:10px;padding:2px 7px;font-size:9px;font-weight:700">✅ TRIGGERED</span>`
+          : `<span style="background:#e2e8f0;color:#64748b;border-radius:10px;padding:2px 7px;font-size:9px;font-weight:700">⏳ WAITING</span>`;
+        return `<div style="background:${bg};border:1px solid ${brd};border-radius:8px;padding:8px 11px;margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <span style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:.5px">ENTRY TRIGGER</span>
+            ${status}
+          </div>
+          <div style="font-size:18px;font-weight:800;color:${col}">₹${fmt(et.trigger)}</div>
+          <div style="font-size:9px;color:#64748b;margin-top:1px">${et.method}${et.note?" · "+et.note:""}</div>
+        </div>`;
+      })()}
+
+      <!-- Trade setup: SL, Target (Entry removed — shown in trigger box above) -->
       <div class="trade-setup">
-        <div class="ts-box"><div class="ts-l">ENTRY</div><div class="ts-v bl">₹${fmt(p.ltp)}</div><div class="ts-s" style="color:#94a3b8">Market</div></div>
+        <div class="ts-box"><div class="ts-l">ENTRY TRIGGER</div><div class="ts-v bl">₹${fmt(p.entryTrigger?.trigger||p.ltp)}</div><div class="ts-s" style="color:#94a3b8">${p.entryTrigger?.method||"Market"}</div></div>
         <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">${(((p.sl-p.ltp)/p.ltp)*100).toFixed(1)}%</div></div>
         <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.target)}</div><div class="ts-s up">+${(((p.target-p.ltp)/p.ltp)*100).toFixed(1)}%</div></div>
       </div>
@@ -2965,7 +3161,12 @@ function renderStockCards(picks,totalScanned,containerId){
       })()}
         ${Object.entries(p.patterns).filter(([,v])=>v).map(([k])=>`<span class="ind ok">📊${k.replace(/([A-Z])/g,' $1').trim()}</span>`).join("")}
       </div>
-      <div class="c-why ${rc}">${p.rec==="STRONG BUY"?"🔥":p.rec==="BUY"?"✅":p.rec==="MODERATE"?"⚡":"👀"} ${p.numInds}/7 indicators. R:R ${p.pot.rr}:1, Win ~${p.pot.wr}%, EV ${p.pot.ev>=0?"+":""}${p.pot.ev.toFixed(2)}%. ${p.rsi?"RSI "+p.rsi+".":""} ${p.macdBull?"MACD bullish.":""}</div>
+      <div class="c-why ${rc}">${(()=>{
+        const str=getSignalStrength(p.numInds,p.conf,p.reversal);
+        const rev=p.reversal?.type!=="NONE"?` · ${p.reversal.type==="BULLISH_REVERSAL"?"🔄 Reversal UP":"🔄 Reversal DOWN"}`:""
+        const trig=p.entryTrigger?.alreadyTriggered?" · ✅ Trigger hit":" · ⏳ Wait for trigger at ₹"+fmt(p.entryTrigger?.trigger||p.ltp);
+        return `${str.label} signal · ${p.numInds}/7 indicators · R:R ${p.pot.rr}:1 · Win ~${p.pot.wr}%${rev}${trig}`;
+      })()}</div>
     </div>`;
   }).join(""):`<div class="empty-state">No picks pass current filters<br><span style="font-size:11px;color:#64748b">Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}</span><br><span style="font-size:10px">Scanned ${totalScanned||50} stocks · Lower thresholds in ⚙ Settings</span></div>`;
 }
@@ -3612,10 +3813,12 @@ async function lookupStock(){
     const risk=calcRisk(ltp,sl,target,tech.atr,vix);
     const pot=calcPotential(ltp,target,sl,numInds,preRec);
     const rec=getRec(conf,pot.base,risk,pot.rr);
+    const reversal     = detectReversal(ltp, tech.rsi, patterns, sr, vix, pcr, nBull, chgPct, tech.atr, high, low);
+    const entryTrigger = calcEntryTrigger(ltp, high, sr, tech.atr, rec, tech.vwap||0, chgPct);
     const stockObj={...inst,ltp,prev:q.ohlc?.close||ltp,high,low,vol,chgPct,
       rsi:tech.rsi,macdBull:tech.macdBull,a50:tech.a50,a200:tech.a200,
       atr:tech.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,
-      target,sl,secSc:50,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null};
+      target,sl,secSc:50,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null,reversal,entryTrigger};
 
     // Render stock card
     renderStockCards([stockObj],1,"lkp-stock-card");

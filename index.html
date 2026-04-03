@@ -3813,7 +3813,8 @@ async function lookupStock(){
     const risk=calcRisk(ltp,sl,target,tech.atr,vix);
     const pot=calcPotential(ltp,target,sl,numInds,preRec);
     const rec=getRec(conf,pot.base,risk,pot.rr);
-    const reversal     = detectReversal(ltp, tech.rsi, patterns, sr, vix, pcr, nBull, chgPct, tech.atr, high, low);
+    const _pcrVal = pcrSc >= 75 ? 1.3 : pcrSc >= 50 ? 0.9 : 0.6; // derive pcr from pcrSc for reversal
+    const reversal     = detectReversal(ltp, tech.rsi, patterns, sr, vix, _pcrVal, nBull, chgPct, tech.atr, high, low);
     const entryTrigger = calcEntryTrigger(ltp, high, sr, tech.atr, rec, tech.vwap||0, chgPct);
     const stockObj={...inst,ltp,prev:q.ohlc?.close||ltp,high,low,vol,chgPct,
       rsi:tech.rsi,macdBull:tech.macdBull,a50:tech.a50,a200:tech.a200,

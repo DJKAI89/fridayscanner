@@ -272,7 +272,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <button class="nav-item" id="nav-lookup" onclick="switchTab('lookup');closeMenu()">
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
-
 <button class="nav-item" id="nav-log" onclick="switchTab('log');closeMenu()">
   <span class="nav-icon">📋</span><span class="nav-label">Signal Log</span><span class="nav-badge" id="nb-log">—</span>
 </button>
@@ -497,7 +496,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="lkp-fo-stats" class="stats-g" style="margin-bottom:8px"></div>
   <div id="lkp-fo-cards" class="cards-g"></div>
 </div>
-
   </div>
 
 </div>
@@ -536,7 +534,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="empty-state">No signals logged yet.<br><span style="font-size:10px;color:#94a3b8">Signals are logged automatically each scan.<br>Set your GitHub token in ⚙ Settings → Signal Log.</span></div>
   </div>
 </div>
-
   </div>
 
   <div class="pane" id="pane-settings">
@@ -576,7 +573,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
-
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -1135,8 +1131,20 @@ async function fetchAndShowUserProfile(){
     localStorage.setItem("friday_user_id",   id);
     lg("✅ User: "+name+(id?" ("+id+")":""),"o");
     // Pull settings from GitHub now that we have user ID
-    // Small delay to ensure GH credentials are loaded
-    setTimeout(()=>pullSettingsFromGH(), 1500);
+    // GH credentials loaded in loadGHSettings() — small delay ensures they're ready
+    setTimeout(async ()=>{
+      // Ensure GH object is populated from localStorage
+      if(!GH.token) loadGHSettings();
+      if(GH.token && GH.user && GH.repo){
+        const pulled = await pullSettingsFromGH();
+        if(pulled){
+          const _sv = document.getElementById("settings-save-status");
+          if(_sv){ _sv.textContent="✅ Settings loaded from GitHub · "+getIST(); _sv.style.color="#16a34a"; setTimeout(()=>{if(_sv)_sv.textContent="";},4000); }
+        }
+      } else {
+        lg("Settings pull skipped — GitHub not configured yet","w");
+      }
+    }, 2000);
 
   }catch(e){
     lg("User profile: "+e.message,"w");
@@ -1247,7 +1255,12 @@ async function testGitHubConnection(){
         Settings   → <code>user-settings/${(localStorage.getItem("friday_user_id")||"default").replace(/[^a-zA-Z0-9_-]/g,"_")}.json</code>`;
       el.style.color = "#16a34a";
       // Try to push settings to GitHub now that we confirmed connection
-      pushSettingsToGH();
+      // Pull existing settings from GitHub (may have been set from another browser)
+      const pulled = await pullSettingsFromGH();
+      if(!pulled){
+        // No existing settings — push current ones
+        pushSettingsToGH();
+      }
     }
     else if(r.status===401){ el.textContent="❌ Token invalid — generate a new one with 'repo' scope."; el.style.color="#dc2626"; }
     else if(r.status===403){ el.textContent="❌ Token missing 'repo' scope. Re-generate with repo access."; el.style.color="#dc2626"; }
@@ -1305,9 +1318,9 @@ async function pushSettingsToGH(){
         headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
         body: JSON.stringify(body) }
     );
-    if(r.ok) lg("✅ Settings pushed to GitHub","o");
-    else lg("Settings push failed: "+r.status,"w");
-  }catch(e){ lg("pushSettingsToGH: "+e.message,"w"); }
+    if(r.ok){ lg("✅ Settings pushed to GitHub","o"); return true; }
+    else { lg("Settings push failed: HTTP "+r.status,"w"); return false; }
+  }catch(e){ lg("pushSettingsToGH: "+e.message,"w"); return false; }
 }
 
 async function pullSettingsFromGH(){
@@ -1320,7 +1333,7 @@ async function pullSettingsFromGH(){
     if(r.status===404){ lg("Settings: no remote file yet — will create on next save"); return false; }
     if(!r.ok) return false;
     const d = await r.json();
-    const payload = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    const payload = JSON.parse(decodeURIComponent(escape(atob(d.content.replace(/[\r\n\s]/g,"")))));
     if(!payload.settings) return false;
 
     // Merge remote settings into CFG (preserve local token)
@@ -1330,7 +1343,11 @@ async function pullSettingsFromGH(){
     localStorage.setItem("friday_cfg", JSON.stringify(CFG));
     // Reload settings UI
     loadSettingsUI();
-    lg(`✅ Settings pulled from GitHub (saved ${payload.savedAt?.slice(0,10)||"?"})`, "o");
+    const savedDate = payload.savedAt ? new Date(payload.savedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",dateStyle:"short",timeStyle:"short"}) : "?";
+    lg(`✅ Settings pulled from GitHub (saved ${savedDate})`, "o");
+    // Show status in settings bar
+    const _sv3 = document.getElementById("settings-save-status");
+    if(_sv3){ _sv3.textContent="📥 Settings loaded from GitHub (saved "+savedDate+")"; _sv3.style.color="#1d4ed8"; setTimeout(()=>{if(_sv3)_sv3.textContent="";},5000); }
     return true;
   }catch(e){ lg("pullSettingsFromGH: "+e.message,"w"); return false; }
 }
@@ -1826,9 +1843,26 @@ function saveSettings(){
   // Update filter label with new settings
   const subEl2 = document.getElementById("stocks-sub");
   if(subEl2) subEl2.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
-  // Status shown in sticky bar (no popup)
+  // Push to GitHub + show status
   const _sv2 = document.getElementById("settings-save-status");
-  if(_sv2){ _sv2.textContent="✅ All settings saved · "+getIST(); _sv2.style.color="#16a34a"; setTimeout(()=>{if(_sv2)_sv2.textContent="";},4000); }
+  if(_sv2){ _sv2.textContent="💾 Saving to GitHub..."; _sv2.style.color="#d97706"; }
+  pushSettingsToGH().then(ok=>{
+    if(_sv2){
+      if(ok===false && (!GH.token||!GH.user||!GH.repo)){
+        _sv2.textContent="✅ Saved locally · Configure GitHub in Signal Log to sync across browsers";
+        _sv2.style.color="#d97706";
+      } else if(ok===false){
+        _sv2.textContent="⚠ Saved locally · GitHub sync failed — check token/repo";
+        _sv2.style.color="#dc2626";
+      } else {
+        _sv2.textContent="✅ Saved & synced to GitHub · "+getIST();
+        _sv2.style.color="#16a34a";
+      }
+      setTimeout(()=>{ if(_sv2) _sv2.textContent=""; }, 5000);
+    }
+  }).catch(e=>{
+    if(_sv2){ _sv2.textContent="✅ Saved locally · GitHub: "+e.message; _sv2.style.color="#d97706"; setTimeout(()=>{if(_sv2)_sv2.textContent="";},5000); }
+  });
 }
 function resetSettings(){
   if(!confirm("Reset all settings to defaults?\nThis cannot be undone.")) return;

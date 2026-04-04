@@ -278,7 +278,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
-
   </nav>
   <div class="nav-footer">
     <div id="nav-refresh-info">Stocks: — · Options: — · Portfolio: —</div>
@@ -573,6 +572,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
+
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -678,7 +678,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       After market close, auto-checks which signals hit target or SL.<br>
       <a href="https://github.com/settings/tokens/new?scopes=repo&description=FRIDAY+Signal+Log" target="_blank" style="color:#16a34a;font-weight:700">Generate GitHub Token →</a>
     </div>
-    <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" placeholder="ghp_xxxxxxxxxxxx"></div>
+    <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="text" placeholder="ghp_xxxxxxxxxxxx"></div>
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
@@ -3485,6 +3485,11 @@ async function triggerScan(){
       vix, vixTxt, pcr, pcrTxt, sent, sentSc, topSec, picks.length);
     renderStockCards(picks, quoted.length);
     updateTicker(nLtp, nChgPct, bLtp, getChgPct(bQ), sent, sentSc, topSec, vix, pcr);
+    // Log only the picks shown on screen (already filtered by conf/pot/risk/rr)
+    if(picks.length){
+      const stockSigs = picks.map(p=>({...buildStockSignal(p), vix}));
+      logSignals(stockSigs).catch(e=>lg("Stock log: "+e.message,"w"));
+    }
 
     document.getElementById("loading-stocks").style.display = "none";
     document.getElementById("dash-stocks").style.display = "block";
@@ -3678,10 +3683,16 @@ async function loadOptions(force=true){
     renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
     renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
     renderOptionsGroups(groups);
-    // Log with-trend options signals to GitHub
+    // Log exactly what is shown on screen — apply same filters as renderOptionsGroups
+    const _logCapLimit = CFG.maxOptCapital > 0 ? CFG.maxOptCapital : Infinity;
     const optSigsToLog = groups.flatMap(g=>
-      g.picks.filter(p=>p.trendAligned && p.confidence>=CFG.minOptConf)
-             .map(p=>buildOptionSignal(p, optVix))
+      g.picks
+        .filter(p =>
+          p.confidence  >= CFG.minOptConf &&   // confidence threshold
+          p.amtRequired <= _logCapLimit    &&   // capital limit
+          p.trendAligned                        // WITH-TREND only (counter-trend not logged)
+        )
+        .map(p => buildOptionSignal(p, optVix))
     );
     if(optSigsToLog.length) logSignals(optSigsToLog).catch(e=>lg("Opt log: "+e.message,"w"));
 

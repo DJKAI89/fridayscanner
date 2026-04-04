@@ -986,21 +986,64 @@ function updateTokenInfo(){
 // ─────────────────────────────────────────────────────────────
 async function loadClosedMarketStats(){
   try{
-    const idxD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX");
+    // Fetch all 4 index spots + VIX
+    const allKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,NSE_INDEX|India VIX,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+    const idxD=await fetchQ(allKeys);
     const nQ=idxD["NSE_INDEX|Nifty 50"],bQ=idxD["NSE_INDEX|Nifty Bank"],vQ=idxD["NSE_INDEX|India VIX"];
+    const sQ=idxD["BSE_INDEX|SENSEX"]||idxD["BSE_INDEX:SENSEX"];
+    const fQ=idxD["NSE_INDEX|Nifty Fin Service"]||idxD["NSE_INDEX:Nifty Fin Service"];
     const vix=vQ?.last_price||0;
     const {txt:vixTxt}=interpVIX(vix);
     const nPts=nQ?.net_change||0, bPts=bQ?.net_change||0;
+
+    // ── Stock tab stats ──
     renderStatsStocks(
       {ltp:nQ?.last_price||0,chgPct:getChgPct(nQ),pts:nPts},
       {ltp:bQ?.last_price||0,chgPct:getChgPct(bQ),pts:bPts},
       vix,vixTxt,1,"—","CLOSED",5,"—",0
     );
     document.getElementById("stocks-upd-time").textContent="Last close · "+getIST();
+
+    // ── Options tab stats — show 4 index spot cards ──
+    const makeGroup = (name, q, step) => {
+      if(!q?.last_price) return null;
+      return {
+        name, step,
+        spot:    q.last_price,
+        spotPts: q.net_change || 0,
+        spotChg: getChgPct(q),
+        pcr:     1,   // unknown when closed
+        expiry:  "—",
+        picks:   [],
+        filteredPicks: [],
+        alignedCount:  0,
+        counterCount:  0,
+        type:    "index",
+        maxPain: 0,
+        oiWalls: {}
+      };
+    };
+    const closedGroups = [
+      makeGroup("NIFTY",    nQ, 50),
+      makeGroup("BANKNIFTY",bQ, 100),
+      makeGroup("SENSEX",   sQ, 100),
+      makeGroup("FINNIFTY", fQ, 50),
+    ].filter(Boolean);
+    if(closedGroups.length){
+      renderStatsOptions(closedGroups, true, 0, vix);
+      document.getElementById("options-upd-time").textContent="Last close · "+getIST();
+    }
   }catch(e){lg("Closed stats: "+e.message,"w");}
+
+  // Stock tab empty state
   document.getElementById("cards-stocks").innerHTML=
     `<div class="empty-state">📅 NSE Market Closed<br>
      <span style="font-size:10px;color:#94a3b8">Stats show last session data · Scan auto-starts Mon–Fri at 9:15 AM IST</span></div>`;
+  // Options tab empty state (body below the stats cards)
+  const optBody=document.getElementById("options-body");
+  if(optBody) optBody.innerHTML=
+    `<div class="empty-state">📅 NSE Market Closed<br>
+     <span style="font-size:10px;color:#94a3b8">Option signals require live market data · Available Mon–Fri 9:15 AM–3:30 PM IST</span></div>`;
 }
 
 
@@ -2900,7 +2943,7 @@ async function loadOptions(force=true){
         const maxPain = calcMaxPain(chain);
         const oiWalls = calcOIWalls(chain);
 
-        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix);
+        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain);
         const _cap=CFG.maxOptCapital>0?CFG.maxOptCapital:Infinity;
         const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf&&p.amtRequired<=_cap);
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
@@ -2951,7 +2994,8 @@ async function loadOptions(force=true){
         const ceOI=chain.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
-        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix);
+        const stkMaxPain = calcMaxPain(chain);
+        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain);
         lg(`${inst.s}: ${chain.length} strikes → ${picks.length} signals`,picks.length?"o":"");
         if(picks.length) groups.push({name:inst.s,spot,spotChg,spotPts:spotPts2,pcr,expiry,picks,type:"stock",fullName:inst.n});
       }catch(e){lg(inst.s+" opts: "+e.message,"w");}
@@ -3051,7 +3095,7 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
 
-function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
+function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain) {
   const picks = [];
   for (const row of chain) {
     const sp = row.strike_price;
@@ -4068,7 +4112,7 @@ async function lookupStock(){
         const pcr2    = ceOI>0 ? +(peOI/ceOI).toFixed(2) : 1;
         const maxPain2= calcMaxPain(chain);
         const oiWalls2= calcOIWalls(chain);
-        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix);
+        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix,maxPain2);
         const picks   = allPicks.filter(p=>p.confidence>=CFG.minOptConf);
         const mp2dist = maxPain2&&ltp ? ((maxPain2-ltp)/ltp*100).toFixed(1) : null;
 

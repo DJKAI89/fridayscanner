@@ -577,7 +577,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
-
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -672,7 +671,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="setting-card">
     <h4>📋 Signal Log (GitHub)</h4>
     <div class="set-sub" style="margin-bottom:10px;line-height:1.6">
-      Logs every FRIDAY signal to your GitHub repo as <code>signals-log.json</code>.<br>
+      Logs every FRIDAY signal to your GitHub repo as <code>signal-logs/{your-upstox-id}.json</code>.<br>
+      Each Upstox account gets its own separate files — signals and settings isolated per user.<br>
+      <b>Settings sync:</b> changes save to GitHub and load on every browser automatically.<br>
       After market close, auto-checks which signals hit target or SL.<br>
       <a href="https://github.com/settings/tokens/new?scopes=repo&description=FRIDAY+Signal+Log" target="_blank" style="color:#16a34a;font-weight:700">Generate GitHub Token →</a>
     </div>
@@ -1128,6 +1129,9 @@ async function fetchAndShowUserProfile(){
     localStorage.setItem("friday_user_name", name);
     localStorage.setItem("friday_user_id",   id);
     lg("✅ User: "+name+(id?" ("+id+")":""),"o");
+    // Pull settings from GitHub now that we have user ID
+    // Small delay to ensure GH credentials are loaded
+    setTimeout(()=>pullSettingsFromGH(), 1500);
 
   }catch(e){
     lg("User profile: "+e.message,"w");
@@ -1164,37 +1168,179 @@ function loadGHSettings(){
   if(ui_r) ui_r.value = GH.repo;
 }
 
+function sanitiseGHInputs(){
+  // Clean token — strip spaces
+  let tok = (document.getElementById("s-gh-token")?.value||"").trim();
+
+  // Clean repo — user may paste full URL e.g. https://github.com/djkai89/repo
+  // or https://djkai89.github.io  → extract just the repo name
+  let repo = (document.getElementById("s-gh-repo")?.value||"").trim();
+  let user = (document.getElementById("s-gh-user")?.value||"").trim();
+
+  // Handle GitHub repo URL: https://github.com/USER/REPO
+  const ghRepoMatch = repo.match(/github\.com\/([^\/]+)\/([^\/\s#?]+)/);
+  if(ghRepoMatch){
+    if(!user) user = ghRepoMatch[1];  // auto-fill user if blank
+    repo = ghRepoMatch[2].replace(/\.git$/, "");
+  }
+  // Handle GitHub Pages URL: https://USER.github.io or https://USER.github.io/REPO
+  const ghPagesMatch = repo.match(/https?:\/\/([^\.]+)\.github\.io(?:\/([^\/\s#?]+))?/);
+  if(ghPagesMatch){
+    if(!user) user = ghPagesMatch[1]; // auto-fill user
+    repo = ghPagesMatch[2] ? ghPagesMatch[2] : ghPagesMatch[1]+".github.io";
+  }
+  // Handle username.github.io typed without https
+  const plainPages = repo.match(/^([a-zA-Z0-9_-]+)\.github\.io$/);
+  if(plainPages && !user){
+    user = plainPages[1];
+  }
+  // Strip any remaining URL parts (http/https/slash)
+  repo = repo.replace(/^https?:\/\/[^\/]+\//, "").replace(/\/$/, "");
+  // Strip leading/trailing slashes
+  repo = repo.replace(/^\/+|\/+$/g, "");
+  // Lowercase
+  user = user.toLowerCase();
+
+  // Update UI with cleaned values
+  const uEl = document.getElementById("s-gh-user");
+  const rEl = document.getElementById("s-gh-repo");
+  if(uEl) uEl.value = user;
+  if(rEl) rEl.value = repo;
+  return { tok, user, repo };
+}
+
 function saveGitHubSettings(){
-  GH.token = (document.getElementById("s-gh-token")?.value||"").trim();
-  GH.user  = (document.getElementById("s-gh-user")?.value||"").trim();
-  GH.repo  = (document.getElementById("s-gh-repo")?.value||"").trim();
+  const { tok, user, repo } = sanitiseGHInputs();
+  GH.token = tok;
+  GH.user  = user;
+  GH.repo  = repo;
   localStorage.setItem("friday_gh_token", GH.token);
   localStorage.setItem("friday_gh_user",  GH.user);
   localStorage.setItem("friday_gh_repo",  GH.repo);
-  document.getElementById("gh-status").textContent = "✅ Saved. Click Test Connection to verify.";
+  const el = document.getElementById("gh-status");
+  el.textContent = `✅ Saved — ${user}/${repo}. Click Test Connection to verify.`;
+  el.style.color = "#16a34a";
 }
 
 async function testGitHubConnection(){
   const el = document.getElementById("gh-status");
-  if(!GH.token||!GH.user||!GH.repo){ el.textContent="❌ Fill in all 3 fields first."; return; }
-  el.textContent = "Testing...";
+  // Sanitise first (handles pasted URLs)
+  saveGitHubSettings();
+  if(!GH.token){ el.textContent="❌ GitHub token is required."; el.style.color="#dc2626"; return; }
+  if(!GH.user){ el.textContent="❌ GitHub username is required."; el.style.color="#dc2626"; return; }
+  if(!GH.repo){ el.textContent="❌ Repository name is required."; el.style.color="#dc2626"; return; }
+  el.textContent = "🔄 Testing connection to "+GH.user+"/"+GH.repo+" ...";
+  el.style.color = "#64748b";
   try{
     const r = await fetch(`https://api.github.com/repos/${GH.user}/${GH.repo}`,{
       headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }
     });
-    if(r.ok){ el.textContent = "✅ Connected! Repo found. Signal logging is active."; el.style.color="#16a34a"; }
-    else if(r.status===401){ el.textContent = "❌ Token invalid or expired. Generate a new one."; el.style.color="#dc2626"; }
-    else if(r.status===404){ el.textContent = "❌ Repo not found. Check username and repo name."; el.style.color="#dc2626"; }
-    else { el.textContent = "❌ Error: "+r.status; el.style.color="#dc2626"; }
-  }catch(e){ el.textContent="❌ Network error: "+e.message; el.style.color="#dc2626"; }
+    if(r.ok){
+      const fp = getLogFilePath();
+      el.innerHTML = `✅ Connected! <b>${GH.user}/${GH.repo}</b><br>
+        Signal log → <code>${fp}</code><br>
+        Settings   → <code>user-settings/${(localStorage.getItem("friday_user_id")||"default").replace(/[^a-zA-Z0-9_-]/g,"_")}.json</code>`;
+      el.style.color = "#16a34a";
+      // Try to push settings to GitHub now that we confirmed connection
+      pushSettingsToGH();
+    }
+    else if(r.status===401){ el.textContent="❌ Token invalid — generate a new one with 'repo' scope."; el.style.color="#dc2626"; }
+    else if(r.status===403){ el.textContent="❌ Token missing 'repo' scope. Re-generate with repo access."; el.style.color="#dc2626"; }
+    else if(r.status===404){ el.textContent=`❌ Repo '${GH.user}/${GH.repo}' not found. Check spelling.`; el.style.color="#dc2626"; }
+    else { el.textContent="❌ GitHub error: HTTP "+r.status; el.style.color="#dc2626"; }
+  }catch(e){
+    el.textContent="❌ Network error: "+e.message+". Check your internet connection.";
+    el.style.color="#dc2626";
+  }
 }
 
 // ── Read signals-log.json from GitHub ──
+
+// ─────────────────────────────────────────────────────────────
+// SETTINGS SYNC — GitHub per-user settings file
+// Keeps settings consistent across all browsers for same user
+// File: user-settings/{upstox_client_id}.json
+// ─────────────────────────────────────────────────────────────
+
+function getSettingsFilePath(){
+  const userId = localStorage.getItem("friday_user_id") || "default";
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g,"_");
+  return "user-settings/"+safe+".json";
+}
+
+async function pushSettingsToGH(){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  try{
+    // Read current SHA if file exists
+    let sha = null;
+    try{
+      const r = await fetch(
+        `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getSettingsFilePath()}`,
+        { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+      );
+      if(r.ok){ const d=await r.json(); sha=d.sha; }
+    }catch(e){}
+
+    // Build settings payload — exclude sensitive token
+    const settingsPayload = { ...CFG };
+    delete settingsPayload._token; // never store token in GitHub
+    const payload = {
+      settings: settingsPayload,
+      upstoxId: localStorage.getItem("friday_user_id")||"unknown",
+      savedAt:  new Date().toISOString(),
+      version:  typeof CFG_VERSION !== "undefined" ? CFG_VERSION : 1
+    };
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
+    const body = { message:"FRIDAY settings sync", content };
+    if(sha) body.sha = sha;
+
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getSettingsFilePath()}`,
+      { method:"PUT",
+        headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    if(r.ok) lg("✅ Settings pushed to GitHub","o");
+    else lg("Settings push failed: "+r.status,"w");
+  }catch(e){ lg("pushSettingsToGH: "+e.message,"w"); }
+}
+
+async function pullSettingsFromGH(){
+  if(!GH.token||!GH.user||!GH.repo) return false;
+  try{
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getSettingsFilePath()}`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404){ lg("Settings: no remote file yet — will create on next save"); return false; }
+    if(!r.ok) return false;
+    const d = await r.json();
+    const payload = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    if(!payload.settings) return false;
+
+    // Merge remote settings into CFG (preserve local token)
+    const remoteCFG = payload.settings;
+    Object.assign(CFG, remoteCFG);
+    // Save to localStorage so it persists
+    localStorage.setItem("friday_cfg", JSON.stringify(CFG));
+    // Reload settings UI
+    loadSettingsUI();
+    lg(`✅ Settings pulled from GitHub (saved ${payload.savedAt?.slice(0,10)||"?"})`, "o");
+    return true;
+  }catch(e){ lg("pullSettingsFromGH: "+e.message,"w"); return false; }
+}
+
+function getLogFilePath(){
+  const userId = localStorage.getItem("friday_user_id") || "default";
+  const safe = userId.replace(/[^a-zA-Z0-9_-]/g,"_");
+  return "signal-logs/"+safe+".json";
+}
+
 async function ghReadLog(){
   if(!GH.token||!GH.user||!GH.repo) return { signals:[], sha:null };
   try{
     const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/signals-log.json`,
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getLogFilePath()}`,
       { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
     );
     if(r.status===404) return { signals:[], sha:null }; // first time
@@ -1205,22 +1351,38 @@ async function ghReadLog(){
 }
 
 // ── Write signals-log.json to GitHub ──
-async function ghWriteLog(signals, sha){
+async function ghWriteLog(signals, sha, retryCount=0){
   if(!GH.token||!GH.user||!GH.repo) return false;
   try{
     const content = btoa(unescape(encodeURIComponent(JSON.stringify({
       signals,
       lastUpdated: new Date().toISOString(),
+      upstoxId: localStorage.getItem("friday_user_id")||"unknown",
       stats: computeLogStats(signals)
     }, null, 2))));
-    const body = { message:"FRIDAY signal log update", content };
+    const body = { message:"FRIDAY signal log · "+(localStorage.getItem("friday_user_id")||"user"), content };
     if(sha) body.sha = sha;
     const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/signals-log.json`,
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getLogFilePath()}`,
       { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
         body: JSON.stringify(body) }
     );
-    return r.ok;
+    if(r.ok) return true;
+
+    // 409 Conflict = SHA mismatch (two browsers wrote simultaneously)
+    // Retry: re-read fresh SHA and merge signals
+    if(r.status===409 && retryCount<2){
+      lg("ghWriteLog: SHA conflict — retrying with fresh read (attempt "+(retryCount+1)+")","w");
+      await sleep(1000 + Math.random()*1000); // stagger retries
+      const fresh = await ghReadLog();
+      // Merge: add any new signals not already in fresh
+      const existingIds = new Set(fresh.signals.map(s=>s.id));
+      const toMerge = signals.filter(s=>!existingIds.has(s.id));
+      const merged = [...fresh.signals, ...toMerge];
+      return ghWriteLog(merged, fresh.sha, retryCount+1);
+    }
+    lg("ghWriteLog: failed status "+r.status,"w");
+    return false;
   }catch(e){ lg("ghWriteLog: "+e.message,"w"); return false; }
 }
 

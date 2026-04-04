@@ -273,6 +273,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <span class="nav-icon">🔍</span><span class="nav-label">Analyse Stock</span>
     </button>
 
+<button class="nav-item" id="nav-log" onclick="switchTab('log');closeMenu()">
+  <span class="nav-icon">📋</span><span class="nav-label">Signal Log</span><span class="nav-badge" id="nb-log">—</span>
+</button>
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -502,6 +505,40 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <!-- SETTINGS -->
 
+  <!-- SIGNAL LOG -->
+
+  <div class="pane" id="pane-log">
+    <div class="pane-hdr"><h2>📋 Signal Log</h2></div>
+    <div style="padding:0 12px 12px">
+
+  <!-- Stats summary -->
+  <div class="stats-g" id="log-stats" style="margin-bottom:12px"></div>
+
+  <!-- Filter bar -->
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <select id="log-filter-type" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;background:#fff" onchange="renderLogTab()">
+      <option value="all">All signals</option>
+      <option value="STOCK">Stocks only</option>
+      <option value="OPTION">Options only</option>
+    </select>
+    <select id="log-filter-status" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;background:#fff" onchange="renderLogTab()">
+      <option value="all">All status</option>
+      <option value="OPEN">Open</option>
+      <option value="TARGET_HIT">Target Hit</option>
+      <option value="SL_HIT">SL Hit</option>
+      <option value="EXPIRED">Expired</option>
+    </select>
+    <button class="btn btn-g" style="padding:7px 12px;font-size:11px" onclick="checkAllOutcomes()">🔄 Update outcomes</button>
+  </div>
+
+  <!-- Log entries -->
+  <div id="log-entries">
+    <div class="empty-state">No signals logged yet.<br><span style="font-size:10px;color:#94a3b8">Signals are logged automatically each scan.<br>Set your GitHub token in ⚙ Settings → Signal Log.</span></div>
+  </div>
+</div>
+
+  </div>
+
   <div class="pane" id="pane-settings">
     <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:16px">⚙ Settings</div>
     <div class="settings-g">
@@ -628,6 +665,25 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <button class="btn btn-g" style="flex:1;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
       <button class="btn" style="margin-top:4px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;padding:8px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer" onclick="resetSettings()">↺ Reset Defaults</button>
     </div>
+  </div>
+
+  <!-- Signal Log / GitHub -->
+
+  <div class="setting-card">
+    <h4>📋 Signal Log (GitHub)</h4>
+    <div class="set-sub" style="margin-bottom:10px;line-height:1.6">
+      Logs every FRIDAY signal to your GitHub repo as <code>signals-log.json</code>.<br>
+      After market close, auto-checks which signals hit target or SL.<br>
+      <a href="https://github.com/settings/tokens/new?scopes=repo&description=FRIDAY+Signal+Log" target="_blank" style="color:#16a34a;font-weight:700">Generate GitHub Token →</a>
+    </div>
+    <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="password" placeholder="ghp_xxxxxxxxxxxx"></div>
+    <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
+    <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-g" style="flex:1;font-size:11px" onclick="saveGitHubSettings()">💾 Save GitHub Settings</button>
+      <button class="btn" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="testGitHubConnection()">🔗 Test Connection</button>
+    </div>
+    <div id="gh-status" style="margin-top:8px;font-size:10px;color:#64748b"></div>
   </div>
 </div>
 
@@ -1087,6 +1143,408 @@ async function fetchAndShowUserProfile(){
   }
 }
 
+
+// ════════════════════════════════════════════════════════════════
+// SIGNAL LOG — GitHub as database
+// Stores signals-log.json in user's GitHub repo
+// ════════════════════════════════════════════════════════════════
+
+// ── GitHub credentials (loaded from localStorage) ──
+let GH = { token:"", user:"", repo:"" };
+
+function loadGHSettings(){
+  GH.token = localStorage.getItem("friday_gh_token") || "";
+  GH.user  = localStorage.getItem("friday_gh_user")  || "";
+  GH.repo  = localStorage.getItem("friday_gh_repo")  || "";
+  const ui_t = document.getElementById("s-gh-token");
+  const ui_u = document.getElementById("s-gh-user");
+  const ui_r = document.getElementById("s-gh-repo");
+  if(ui_t) ui_t.value = GH.token;
+  if(ui_u) ui_u.value = GH.user;
+  if(ui_r) ui_r.value = GH.repo;
+}
+
+function saveGitHubSettings(){
+  GH.token = (document.getElementById("s-gh-token")?.value||"").trim();
+  GH.user  = (document.getElementById("s-gh-user")?.value||"").trim();
+  GH.repo  = (document.getElementById("s-gh-repo")?.value||"").trim();
+  localStorage.setItem("friday_gh_token", GH.token);
+  localStorage.setItem("friday_gh_user",  GH.user);
+  localStorage.setItem("friday_gh_repo",  GH.repo);
+  document.getElementById("gh-status").textContent = "✅ Saved. Click Test Connection to verify.";
+}
+
+async function testGitHubConnection(){
+  const el = document.getElementById("gh-status");
+  if(!GH.token||!GH.user||!GH.repo){ el.textContent="❌ Fill in all 3 fields first."; return; }
+  el.textContent = "Testing...";
+  try{
+    const r = await fetch(`https://api.github.com/repos/${GH.user}/${GH.repo}`,{
+      headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }
+    });
+    if(r.ok){ el.textContent = "✅ Connected! Repo found. Signal logging is active."; el.style.color="#16a34a"; }
+    else if(r.status===401){ el.textContent = "❌ Token invalid or expired. Generate a new one."; el.style.color="#dc2626"; }
+    else if(r.status===404){ el.textContent = "❌ Repo not found. Check username and repo name."; el.style.color="#dc2626"; }
+    else { el.textContent = "❌ Error: "+r.status; el.style.color="#dc2626"; }
+  }catch(e){ el.textContent="❌ Network error: "+e.message; el.style.color="#dc2626"; }
+}
+
+// ── Read signals-log.json from GitHub ──
+async function ghReadLog(){
+  if(!GH.token||!GH.user||!GH.repo) return { signals:[], sha:null };
+  try{
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/signals-log.json`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404) return { signals:[], sha:null }; // first time
+    const d = await r.json();
+    const content = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    return { signals: content.signals||[], sha: d.sha };
+  }catch(e){ lg("ghReadLog: "+e.message,"w"); return { signals:[], sha:null }; }
+}
+
+// ── Write signals-log.json to GitHub ──
+async function ghWriteLog(signals, sha){
+  if(!GH.token||!GH.user||!GH.repo) return false;
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify({
+      signals,
+      lastUpdated: new Date().toISOString(),
+      stats: computeLogStats(signals)
+    }, null, 2))));
+    const body = { message:"FRIDAY signal log update", content };
+    if(sha) body.sha = sha;
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/signals-log.json`,
+      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    return r.ok;
+  }catch(e){ lg("ghWriteLog: "+e.message,"w"); return false; }
+}
+
+// ── Compute summary stats from signal array ──
+function computeLogStats(signals){
+  const total    = signals.length;
+  const closed   = signals.filter(s=>s.status!=="OPEN"&&s.status!=="EXPIRED");
+  const hits     = signals.filter(s=>s.status==="TARGET_HIT").length;
+  const sls      = signals.filter(s=>s.status==="SL_HIT").length;
+  const winRate  = closed.length>0 ? Math.round(hits/closed.length*100) : null;
+  const avgConf  = total>0 ? Math.round(signals.reduce((a,s)=>a+s.confidence,0)/total) : 0;
+  return { total, hits, sls, open: signals.filter(s=>s.status==="OPEN").length, winRate, avgConf };
+}
+
+// ── Log a batch of signals (called after each scan) ──
+async function logSignals(newSignals){
+  if(!GH.token||!GH.user||!GH.repo){
+    lg("Signal log: GitHub not configured — skipping","w");
+    return;
+  }
+  if(!newSignals||!newSignals.length) return;
+
+  try{
+    const { signals, sha } = await ghReadLog();
+    // Deduplicate: don't log same stock+date+type twice
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    const existing = new Set(signals.map(s=>s.id));
+    const toAdd = newSignals.filter(s=>!existing.has(s.id));
+    if(!toAdd.length){ lg("Signal log: all signals already logged"); return; }
+    const updated = [...signals, ...toAdd];
+    // Keep last 500 signals (prune oldest)
+    if(updated.length > 500) updated.splice(0, updated.length-500);
+    const ok = await ghWriteLog(updated, sha);
+    lg(`Signal log: ${ok?"✅":"❌"} logged ${toAdd.length} new signals (total ${updated.length})`,"o");
+    updateLogBadge(updated);
+  }catch(e){ lg("logSignals: "+e.message,"w"); }
+}
+
+// ── Build signal object from stock pick ──
+function buildStockSignal(p){
+  const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+  return {
+    id:          `${istDate}-${p.s}-STOCK`,
+    date:        istDate,
+    time:        istTime,
+    type:        "STOCK",
+    stock:       p.s,
+    name:        p.n,
+    signal:      p.rec,
+    confidence:  p.conf,
+    strength:    getSignalStrength(p.numInds, p.conf, p.reversal).label,
+    numInds:     p.numInds,
+    entry:       +p.ltp.toFixed(2),
+    sl:          +p.sl.toFixed(2),
+    target:      +p.target.toFixed(2),
+    targetCons:  +p.pot.cons.toFixed(2),
+    targetMod:   +p.pot.mod.toFixed(2),
+    targetAgg:   +p.pot.agg.toFixed(2),
+    rr:          p.pot.rr,
+    winRateEst:  p.pot.wr,
+    risk:        p.risk,
+    rsi:         p.rsi,
+    vix:         null, // filled by caller
+    reversal:    p.reversal?.type||"NONE",
+    trigger:     p.entryTrigger?.trigger||p.ltp,
+    triggerMethod: p.entryTrigger?.method||"Market",
+    status:      "OPEN",
+    exitPrice:   null,
+    exitTime:    null,
+    pnlPct:      null,
+    note:        ""
+  };
+}
+
+// ── Build signal object from option pick ──
+function buildOptionSignal(p, vix){
+  const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+  return {
+    id:          `${istDate}-${p.und}-${p.strike}-${p.type}`,
+    date:        istDate,
+    time:        istTime,
+    type:        "OPTION",
+    stock:       p.und,
+    name:        `${p.und} ${p.strike} ${p.type}`,
+    signal:      p.action,
+    confidence:  p.confidence,
+    strength:    p.confidence>=75?"STRONG":p.confidence>=55?"MODERATE":"WEAK",
+    numInds:     p.score,
+    entry:       +p.entry.toFixed(2),
+    sl:          +p.sl.toFixed(2),
+    target:      +p.tgt.toFixed(2),
+    strike:      p.strike,
+    optType:     p.type,
+    expiry:      p.expiry,
+    lot:         p.lot,
+    delta:       p.delta,
+    iv:          p.iv,
+    trendAligned: p.trendAligned,
+    capitalReq:  p.amtRequired,
+    rr:          p.rr,
+    winRateEst:  55,
+    vix:         vix||null,
+    status:      "OPEN",
+    exitPrice:   null,
+    exitTime:    null,
+    pnlPct:      null,
+    note:        ""
+  };
+}
+
+// ── Check outcomes for all open signals ──
+async function checkAllOutcomes(){
+  if(!GH.token){ alert("Configure GitHub token in ⚙ Settings → Signal Log first."); return; }
+  document.getElementById("log-entries").innerHTML=
+    `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking outcomes for open signals...</div>`;
+  try{
+    const { signals, sha } = await ghReadLog();
+    const openSignals = signals.filter(s=>s.status==="OPEN");
+    if(!openSignals.length){
+      renderLogTab(signals);
+      return;
+    }
+
+    // Fetch current prices for all open stock signals
+    const stockSyms = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
+    const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
+    const allSyms = [...new Set([...stockSyms, ...optUnderlying])];
+
+    // Batch fetch quotes
+    const priceMap = {};
+    if(allSyms.length){
+      // Map symbols to Upstox keys via STOCK_MASTER_MAP
+      const keys = allSyms.map(sym=>{
+        const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym) || FO_STOCK_LIST.find(s=>s.s===sym);
+        return inst?.key;
+      }).filter(Boolean).join(",");
+      // Also add index keys
+      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      try{
+        const quotes = await fetchQ(keys+","+idxKeys);
+        // Map back to symbol
+        allSyms.forEach(sym=>{
+          const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym);
+          if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
+        });
+        // Index map
+        priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
+        priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
+        priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
+        priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
+      }catch(e){ lg("checkOutcomes quotes: "+e.message,"w"); }
+    }
+
+    // For options: fetch current premium prices
+    const optPriceMap = {};
+    for(const sig of openSignals.filter(s=>s.type==="OPTION")){
+      try{
+        const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock) || INDEX_OPTS.find(s=>s.name===sig.stock);
+        if(!inst) continue;
+        const chain = await fetchOptions(inst.key, sig.expiry);
+        const row = chain.find(r=>r.strike_price===sig.strike);
+        if(!row) continue;
+        const opt = sig.optType==="CE" ? row.call_options : row.put_options;
+        if(opt?.market_data?.ltp) optPriceMap[sig.id] = opt.market_data.ltp;
+      }catch(e){}
+    }
+
+    const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+
+    // Update each open signal
+    let updated = 0;
+    for(const sig of signals){
+      if(sig.status !== "OPEN") continue;
+      let currentPrice = null;
+
+      if(sig.type==="STOCK")  currentPrice = priceMap[sig.stock];
+      if(sig.type==="OPTION") currentPrice = optPriceMap[sig.id];
+
+      if(!currentPrice) continue;
+
+      // Check target / SL
+      const hitTarget = sig.signal==="BUY"||sig.signal==="CALL"
+        ? currentPrice >= sig.target
+        : currentPrice <= sig.target;
+      const hitSL = sig.signal==="BUY"||sig.signal==="CALL"
+        ? currentPrice <= sig.sl
+        : currentPrice >= sig.sl;
+
+      // Check if signal date is old (past expiry / yesterday)
+      const sigDate = sig.date;
+      const isOldSignal = sigDate < istDate;
+      // For options: check if expiry has passed
+      const isExpired = sig.type==="OPTION" && sig.expiry && sig.expiry < istDate;
+
+      if(isExpired){
+        sig.status    = "EXPIRED";
+        sig.exitPrice = currentPrice;
+        sig.exitTime  = istTime;
+        sig.pnlPct    = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+      } else if(hitTarget){
+        sig.status    = "TARGET_HIT";
+        sig.exitPrice = sig.target;
+        sig.exitTime  = istTime;
+        sig.pnlPct    = +(((sig.target-sig.entry)/sig.entry)*100).toFixed(2);
+      } else if(hitSL){
+        sig.status    = "SL_HIT";
+        sig.exitPrice = sig.sl;
+        sig.exitTime  = istTime;
+        sig.pnlPct    = +(((sig.sl-sig.entry)/sig.entry)*100).toFixed(2);
+      } else if(isOldSignal && !isExpired){
+        // Old open signal — mark as expired (no confirmation either way)
+        sig.status    = "EXPIRED";
+        sig.exitPrice = currentPrice;
+        sig.exitTime  = istTime;
+        sig.pnlPct    = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+      }
+      if(sig.status!=="OPEN") updated++;
+    }
+
+    const ok = await ghWriteLog(signals, sha);
+    lg(`Outcomes: updated ${updated} signals, wrote to GitHub: ${ok}`,"o");
+    renderLogTab(signals);
+    updateLogBadge(signals);
+    if(updated>0) alert(`✅ Updated ${updated} signal outcomes. ${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
+    else alert("No open signals have hit their target or SL yet.");
+  }catch(e){
+    lg("checkAllOutcomes: "+e.message,"e");
+    document.getElementById("log-entries").innerHTML=`<div class="empty-state">Error: ${e.message}</div>`;
+  }
+}
+
+// ── Update nav badge ──
+function updateLogBadge(signals){
+  const open = (signals||[]).filter(s=>s.status==="OPEN").length;
+  const el = document.getElementById("nb-log");
+  if(el) el.textContent = open>0 ? open+" open" : signals?.length||"—";
+}
+
+// ── Render Log tab ──
+async function renderLogTab(signalsIn){
+  let signals = signalsIn;
+  if(!signals){
+    if(!GH.token){
+      document.getElementById("log-entries").innerHTML=
+        `<div class="empty-state">Configure GitHub token in ⚙ Settings → Signal Log to enable logging.</div>`;
+      document.getElementById("log-stats").innerHTML="";
+      return;
+    }
+    document.getElementById("log-entries").innerHTML=
+      `<div style="text-align:center;padding:20px;color:#64748b">Loading from GitHub...</div>`;
+    const result = await ghReadLog();
+    signals = result.signals;
+  }
+
+  // Apply filters
+  const typeF   = document.getElementById("log-filter-type")?.value||"all";
+  const statusF = document.getElementById("log-filter-status")?.value||"all";
+  let filtered  = signals;
+  if(typeF!=="all")   filtered=filtered.filter(s=>s.type===typeF);
+  if(statusF!=="all") filtered=filtered.filter(s=>s.status===statusF);
+
+  // Sort newest first
+  filtered = filtered.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.time.localeCompare(a.time));
+
+  // Stats
+  const stats = computeLogStats(signals);
+  const openCount  = signals.filter(s=>s.status==="OPEN").length;
+  const hitCount   = signals.filter(s=>s.status==="TARGET_HIT").length;
+  const slCount    = signals.filter(s=>s.status==="SL_HIT").length;
+  const expCount   = signals.filter(s=>s.status==="EXPIRED").length;
+  const closedCount= hitCount+slCount;
+  const wr = closedCount>0 ? Math.round(hitCount/closedCount*100) : null;
+
+  document.getElementById("log-stats").innerHTML=`
+    <div class="sc"><div class="sc-lbl">TOTAL SIGNALS</div><div class="sc-val bl">${signals.length}</div><div class="sc-sub">since logging started</div></div>
+    <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val ${wr>=60?"up":wr>=45?"am":"dn"}">${wr!=null?wr+"%":"—"}</div><div class="sc-sub">${closedCount} closed signals</div></div>
+    <div class="sc"><div class="sc-lbl">TARGET HIT ✅</div><div class="sc-val up">${hitCount}</div><div class="sc-sub">reached target</div></div>
+    <div class="sc"><div class="sc-lbl">SL HIT ❌</div><div class="sc-val dn">${slCount}</div><div class="sc-sub">stopped out</div></div>
+    <div class="sc"><div class="sc-lbl">OPEN 🔄</div><div class="sc-val am">${openCount}</div><div class="sc-sub">watching</div></div>
+    <div class="sc"><div class="sc-lbl">AVG CONFIDENCE</div><div class="sc-val">${stats.avgConf}%</div><div class="sc-sub">all signals</div></div>
+  `;
+
+  if(!filtered.length){
+    document.getElementById("log-entries").innerHTML=
+      `<div class="empty-state">No signals match the selected filter.</div>`;
+    return;
+  }
+
+  document.getElementById("log-entries").innerHTML = filtered.map(s=>{
+    const stColor = s.status==="TARGET_HIT"?"#16a34a":s.status==="SL_HIT"?"#dc2626":s.status==="OPEN"?"#d97706":"#94a3b8";
+    const stBg    = s.status==="TARGET_HIT"?"#f0fdf4":s.status==="SL_HIT"?"#fef2f2":s.status==="OPEN"?"#fffbeb":"#f8fafc";
+    const stLabel = s.status==="TARGET_HIT"?"✅ TARGET HIT":s.status==="SL_HIT"?"❌ SL HIT":s.status==="OPEN"?"🔄 OPEN":"⏳ EXPIRED";
+    const pnlStr  = s.pnlPct!=null?(s.pnlPct>=0?"+":"")+s.pnlPct.toFixed(2)+"%":"—";
+    const pnlColor= s.pnlPct!=null?(s.pnlPct>=0?"#16a34a":"#dc2626"):"#94a3b8";
+    return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:11px 13px;margin-bottom:8px;border-left:4px solid ${stColor}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div>
+          <span style="font-weight:800;font-size:13px;color:#0f172a">${s.name}</span>
+          <span style="font-size:9px;color:#94a3b8;margin-left:6px">${s.type}</span>
+        </div>
+        <span style="background:${stBg};color:${stColor};border:1px solid ${stColor}33;border-radius:10px;padding:2px 8px;font-size:9px;font-weight:800">${stLabel}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:6px">
+        <div style="font-size:9px;color:#64748b">Signal<br><span style="font-weight:700;color:#0f172a">${s.signal}</span></div>
+        <div style="font-size:9px;color:#64748b">Confidence<br><span style="font-weight:700;color:#0f172a">${s.confidence}%</span></div>
+        <div style="font-size:9px;color:#64748b">Strength<br><span style="font-weight:700;color:#0f172a">${s.strength||"—"}</span></div>
+        <div style="font-size:9px;color:#64748b">P&L<br><span style="font-weight:700;color:${pnlColor}">${pnlStr}</span></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px">
+        <div style="font-size:9px;color:#64748b">Entry<br><span style="font-weight:700;color:#1d4ed8">₹${s.entry}</span></div>
+        <div style="font-size:9px;color:#64748b">SL<br><span style="font-weight:700;color:#dc2626">₹${s.sl}</span></div>
+        <div style="font-size:9px;color:#64748b">Target<br><span style="font-weight:700;color:#16a34a">₹${s.target}</span></div>
+      </div>
+      ${s.exitPrice?`<div style="font-size:9px;color:#64748b">Exit: ₹${s.exitPrice} at ${s.exitTime||"—"}</div>`:""}
+      <div style="font-size:9px;color:#94a3b8;margin-top:3px">${s.date} ${s.time}${s.reversal&&s.reversal!=="NONE"?" · 🔄 "+s.reversal:""}</div>
+    </div>`;
+  }).join("");
+
+  updateLogBadge(signals);
+}
+
 function boot(){
   document.getElementById("token-gate").style.display="none";
   document.getElementById("app").style.display="block";
@@ -1099,6 +1557,7 @@ function boot(){
   if(btn){btn.disabled=false;btn.textContent="▶ Launch Scanner";}
   loadSettingsUI();
   updateTokenInfo();
+  loadGHSettings();
   startTimers();
   // Load cached name instantly, then refresh from API
   const _cachedName = localStorage.getItem("friday_user_name");
@@ -1214,7 +1673,7 @@ function resetSettings(){
 // ══════════════════════════════════════
 // SLIDE MENU + NAVIGATION
 // ══════════════════════════════════════
-const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',settings:'⚙ Settings'};
+const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',log:'📋 Signal Log',settings:'⚙ Settings'};
 
 function openMenu(){
   document.getElementById("nav-drawer").classList.add("open");
@@ -1247,6 +1706,7 @@ function switchTab(t){
   updateRefreshInfo();
   // Load options on first visit
   if(t==="options"&&document.getElementById("dash-options").style.display==="none"&&!optLoading) loadOptions(false);
+  if(t==="log") renderLogTab();
 }
 
 // ══════════════════════════════════════
@@ -1349,6 +1809,15 @@ function startTimers(){
       const lblEl = document.getElementById("cdown-lbl");
       if(lblEl) lblEl.textContent = "MARKET CLOSED";
       setStatus("scan","Closed"); // keep amber dot while market closed
+      // Auto-check outcomes once in the 3:31-3:35 PM window
+      const _istH2=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+      const _istM2=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
+      if(_istH2===15&&_istM2>=31&&_istM2<=35&&GH.token&&!window._outcomeCheckDone){
+        window._outcomeCheckDone=true;
+        lg("Auto-checking signal outcomes after market close...","o");
+        setTimeout(()=>checkAllOutcomes(),5000);
+      }
+      if(_istH2===9&&_istM2<20) window._outcomeCheckDone=false; // reset next morning
     }
     updateRefreshInfo();
   }, 1000);
@@ -3006,6 +3475,12 @@ async function loadOptions(force=true){
     renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
     renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
     renderOptionsGroups(groups);
+    // Log with-trend options signals to GitHub
+    const optSigsToLog = groups.flatMap(g=>
+      g.picks.filter(p=>p.trendAligned && p.confidence>=CFG.minOptConf)
+             .map(p=>buildOptionSignal(p, optVix))
+    );
+    if(optSigsToLog.length) logSignals(optSigsToLog).catch(e=>lg("Opt log: "+e.message,"w"));
 
     lastOptScan=getIST();
     document.getElementById("options-upd-time").textContent="Last scan: "+lastOptScan;

@@ -1,11 +1,11 @@
 {
   "settings": {
-    "minStockConf": 50,
+    "minStockConf": 80,
     "pot": 3,
     "risk": 55,
     "rr": 1.2,
-    "rsiOS": 35,
-    "rsiOB": 65,
+    "rsiOS": 30,
+    "rsiOB": 70,
     "vol": 1.2,
     "delta": 0.3,
     "iv": 15,
@@ -17,11 +17,11 @@
     "portRef": 15,
     "scanOpts": 15,
     "moodRefresh": 10,
-    "minOptConf": 50,
-    "maxOptCapital": 0,
+    "minOptConf": 75,
+    "maxOptCapital": 10000,
     "_v": "v4"
   },
   "upstoxId": "132199",
-  "savedAt": "2026-04-04T13:53:21.805Z",
+  "savedAt": "2026-04-04T16:13:53.733Z",
   "version": "v4"
 }

@@ -380,6 +380,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
     <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
     <div id="dash-stocks" style="display:none">
+    <div id="tod-stocks"></div>
       <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
       <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-stocks"></div>
@@ -396,6 +397,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="err-b" id="err-options"><h4>⚠ Options Error</h4><p id="err-options-msg"></p><button onclick="loadOptions(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
     <div id="loading-options" class="spin-wrap" style="display:none"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Scanning F&O options...</p><p id="opt-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">Nifty · BankNifty · Sensex · Top F&O Stocks · Entry · SL · Target</p></div>
     <div id="dash-options" style="display:none">
+    <div id="tod-options"></div>
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-options"></div>
       <div id="options-body"></div>
@@ -621,6 +623,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">Price tick (sec)</div><div class="set-sub">LTP refresh frequency (min 15 recommended)</div></div><input class="set-inp" id="s-tick" type="number" value="15" min="10" max="60"></div>
     <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency (min 60 recommended)</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
     <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan (min 15 recommended)</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
+    <div class="set-row"><div><div class="set-lbl">Market Mood refresh (min)</div><div class="set-sub">How often to re-check Nifty + VIX mood (5–30 min)</div></div><input class="set-inp" id="s-mood-ref" type="number" value="10" min="5" max="30"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-g" style="flex:1;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
       <button class="btn" style="margin-top:4px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;padding:8px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer" onclick="resetSettings()">↺ Reset Defaults</button>
@@ -871,7 +874,7 @@ const INDEX_OPTS=[
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
 const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.3,iv:15,oi:5,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50,maxOptCapital:0};
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.3,iv:15,oi:5,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50,maxOptCapital:0,moodRefresh:10};
 let CFG = DEF; // start with DEF
 try{
   const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
@@ -886,7 +889,7 @@ try{
 }catch(e){ CFG = {...DEF}; }
 
 let scanning=false,optLoading=false,portLoading=false;
-let scanTimer,optTimer,tickTimer,portTimer,cdTimer,scanSecs;
+let scanTimer,optTimer,tickTimer,portTimer,cdTimer,moodTimer,scanSecs;
 let lastPrices={},rsiCache={};
 let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
@@ -1118,6 +1121,7 @@ function loadSettingsUI(){
   document.getElementById("s-tick").value=CFG.tick;
   document.getElementById("s-port-ref").value=CFG.portRef;
   document.getElementById("s-scan-opts").value=CFG.scanOpts;
+  document.getElementById("s-mood-ref").value=CFG.moodRefresh||DEF.moodRefresh;
   document.getElementById("s-min-stock-conf").value=CFG.minStockConf;
   document.getElementById("s-min-opt-conf").value=CFG.minOptConf;
   document.getElementById("s-max-opt-cap").value=CFG.maxOptCapital||0;
@@ -1143,6 +1147,7 @@ function saveSettings(){
     tick:         rv("s-tick")         ||DEF.tick,
     portRef:      rv("s-port-ref")     ||DEF.portRef,
     scanOpts:     rv("s-scan-opts")    ||DEF.scanOpts,
+    moodRefresh:  rv("s-mood-ref")     ||DEF.moodRefresh,
     minOptConf:     rv("s-min-opt-conf") ||DEF.minOptConf,
     maxOptCapital:  rv("s-max-opt-cap"),  // 0 = no limit
   };
@@ -1204,7 +1209,35 @@ function switchTab(t){
 // ══════════════════════════════════════
 // TIMERS
 // ══════════════════════════════════════
-function clearTimers(){clearInterval(scanTimer);clearInterval(optTimer);clearInterval(tickTimer);clearInterval(portTimer);clearInterval(cdTimer);}
+
+// ─────────────────────────────────────────────────────────────
+// MARKET MOOD REFRESH — runs on its own timer
+// Fetches live Nifty change% + VIX and updates both banners
+// Independent of stock scan and options scan timers
+// ─────────────────────────────────────────────────────────────
+async function refreshMarketMood(){
+  if(!isOpen()) return; // no point refreshing when market closed
+  try{
+    const mD  = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
+    const nQ  = mD["NSE_INDEX|Nifty 50"];
+    const vQ  = mD["NSE_INDEX|India VIX"];
+    const vix = vQ?.last_price || 15;
+    let chgPct = 0;
+    if(nQ){
+      const netChg = nQ.net_change != null ? nQ.net_change
+                   : (nQ.ohlc?.open ? nQ.last_price - nQ.ohlc.open : 0);
+      chgPct = nQ.last_price > 0 ? (netChg / nQ.last_price) * 100 : 0;
+    }
+    // Update both stock and options banners with fresh data
+    renderTimeOfDayBanner("tod-stocks",  chgPct, vix);
+    renderTimeOfDayBanner("tod-options", chgPct, vix);
+    lg(`Mood refresh: Nifty ${chgPct>=0?"+":""}${chgPct.toFixed(2)}% VIX ${vix.toFixed(1)}`);
+  }catch(e){
+    lg("Mood refresh: "+e.message,"w");
+  }
+}
+
+function clearTimers(){clearInterval(scanTimer);clearInterval(optTimer);clearInterval(tickTimer);clearInterval(portTimer);clearInterval(cdTimer);clearInterval(moodTimer);}
 function startTimers(){
   // Restore remaining countdown from previous session (persists across browser close)
   const _lastTs=parseInt(localStorage.getItem("friday_last_scan_ts")||"0");
@@ -1236,6 +1269,13 @@ function startTimers(){
     if(isOpen()) loadPortfolio();
     // After market close load one final time to show end-of-day P&L
   }, CFG.portRef*1000);
+
+  // ── Market Mood — independent refresh on its own interval ──
+  // Fires immediately on start (after small delay), then every N minutes
+  setTimeout(()=>refreshMarketMood(), 3000); // initial load
+  moodTimer = setInterval(()=>{
+    refreshMarketMood();
+  }, (CFG.moodRefresh||10) * 60 * 1000);
 
   // ── Countdown + market status check (runs every second always) ──
   cdTimer = setInterval(()=>{
@@ -1679,6 +1719,104 @@ function calcPotential(ltp, target, sl, numInds, rec) {
 // MODERATE: 3-4 indicators OR conf 55-70%
 // WEAK:     1-2 indicators AND conf<55%
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// TIME-OF-DAY CONTEXT
+// Returns session info with reliability guidance
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// TIME-OF-DAY + LIVE MARKET CONTEXT BANNER
+// Combines: session time + actual Nifty move + VIX level
+// NOT hardcoded — adjusts based on real market conditions each scan
+// ─────────────────────────────────────────────────────────────
+
+function renderTimeOfDayBanner(containerId, niftyChgPct, vix){
+  if(!isOpen()){ 
+    const el=document.getElementById(containerId); 
+    if(el) el.style.display="none"; 
+    return; 
+  }
+  const el = document.getElementById(containerId);
+  if(!el) return;
+
+  // ── 1. Session time (base) ──
+  const now  = new Date();
+  const istH = parseInt(now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false})) % 24;
+  const istM = parseInt(now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
+  const total = istH * 60 + istM;
+  if(total < 9*60+15){ el.style.display="none"; return; }
+
+  let session, baseReliability, sessionLabel, sessionMsg;
+  if     (total <= 9*60+45)  { session="OPENING";   baseReliability=35; sessionLabel="Opening (9:15–9:45 AM)"; sessionMsg="Early volatility — gap fills, stop hunts common. Best to wait."; }
+  else if(total <= 10*60+30) { session="EARLY";      baseReliability=60; sessionLabel="Early Session (9:45–10:30 AM)"; sessionMsg="Market finding direction. Monitor for trend confirmation."; }
+  else if(total <= 14*60+0)  { session="MIDDAY";     baseReliability=85; sessionLabel="Mid Session (10:30 AM–2:00 PM)"; sessionMsg="Most reliable window. Trend established, cleanest signals."; }
+  else if(total <= 15*60+0)  { session="PRE_CLOSE";  baseReliability=65; sessionLabel="Pre-Close (2:00–3:00 PM)"; sessionMsg="Watch for reversals as positions unwind."; }
+  else                        { session="CLOSING";    baseReliability=25; sessionLabel="Closing (3:00–3:30 PM)"; sessionMsg="High noise near close. Avoid new intraday entries."; }
+
+  // ── 2. Adjust reliability based on LIVE market conditions ──
+  const nChg   = niftyChgPct || 0;
+  const liveVix= vix || 15;
+  let reliabilityAdj = 0;
+  const conditions = [];
+
+  // VIX impact: high VIX = more noise = lower reliability
+  if(liveVix > 25){ reliabilityAdj -= 20; conditions.push("⚠ VIX "+liveVix.toFixed(1)+" (Panic — very wide spreads)"); }
+  else if(liveVix > 20){ reliabilityAdj -= 12; conditions.push("⚠ VIX "+liveVix.toFixed(1)+" (High fear — elevated noise)"); }
+  else if(liveVix > 17){ reliabilityAdj -= 5;  conditions.push("VIX "+liveVix.toFixed(1)+" (Slightly elevated)"); }
+  else if(liveVix < 13){ reliabilityAdj += 5;  conditions.push("✅ VIX "+liveVix.toFixed(1)+" (Low vol — clean trends)"); }
+  else                  {                       conditions.push("✅ VIX "+liveVix.toFixed(1)+" (Normal)"); }
+
+  // Nifty move impact: big moves = trending or panic
+  const absChg = Math.abs(nChg);
+  if(absChg > 2.0){ 
+    reliabilityAdj -= 15; 
+    conditions.push("⚠ Nifty "+(nChg>=0?"+":"")+nChg.toFixed(2)+"% (Extreme move — high risk)"); 
+  } else if(absChg > 1.2){ 
+    reliabilityAdj += 5; 
+    conditions.push("📈 Nifty "+(nChg>=0?"+":"")+nChg.toFixed(2)+"% (Strong trend — follow direction)"); 
+  } else if(absChg < 0.3){ 
+    reliabilityAdj -= 8; 
+    conditions.push("📊 Nifty "+(nChg>=0?"+":"")+nChg.toFixed(2)+"% (Sideways — choppy signals)"); 
+  } else { 
+    conditions.push("Nifty "+(nChg>=0?"+":"")+nChg.toFixed(2)+"%"); 
+  }
+
+  const finalReliability = Math.max(10, Math.min(95, baseReliability + reliabilityAdj));
+
+  // ── 3. Choose colour based on final reliability ──
+  const color  = finalReliability >= 75 ? "#15803d" : finalReliability >= 50 ? "#d97706" : "#dc2626";
+  const bg     = finalReliability >= 75 ? "#f0fdf4"  : finalReliability >= 50 ? "#fffbeb"  : "#fef2f2";
+  const border = finalReliability >= 75 ? "#86efac"  : finalReliability >= 50 ? "#fcd34d"  : "#fca5a5";
+  const icon   = finalReliability >= 75 ? "✅" : finalReliability >= 50 ? "⚡" : "⚠";
+
+  // Special override messages for extreme market conditions
+  let overrideMsg = "";
+  if(liveVix > 25 && absChg > 1.5)    overrideMsg = "🚨 Panic conditions detected — signals very unreliable. Consider staying out.";
+  else if(absChg > 2.0 && nChg < 0)   overrideMsg = "📉 Strong sell-off — only PUT/short signals are aligned today.";
+  else if(absChg > 2.0 && nChg > 0)   overrideMsg = "📈 Strong rally — only CALL/long signals are aligned today.";
+  else if(absChg < 0.2 && liveVix < 14) overrideMsg = "📊 Very quiet market — wait for a directional move before trading.";
+
+  el.style.display = "block";
+  el.innerHTML = `
+    <div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:10px 13px;margin-bottom:12px;font-size:11px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="font-weight:800;color:${color}">${icon} ${sessionLabel}</span>
+        <span style="font-size:10px;font-weight:800;color:${color}">${finalReliability}% reliable</span>
+      </div>
+      <div style="color:${color};opacity:.9;margin-bottom:5px">${overrideMsg || sessionMsg}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+        ${conditions.map(cond=>`<span style="font-size:9px;color:#475569;background:#f1f5f9;border-radius:10px;padding:2px 7px">${cond}</span>`).join("")}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:9px;color:#64748b;font-weight:600;white-space:nowrap">SIGNAL RELIABILITY</span>
+        <div style="flex:1;height:5px;background:#e2e8f0;border-radius:3px">
+          <div style="width:${finalReliability}%;height:100%;border-radius:3px;background:${color};transition:width .5s"></div>
+        </div>
+        <span style="font-size:9px;font-weight:800;color:${color}">${finalReliability}%</span>
+      </div>
+    </div>`;
+}
+
 function getSignalStrength(numInds, conf, reversal){
   const revBoost = reversal?.type !== "NONE" ? 1 : 0; // reversal adds 1 to effective count
   const eff = numInds + revBoost;
@@ -1687,47 +1825,61 @@ function getSignalStrength(numInds, conf, reversal){
   return                            {label:"WEAK",     color:"#dc2626", bg:"#fee2e2", border:"#fca5a5"};
 }
 
-function calcEntryTrigger(ltp, high, sr, atr, rec, vwap, chgPct){
-  const a = atr || ltp * 0.015; // fallback: 1.5% ATR
+function calcEntryTrigger(ltp, high, sr, atr, rec, vwap, chgPct, oiWalls){
+  const a = atr || ltp * 0.015;
   let trigger = null, method = "", note = "";
 
   if(rec === "STRONG BUY" || rec === "BUY" || rec === "MODERATE"){
-    // Method 1: Break above yesterday's high + small buffer (momentum confirmation)
-    if(high > ltp * 1.001){
-      trigger = +(high * 1.003).toFixed(2); // 0.3% above day high
-      method = "Break above Day High";
-      note = "Wait for close above ₹"+trigger.toFixed(0);
+    // Method 1: OI Call Wall (strongest resistance level — smartest trigger)
+    // If call wall is above LTP within 3% → that's where bulls need to break
+    const cw = oiWalls?.callWall || sr?.callWall || 0;
+    if(cw > ltp && (cw-ltp)/ltp*100 < 3){
+      trigger = +(cw * 1.003).toFixed(2);
+      method  = "Break above Call Wall";
+      note    = "OI wall at ₹"+cw.toFixed(0)+" — major resistance";
     }
-    // Method 2: Break above Pivot R1 (if within 3% of LTP)
+
+    // Method 2: Break above Pivot R1 (if within 3% and tighter than call wall)
     if(sr?.pivotR1 > 0 && sr.pivotR1 > ltp && (sr.pivotR1-ltp)/ltp*100 < 3){
       if(!trigger || sr.pivotR1 < trigger){
         trigger = +(sr.pivotR1 * 1.002).toFixed(2);
-        method = "Break above Pivot R1";
-        note = "R1 at ₹"+sr.pivotR1.toFixed(0)+" — trigger on break";
+        method  = "Break above Pivot R1";
+        note    = "R1 ₹"+sr.pivotR1.toFixed(0)+" — pivot resistance break";
       }
     }
-    // Method 3: ATR-based breakout entry (price + 0.5 ATR from current)
+
+    // Method 3: Break above Day High + buffer
+    if(high > ltp * 1.001){
+      const dhTrig = +(high * 1.003).toFixed(2);
+      if(!trigger || dhTrig < trigger){
+        trigger = dhTrig;
+        method  = "Break above Day High";
+        note    = "Day high ₹"+high.toFixed(0)+" — momentum break";
+      }
+    }
+
+    // Method 4: VWAP break (if price is just below VWAP)
+    if(vwap > 0 && vwap > ltp && (vwap-ltp)/ltp*100 < 1.5){
+      if(!trigger || vwap < trigger){
+        trigger = +(vwap * 1.002).toFixed(2);
+        method  = "Break above VWAP";
+        note    = "VWAP ₹"+vwap.toFixed(0)+" — institutional level";
+      }
+    }
+
+    // Method 5: ATR fallback
     if(!trigger){
       trigger = +(ltp + a * 0.5).toFixed(2);
-      method = "ATR Breakout";
-      note = "Entry on +0.5 ATR move";
-    }
-    // Method 4: If near VWAP, trigger on break above VWAP
-    if(vwap > 0 && Math.abs((ltp-vwap)/ltp*100) < 1.5 && vwap > ltp){
-      trigger = +(vwap * 1.002).toFixed(2);
-      method = "Break above VWAP";
-      note = "VWAP at ₹"+vwap.toFixed(0)+" — institutional level";
+      method  = "ATR Breakout";
+      note    = "+0.5× ATR confirmation";
     }
 
-    // If price is already above potential trigger, use market (gap up)
     if(trigger && trigger <= ltp * 1.001){
-      return {trigger: ltp, method: "Market (already triggered)", note: "Price above trigger — act now", alreadyTriggered: true};
+      return {trigger:ltp, method:"Market (already triggered)", note:"Price above trigger — act now", alreadyTriggered:true};
     }
-    return {trigger: trigger||ltp, method, note, alreadyTriggered: false};
+    return {trigger:trigger||ltp, method, note, alreadyTriggered:false};
   }
-
-  // For WATCH/AVOID — just show market
-  return {trigger: ltp, method: "Market", note: "", alreadyTriggered: false};
+  return {trigger:ltp, method:"Market", note:"", alreadyTriggered:false};
 }
 
 function detectReversal(ltp, rsi, patterns, sr, vix, pcr, nBull, chgPct, atr, high, low){
@@ -2576,11 +2728,12 @@ async function triggerScan(){
       const passes = conf>=CFG.minStockConf && pot.base>=CFG.pot && risk<CFG.risk && pot.rr>=CFG.rr;
       
       const reversal     = detectReversal(ltp, t.rsi, patterns, sr, vix, pcr, nBull, chgPct, t.atr, high, low);
-      const entryTrigger = calcEntryTrigger(ltp, high, sr, t.atr, rec, t.vwap||0, chgPct);
+      const entryTrigger = calcEntryTrigger(ltp, high, sr, t.atr, rec, t.vwap||0, chgPct, null);
        stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
-        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger});
+        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger,
+        avgVol20: t.avgVol20||0});
       
     }
 
@@ -2806,6 +2959,7 @@ async function loadOptions(force=true){
 
     // Summary stats: all index spots
     const allSpots=groups.filter(g=>g.type==="index");
+    renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
     renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
     renderOptionsGroups(groups);
 
@@ -2830,7 +2984,7 @@ async function loadOptions(force=true){
 // optType: "CE"=call, "PE"=put
 // niftyBullish: true=market up, false=market down
 // vix: India VIX level
-function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix) {
+function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix, maxPain) {
   const absD = Math.abs(delta);
   const isCE = optType === "CE";
   // Aligned = option direction matches market trend
@@ -2880,6 +3034,16 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   else if(vix > 20) raw -= 4;   // slightly elevated
   // Low VIX bonus: cheap premium + clear trend
   else if(vix < 14) raw += 5;
+
+  // ── Max Pain gravity boost ──
+  // If strike is between spot and max pain → expiry likely to pull price there → boost
+  if(maxPain && maxPain > 0 && spot > 0){
+    const towardMP = (optType==="CE" && maxPain > spot && strike <= maxPain)
+                  || (optType==="PE" && maxPain < spot && strike >= maxPain);
+    const mpDist = Math.abs((maxPain - spot) / spot * 100);
+    if(towardMP && mpDist > 1.5) raw += 6;   // price needs to move toward max pain
+    else if(towardMP && mpDist > 0.5) raw += 3;
+  }
 
   // Apply direction multiplier — counter-trend signals are significantly discounted
   raw = raw * dirMult;
@@ -2933,7 +3097,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix) {
       const maxProfit   = +((tgt - ltp) * lot).toFixed(0);
 
       // Confidence score
-      const confidence = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix);
+      const confidence = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain);
 
       // Market-direction-aware action
       const isCE   = optType === "CE";
@@ -3142,7 +3306,20 @@ function renderStockCards(picks,totalScanned,containerId){
       <!-- Technical -->
       <div class="c-metrics cm3" style="gap:1px;margin-bottom:7px">
         <div class="cbox neutral"><div class="cb-l">RSI(14)</div><div class="cb-v ${p.rsi&&p.rsi<=CFG.rsiOS?"up":p.rsi&&p.rsi>=CFG.rsiOB?"dn":"am"}">${p.rsi??"-"}</div><div class="cb-s" style="color:#64748b">${p.rsi?p.rsi<=CFG.rsiOS?"Oversold":p.rsi>=CFG.rsiOB?"Overbought":"Neutral":""}</div></div>
-        <div class="cbox neutral"><div class="cb-l">INDICATORS</div><div class="cb-v ${p.numInds>=5?"up":p.numInds>=3?"am":"dn"}">${p.numInds}/7</div><div class="cb-s" style="color:#64748b">confirming</div></div>
+        <div class="cbox neutral"><div class="cb-l">VOLUME</div>
+          ${(()=>{
+            const avg = p.avgVol20 || 0;
+            const ratio = avg > 0 ? +(p.vol / avg).toFixed(1) : null;
+            const color = ratio >= 1.5 ? "up" : ratio >= 0.8 ? "am" : "dn";
+            const label = ratio == null ? "—"
+                        : ratio >= 2.0 ? ratio+"x avg 🔥"
+                        : ratio >= 1.5 ? ratio+"x avg ↑"
+                        : ratio >= 0.8 ? ratio+"x avg"
+                        : ratio+"x avg ↓";
+            return `<div class="cb-v ${color}">${fmtVol(p.vol)}</div>
+                    <div class="cb-s" style="color:#64748b">${label}</div>`;
+          })()}
+        </div>
         <div class="cbox neutral"><div class="cb-l">DAY HIGH/LOW</div><div class="cb-v" style="color:#374151;font-size:11px">₹${fmt(p.high,0)} / ${fmt(p.low,0)}</div></div>
       </div>
       <!-- 7 Indicators ──────────────────────────── -->
@@ -3773,7 +3950,7 @@ async function lookupStock(){
 
     // Step 3: Market context — use net_change (reliable) not close comparison
     document.getElementById("lkp-progress").textContent="Fetching market context...";
-    let vix=15,vixSc=70,pcrSc=50,nBull=true,nChgPct=0;
+    let vix=15,vixSc=70,pcrSc=50,nBull=true,nChgPct=0,realPCR=0.9;
     try{
       const mD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
       const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
@@ -3787,7 +3964,18 @@ async function lookupStock(){
         nBull=nChgPct>-0.3; // bearish only if clearly negative
       }
       vixSc=interpVIX(vix).sc;
-      lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% → ${nBull?"BULLISH":"BEARISH"} VIX=${vix.toFixed(1)}`);
+      // Fetch real Nifty PCR (async, best-effort)
+      try{
+        const nExp=await fetchExpiries("NSE_INDEX|Nifty 50");
+        if(nExp.length){
+          const nCh=await fetchOptions("NSE_INDEX|Nifty 50", pickBestExpiry(nExp));
+          const ceOI_n=nCh.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
+          const peOI_n=nCh.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
+          if(ceOI_n>0){ realPCR=+(peOI_n/ceOI_n).toFixed(2); pcrSc=interpPCR(realPCR).sc; }
+          lg(`Analyse: real Nifty PCR=${realPCR}`);
+        }
+      }catch(e2){ lg("PCR fetch: "+e2.message,"w"); }
+      lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% → ${nBull?"BULLISH":"BEARISH"} VIX=${vix.toFixed(1)} PCR=${realPCR}`);
     }catch(e){ lg("Market ctx: "+e.message,"w"); }
 
     // Also factor in the stock's own trend — if stock is strongly down, treat as bearish for options
@@ -3813,13 +4001,13 @@ async function lookupStock(){
     const risk=calcRisk(ltp,sl,target,tech.atr,vix);
     const pot=calcPotential(ltp,target,sl,numInds,preRec);
     const rec=getRec(conf,pot.base,risk,pot.rr);
-    const _pcrVal = pcrSc >= 75 ? 1.3 : pcrSc >= 50 ? 0.9 : 0.6; // derive pcr from pcrSc for reversal
-    const reversal     = detectReversal(ltp, tech.rsi, patterns, sr, vix, _pcrVal, nBull, chgPct, tech.atr, high, low);
-    const entryTrigger = calcEntryTrigger(ltp, high, sr, tech.atr, rec, tech.vwap||0, chgPct);
+    const reversal     = detectReversal(ltp, tech.rsi, patterns, sr, vix, realPCR, nBull, chgPct, tech.atr, high, low);
+    const entryTrigger = calcEntryTrigger(ltp, high, sr, tech.atr, rec, tech.vwap||0, chgPct, null);
     const stockObj={...inst,ltp,prev:q.ohlc?.close||ltp,high,low,vol,chgPct,
       rsi:tech.rsi,macdBull:tech.macdBull,a50:tech.a50,a200:tech.a200,
       atr:tech.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,
-      target,sl,secSc:50,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null,reversal,entryTrigger};
+      target,sl,secSc:50,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null,reversal,entryTrigger,
+      avgVol20:tech.avgVol20||0};
 
     // Render stock card
     renderStockCards([stockObj],1,"lkp-stock-card");

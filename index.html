@@ -567,7 +567,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">Min Upside % (Base)</div><div class="set-sub">Raw target vs entry (e.g. 2 = 2% upside)</div></div><input class="set-inp" id="s-pot" type="number" value="3" min="0" step="1"></div>
     <div class="set-row"><div><div class="set-lbl">Max Risk %</div><div class="set-sub">Multi-factor risk score</div></div><input class="set-inp" id="s-risk" type="number" value="55" min="0"></div>
     <div class="set-row"><div><div class="set-lbl">Min R:R Ratio</div><div class="set-sub">Risk-reward minimum</div></div><input class="set-inp" id="s-rr" type="number" value="1.2" step="0.1" min="0"></div>
-    <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save</button>
   </div>
 
   <!-- Confidence Filters -->
@@ -577,6 +576,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
       Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
+
 <!-- Formula display -->
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
@@ -623,9 +623,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:5px;padding:5px"><div style="font-weight:800;color:#16a34a">70–85%</div><div style="color:#6b7280">High</div></div>
   <div style="background:#faf5ff;border:1px solid #ddd6fe;border-radius:5px;padding:5px"><div style="font-weight:800;color:#7c3aed">85–100%</div><div style="color:#6b7280">Very High</div></div>
 </div>
-
-<button class="btn btn-g" style="width:100%;margin-top:12px" onclick="saveSettings()">💾 Save Confidence Filters</button>
-
   </div>
 
   <!-- Technical -->
@@ -635,7 +632,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">RSI Oversold</div><div class="set-sub">Below = BUY signal</div></div><input class="set-inp" id="s-rsi-os" type="number" value="35" min="10" max="45"></div>
     <div class="set-row"><div><div class="set-lbl">RSI Overbought</div><div class="set-sub">Above = SELL signal</div></div><input class="set-inp" id="s-rsi-ob" type="number" value="65" min="55" max="90"></div>
     <div class="set-row"><div><div class="set-lbl">Volume Spike (×avg)</div><div class="set-sub">Min multiplier for signal</div></div><input class="set-inp" id="s-vol" type="number" value="1.2" step="0.1" min="1"></div>
-    <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save</button>
   </div>
 
   <!-- Options -->
@@ -648,7 +644,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">Options SL %</div><div class="set-sub">% below entry = stop loss</div></div><input class="set-inp" id="s-opt-sl" type="number" value="25" min="5" max="60"></div>
     <div class="set-row"><div><div class="set-lbl">Options Target %</div><div class="set-sub">% above entry = target</div></div><input class="set-inp" id="s-opt-tgt" type="number" value="50" min="10" max="200"></div>
     <div class="set-row"><div><div class="set-lbl">Max Capital per Trade ₹</div><div class="set-sub">Hide options above this capital · 0 = no limit</div></div><input class="set-inp" id="s-max-opt-cap" type="number" value="0" min="0" step="1000"></div>
-    <button class="btn btn-g" style="width:100%;margin-top:4px" onclick="saveSettings()">💾 Save</button>
   </div>
 
   <!-- Scan intervals -->
@@ -660,10 +655,20 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">Portfolio refresh (sec)</div><div class="set-sub">P&L update frequency (min 60 recommended)</div></div><input class="set-inp" id="s-port-ref" type="number" value="60" min="30" max="300"></div>
     <div class="set-row"><div><div class="set-lbl">Options refresh (min)</div><div class="set-sub">Full options chain rescan (min 15 recommended)</div></div><input class="set-inp" id="s-scan-opts" type="number" value="15" min="5" max="60"></div>
     <div class="set-row"><div><div class="set-lbl">Market Mood refresh (min)</div><div class="set-sub">How often to re-check Nifty + VIX mood (5–30 min)</div></div><input class="set-inp" id="s-mood-ref" type="number" value="10" min="5" max="30"></div>
+  </div>
+
+  <!-- ── STICKY SAVE BAR — applies to all settings above ── -->
+
+  <div style="grid-column:1/-1;position:sticky;bottom:0;background:linear-gradient(to top,#f8fafc 80%,transparent);padding:14px 0 4px;z-index:10;margin-top:4px">
     <div style="display:flex;gap:8px">
-      <button class="btn btn-g" style="flex:1;margin-top:4px" onclick="saveSettings()">💾 Save & Restart Timers</button>
-      <button class="btn" style="margin-top:4px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;padding:8px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer" onclick="resetSettings()">↺ Reset Defaults</button>
+      <button class="btn btn-g" style="flex:1;padding:13px;font-size:13px;font-weight:800;border-radius:10px;letter-spacing:.3px" onclick="saveSettings()">
+        💾 Save All Settings
+      </button>
+      <button class="btn" style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:10px;padding:13px 16px;font-size:12px;font-weight:700;cursor:pointer" onclick="resetSettings()">
+        ↺ Reset
+      </button>
     </div>
+    <div id="settings-save-status" style="text-align:center;font-size:10px;color:#64748b;margin-top:6px"></div>
   </div>
 
   <!-- Signal Log / GitHub -->
@@ -677,7 +682,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       After market close, auto-checks which signals hit target or SL.<br>
       <a href="https://github.com/settings/tokens/new?scopes=repo&description=FRIDAY+Signal+Log" target="_blank" style="color:#16a34a;font-weight:700">Generate GitHub Token →</a>
     </div>
-    <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" placeholder="ghp_xxxxxxxxxxxx"></div>
+    <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="password" placeholder="ghp_xxxxxxxxxxxx"></div>
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
@@ -1821,10 +1826,12 @@ function saveSettings(){
   // Update filter label with new settings
   const subEl2 = document.getElementById("stocks-sub");
   if(subEl2) subEl2.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
-  alert("✅ Settings saved! Timers restarted.");
+  // Status shown in sticky bar (no popup)
+  const _sv2 = document.getElementById("settings-save-status");
+  if(_sv2){ _sv2.textContent="✅ All settings saved · "+getIST(); _sv2.style.color="#16a34a"; setTimeout(()=>{if(_sv2)_sv2.textContent="";},4000); }
 }
 function resetSettings(){
-  if(!confirm("Reset all settings to defaults?")) return;
+  if(!confirm("Reset all settings to defaults?\nThis cannot be undone.")) return;
   localStorage.removeItem("friday_cfg");
   CFG = {...DEF};
   loadSettingsUI();

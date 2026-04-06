@@ -25,10 +25,10 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 25.52,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "EXPIRED",
+      "exitPrice": 166,
+      "exitTime": "18:25:37",
+      "pnlPct": 27.69,
       "note": ""
     },
     {
@@ -56,10 +56,10 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 25.52,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "TARGET_HIT",
+      "exitPrice": 723,
+      "exitTime": "18:25:37",
+      "pnlPct": 50,
       "note": ""
     },
     {
@@ -87,10 +87,10 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 25.52,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "TARGET_HIT",
+      "exitPrice": 661.42,
+      "exitTime": "18:25:37",
+      "pnlPct": 50,
       "note": ""
     },
     {
@@ -435,14 +435,14 @@
       "note": ""
     }
   ],
-  "lastUpdated": "2026-04-06T09:57:57.624Z",
+  "lastUpdated": "2026-04-06T12:55:37.063Z",
   "upstoxId": "132199",
   "stats": {
     "total": 14,
-    "hits": 0,
+    "hits": 2,
     "sls": 0,
-    "open": 14,
-    "winRate": null,
+    "open": 11,
+    "winRate": 100,
     "avgConf": 66
   }
 }

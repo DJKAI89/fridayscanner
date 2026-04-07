@@ -375,7 +375,7 @@
     {
       "id": "2026-04-07-SENSEX-75400-CE",
       "date": "2026-04-07",
-      "time": "16:14:19",
+      "time": "16:14:32",
       "type": "OPTION",
       "stock": "SENSEX",
       "name": "SENSEX 75400 CE",
@@ -468,7 +468,7 @@
     {
       "id": "2026-04-07-SENSEX-75600-CE",
       "date": "2026-04-07",
-      "time": "16:14:19",
+      "time": "16:14:32",
       "type": "OPTION",
       "stock": "SENSEX",
       "name": "SENSEX 75600 CE",
@@ -590,7 +590,7 @@
       "note": ""
     }
   ],
-  "lastUpdated": "2026-04-07T10:44:25.714Z",
+  "lastUpdated": "2026-04-07T10:44:33.138Z",
   "upstoxId": "132199",
   "stats": {
     "total": 19,

@@ -34,27 +34,27 @@
     {
       "id": "2026-04-07-COALINDIA-STOCK",
       "date": "2026-04-07",
-      "time": "11:35:35",
+      "time": "11:44:37",
       "type": "STOCK",
       "stock": "COALINDIA",
       "name": "Coal India",
       "signal": "WATCH",
-      "confidence": 64,
+      "confidence": 66.6,
       "strength": "MODERATE",
       "numInds": 4,
-      "entry": 460.8,
+      "entry": 460,
       "sl": 450.75,
-      "target": 480.9,
-      "targetCons": 475.88,
-      "targetMod": 480.9,
-      "targetAgg": 501,
+      "target": 478.5,
+      "targetCons": 473.88,
+      "targetMod": 478.5,
+      "targetAgg": 497,
       "rr": 2,
-      "winRateEst": 61,
-      "risk": 38,
+      "winRateEst": 68,
+      "risk": 37.3,
       "rsi": 58.61,
-      "vix": 25.38,
+      "vix": 25.45,
       "reversal": "NONE",
-      "trigger": 460.8,
+      "trigger": 460,
       "triggerMethod": "Market",
       "status": "OPEN",
       "exitPrice": null,
@@ -125,7 +125,7 @@
       "note": ""
     }
   ],
-  "lastUpdated": "2026-04-07T06:05:41.850Z",
+  "lastUpdated": "2026-04-07T06:14:37.773Z",
   "upstoxId": "132199",
   "stats": {
     "total": 4,
@@ -133,6 +133,6 @@
     "sls": 0,
     "open": 4,
     "winRate": null,
-    "avgConf": 71
+    "avgConf": 72
   }
 }

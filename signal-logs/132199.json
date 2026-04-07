@@ -153,7 +153,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 173.4,
+      "livePnlPct": 44.2
     },
     {
       "id": "2026-04-07-BIOCON-STOCK",
@@ -308,7 +310,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 123.35,
+      "livePnlPct": 2.83
     },
     {
       "id": "2026-04-07-NIFTY-23100-CE",
@@ -339,7 +343,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 23.6,
+      "livePnlPct": 14.29
     },
     {
       "id": "2026-04-07-NIFTY-23050-CE",
@@ -370,7 +376,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 73.5,
+      "livePnlPct": 4.33
     },
     {
       "id": "2026-04-07-SENSEX-75400-CE",
@@ -401,7 +409,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 450,
+      "livePnlPct": 0
     },
     {
       "id": "2026-04-07-WIPRO-STOCK",
@@ -494,7 +504,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 369.55,
+      "livePnlPct": 0
     },
     {
       "id": "2026-04-07-ONGC-STOCK",
@@ -590,7 +602,7 @@
       "note": ""
     }
   ],
-  "lastUpdated": "2026-04-07T10:45:02.549Z",
+  "lastUpdated": "2026-04-07T12:33:03.899Z",
   "upstoxId": "132199",
   "stats": {
     "total": 19,

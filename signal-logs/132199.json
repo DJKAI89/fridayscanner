@@ -154,16 +154,47 @@
       "exitTime": null,
       "pnlPct": null,
       "note": ""
+    },
+    {
+      "id": "2026-04-07-BIOCON-STOCK",
+      "date": "2026-04-07",
+      "time": "13:16:30",
+      "type": "STOCK",
+      "stock": "BIOCON",
+      "name": "Biocon",
+      "signal": "WATCH",
+      "confidence": 65.1,
+      "strength": "MODERATE",
+      "numInds": 2,
+      "entry": 340.5,
+      "sl": 334.32,
+      "target": 352.86,
+      "targetCons": 349.77,
+      "targetMod": 352.86,
+      "targetAgg": 365.22,
+      "rr": 2,
+      "winRateEst": 62,
+      "risk": 35.1,
+      "rsi": 38.8,
+      "vix": 25.47,
+      "reversal": "BULLISH_REVERSAL",
+      "trigger": 340.5,
+      "triggerMethod": "Market",
+      "status": "OPEN",
+      "exitPrice": null,
+      "exitTime": null,
+      "pnlPct": null,
+      "note": ""
     }
   ],
-  "lastUpdated": "2026-04-07T07:46:27.120Z",
+  "lastUpdated": "2026-04-07T07:46:30.716Z",
   "upstoxId": "132199",
   "stats": {
-    "total": 5,
+    "total": 6,
     "hits": 0,
     "sls": 0,
-    "open": 5,
+    "open": 6,
     "winRate": null,
-    "avgConf": 74
+    "avgConf": 72
   }
 }

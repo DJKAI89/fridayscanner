@@ -479,6 +479,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="lkp-results" style="display:none">
 
 <!-- ── SECTION 1: Stock Analysis ── -->
+
 <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:6px">
   <span style="background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px">1</span>
   📈 STOCK ANALYSIS
@@ -486,6 +487,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <div id="lkp-stock-card" class="cards-g"></div>
 
 <!-- ── SECTION 2: F&O Options ── -->
+
 <div id="lkp-fo-section" style="display:none;margin-top:16px">
   <div style="font-size:11px;font-weight:700;color:#374151;margin-bottom:8px;display:flex;align-items:center;gap:6px">
     <span style="background:#7c3aed;color:#fff;border-radius:5px;padding:2px 8px;font-size:10px">2</span>
@@ -509,10 +511,18 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="padding:0 12px 12px">
 
   <!-- Stats summary -->
+
   <div class="stats-g" id="log-stats" style="margin-bottom:12px"></div>
 
   <!-- Filter bar -->
+
   <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <select id="log-filter-date" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;background:#fff" onchange="renderLogTab()">
+      <option value="today" selected>Today</option>
+      <option value="week">This Week</option>
+      <option value="month">This Month</option>
+      <option value="all">All Time</option>
+    </select>
     <select id="log-filter-type" style="flex:1;min-width:100px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;background:#fff" onchange="renderLogTab()">
       <option value="all">All signals</option>
       <option value="STOCK">Stocks only</option>
@@ -529,6 +539,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
   <!-- Log entries -->
+
   <div id="log-entries">
     <div class="empty-state">No signals logged yet.<br><span style="font-size:10px;color:#94a3b8">Signals are logged automatically each scan.<br>Set your GitHub token in ⚙ Settings → Signal Log.</span></div>
   </div>
@@ -574,6 +585,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
 
 <!-- Formula display -->
+
 <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:10px;line-height:2;color:#374151">
   <div style="font-weight:700;color:#0f172a;margin-bottom:6px">📐 How Confidence is Calculated</div>
   <div style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center">
@@ -612,6 +624,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 </div>
 
 <!-- Confidence guide -->
+
 <div style="margin-top:12px;display:grid;grid-template-columns:repeat(5,1fr);gap:4px;font-size:9px;text-align:center">
   <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:5px;padding:5px"><div style="font-weight:800;color:#dc2626">0–40%</div><div style="color:#6b7280">Weak</div></div>
   <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:5px"><div style="font-weight:800;color:#d97706">40–55%</div><div style="color:#6b7280">Low</div></div>
@@ -1429,16 +1442,35 @@ async function logSignals(newSignals){
 
   try{
     const { signals, sha } = await ghReadLog();
-    // Deduplicate: don't log same stock+date+type twice
-    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    const existing = new Set(signals.map(s=>s.id));
-    const toAdd = newSignals.filter(s=>!existing.has(s.id));
-    if(!toAdd.length){ lg("Signal log: all signals already logged"); return; }
-    const updated = [...signals, ...toAdd];
+    // Build a map of existing signals by ID for fast lookup
+    const existingMap = new Map(signals.map(s=>[s.id, s]));
+    let addedCount = 0, updatedCount = 0;
+
+    for(const ns of newSignals){
+      if(existingMap.has(ns.id)){
+        // Same day, same symbol — update values but preserve status/exit data
+        const ex = existingMap.get(ns.id);
+        const preservedFields = {
+          status:    ex.status,
+          exitPrice: ex.exitPrice,
+          exitTime:  ex.exitTime,
+          pnlPct:    ex.pnlPct,
+          note:      ex.note
+        };
+        Object.assign(ex, ns, preservedFields);
+        updatedCount++;
+      } else {
+        // New day or new symbol — create fresh entry
+        existingMap.set(ns.id, ns);
+        addedCount++;
+      }
+    }
+
+    const updated = Array.from(existingMap.values());
     // Keep last 500 signals (prune oldest)
     if(updated.length > 500) updated.splice(0, updated.length-500);
     const ok = await ghWriteLog(updated, sha);
-    lg(`Signal log: ${ok?"✅":"❌"} logged ${toAdd.length} new signals (total ${updated.length})`,"o");
+    lg(`Signal log: ${ok?"✅":"❌"} added ${addedCount} new, updated ${updatedCount} same-day signals (total ${updated.length})`,"o");
     updateLogBadge(updated);
   }catch(e){ lg("logSignals: "+e.message,"w"); }
 }
@@ -1663,36 +1695,58 @@ async function renderLogTab(signalsIn){
   }
 
   // Apply filters
+  const dateF   = document.getElementById("log-filter-date")?.value||"today";
   const typeF   = document.getElementById("log-filter-type")?.value||"all";
   const statusF = document.getElementById("log-filter-status")?.value||"all";
-  let filtered  = signals;
+
+  // Date range calculation (IST)
+  const todayIST = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}); // "YYYY-MM-DD"
+  function getWeekStart(){
+    const d = new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"}));
+    const day = d.getDay(); // 0=Sun
+    d.setDate(d.getDate() - day);
+    return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  }
+  function getMonthStart(){
+    const d = new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"}));
+    d.setDate(1);
+    return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  }
+
+  let filtered = signals;
+  if(dateF==="today")  filtered = filtered.filter(s=>s.date===todayIST);
+  else if(dateF==="week")  filtered = filtered.filter(s=>s.date>=getWeekStart());
+  else if(dateF==="month") filtered = filtered.filter(s=>s.date>=getMonthStart());
+  // "all" → no date filter
+
   if(typeF!=="all")   filtered=filtered.filter(s=>s.type===typeF);
   if(statusF!=="all") filtered=filtered.filter(s=>s.status===statusF);
 
   // Sort newest first
   filtered = filtered.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.time.localeCompare(a.time));
 
-  // Stats
-  const stats = computeLogStats(signals);
-  const openCount  = signals.filter(s=>s.status==="OPEN").length;
-  const hitCount   = signals.filter(s=>s.status==="TARGET_HIT").length;
-  const slCount    = signals.filter(s=>s.status==="SL_HIT").length;
-  const expCount   = signals.filter(s=>s.status==="EXPIRED").length;
+  // Stats — computed from filtered set so cards and stats stay in sync
+  const statsBase  = filtered;
+  const stats      = computeLogStats(statsBase);
+  const openCount  = statsBase.filter(s=>s.status==="OPEN").length;
+  const hitCount   = statsBase.filter(s=>s.status==="TARGET_HIT").length;
+  const slCount    = statsBase.filter(s=>s.status==="SL_HIT").length;
   const closedCount= hitCount+slCount;
   const wr = closedCount>0 ? Math.round(hitCount/closedCount*100) : null;
+  const avgConf    = statsBase.length>0 ? Math.round(statsBase.reduce((a,s)=>a+s.confidence,0)/statsBase.length) : 0;
 
   document.getElementById("log-stats").innerHTML=`
-    <div class="sc"><div class="sc-lbl">TOTAL SIGNALS</div><div class="sc-val bl">${signals.length}</div><div class="sc-sub">since logging started</div></div>
+    <div class="sc"><div class="sc-lbl">TOTAL SIGNALS</div><div class="sc-val bl">${filtered.length}</div><div class="sc-sub">${dateF==="today"?"today":dateF==="week"?"this week":dateF==="month"?"this month":"all time"}</div></div>
     <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val ${wr>=60?"up":wr>=45?"am":"dn"}">${wr!=null?wr+"%":"—"}</div><div class="sc-sub">${closedCount} closed signals</div></div>
     <div class="sc"><div class="sc-lbl">TARGET HIT ✅</div><div class="sc-val up">${hitCount}</div><div class="sc-sub">reached target</div></div>
     <div class="sc"><div class="sc-lbl">SL HIT ❌</div><div class="sc-val dn">${slCount}</div><div class="sc-sub">stopped out</div></div>
     <div class="sc"><div class="sc-lbl">OPEN 🔄</div><div class="sc-val am">${openCount}</div><div class="sc-sub">watching</div></div>
-    <div class="sc"><div class="sc-lbl">AVG CONFIDENCE</div><div class="sc-val">${stats.avgConf}%</div><div class="sc-sub">all signals</div></div>
+    <div class="sc"><div class="sc-lbl">AVG CONFIDENCE</div><div class="sc-val">${avgConf}%</div><div class="sc-sub">${dateF==="today"?"today":dateF==="week"?"this week":dateF==="month"?"this month":"all time"}</div></div>
   `;
 
   if(!filtered.length){
     document.getElementById("log-entries").innerHTML=
-      `<div class="empty-state">No signals match the selected filter.</div>`;
+      `<div class="empty-state">No signals for ${dateF==="today"?"today":dateF==="week"?"this week":dateF==="month"?"this month":"any time"}.<br><span style="font-size:10px;color:#94a3b8">Try changing the date or filter above.</span></div>`;
     return;
   }
 

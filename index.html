@@ -1451,11 +1451,13 @@ async function logSignals(newSignals){
         // Same day, same symbol — update values but preserve status/exit data
         const ex = existingMap.get(ns.id);
         const preservedFields = {
-          status:    ex.status,
-          exitPrice: ex.exitPrice,
-          exitTime:  ex.exitTime,
-          pnlPct:    ex.pnlPct,
-          note:      ex.note
+          status:     ex.status,
+          exitPrice:  ex.exitPrice,
+          exitTime:   ex.exitTime,
+          pnlPct:     ex.pnlPct,
+          note:       ex.note,
+          livePrice:  ex.livePrice  ?? null,
+          livePnlPct: ex.livePnlPct ?? null
         };
         Object.assign(ex, ns, preservedFields);
         updatedCount++;
@@ -1559,6 +1561,7 @@ async function checkAllOutcomes(){
     const openSignals = signals.filter(s=>s.status==="OPEN");
     if(!openSignals.length){
       renderLogTab(signals);
+      alert("No open signals to check.");
       return;
     }
 
@@ -1567,24 +1570,20 @@ async function checkAllOutcomes(){
     const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
     const allSyms = [...new Set([...stockSyms, ...optUnderlying])];
 
-    // Batch fetch quotes
+    // Batch fetch underlying quotes
     const priceMap = {};
     if(allSyms.length){
-      // Map symbols to Upstox keys via STOCK_MASTER_MAP
       const keys = allSyms.map(sym=>{
         const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym) || FO_STOCK_LIST.find(s=>s.s===sym);
         return inst?.key;
       }).filter(Boolean).join(",");
-      // Also add index keys
       const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
       try{
         const quotes = await fetchQ(keys+","+idxKeys);
-        // Map back to symbol
         allSyms.forEach(sym=>{
           const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym);
           if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
         });
-        // Index map
         priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
         priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
         priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
@@ -1593,78 +1592,101 @@ async function checkAllOutcomes(){
     }
 
     // For options: fetch current premium prices
+    // Group by expiry so we can also attempt expired contracts
     const optPriceMap = {};
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
     for(const sig of openSignals.filter(s=>s.type==="OPTION")){
       try{
+        const isExpiredContract = sig.expiry && sig.expiry < istDate;
+        if(isExpiredContract){
+          // Expired contract — premium is 0 (expired worthless if not closed earlier)
+          optPriceMap[sig.id] = 0;
+          continue;
+        }
         const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock) || INDEX_OPTS.find(s=>s.name===sig.stock);
         if(!inst) continue;
         const chain = await fetchOptions(inst.key, sig.expiry);
         const row = chain.find(r=>r.strike_price===sig.strike);
         if(!row) continue;
         const opt = sig.optType==="CE" ? row.call_options : row.put_options;
-        if(opt?.market_data?.ltp) optPriceMap[sig.id] = opt.market_data.ltp;
-      }catch(e){}
+        if(opt?.market_data?.ltp != null) optPriceMap[sig.id] = opt.market_data.ltp;
+      }catch(e){ lg("optPrice fetch "+sig.id+": "+e.message,"w"); }
     }
 
     const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
-    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
 
     // Update each open signal
-    let updated = 0;
+    let closed = 0, liveupdated = 0;
     for(const sig of signals){
       if(sig.status !== "OPEN") continue;
-      let currentPrice = null;
 
+      let currentPrice = null;
       if(sig.type==="STOCK")  currentPrice = priceMap[sig.stock];
       if(sig.type==="OPTION") currentPrice = optPriceMap[sig.id];
 
-      if(!currentPrice) continue;
-
-      // Check target / SL
-      const hitTarget = sig.signal==="BUY"||sig.signal==="CALL"
-        ? currentPrice >= sig.target
-        : currentPrice <= sig.target;
-      const hitSL = sig.signal==="BUY"||sig.signal==="CALL"
-        ? currentPrice <= sig.sl
-        : currentPrice >= sig.sl;
-
-      // Check if signal date is old (past expiry / yesterday)
-      const sigDate = sig.date;
-      const isOldSignal = sigDate < istDate;
-      // For options: check if expiry has passed
-      const isExpired = sig.type==="OPTION" && sig.expiry && sig.expiry < istDate;
-
-      if(isExpired){
+      // ── 1. Expired contract ──
+      const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry < istDate;
+      if(isExpiredContract){
+        const exitPx = currentPrice ?? 0; // 0 if we couldn't fetch (expired worthless)
         sig.status    = "EXPIRED";
-        sig.exitPrice = currentPrice;
+        sig.exitPrice = exitPx;
         sig.exitTime  = istTime;
-        sig.pnlPct    = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
-      } else if(hitTarget){
+        sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null;
+        sig.livePnlPct= null;
+        closed++;
+        continue;
+      }
+
+      if(currentPrice == null) continue;
+
+      const isBull = sig.signal==="BUY" || sig.signal==="CALL";
+      const hitTarget = isBull ? currentPrice >= sig.target : currentPrice <= sig.target;
+      const hitSL     = isBull ? currentPrice <= sig.sl     : currentPrice >= sig.sl;
+      // Old stock signal (yesterday's) with no expiry — expire it
+      const isOldStock = sig.type==="STOCK" && sig.date < istDate;
+
+      if(hitTarget){
+        // ── 3. Target hit — use ACTUAL current price, not just target ──
         sig.status    = "TARGET_HIT";
-        sig.exitPrice = sig.target;
+        sig.exitPrice = +currentPrice.toFixed(2);   // real exit, may be above target
         sig.exitTime  = istTime;
-        sig.pnlPct    = +(((sig.target-sig.entry)/sig.entry)*100).toFixed(2);
+        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null;
+        sig.livePnlPct= null;
+        closed++;
       } else if(hitSL){
         sig.status    = "SL_HIT";
-        sig.exitPrice = sig.sl;
+        sig.exitPrice = +sig.sl.toFixed(2);
         sig.exitTime  = istTime;
-        sig.pnlPct    = +(((sig.sl-sig.entry)/sig.entry)*100).toFixed(2);
-      } else if(isOldSignal && !isExpired){
-        // Old open signal — mark as expired (no confirmation either way)
+        sig.pnlPct    = +(((sig.sl - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null;
+        sig.livePnlPct= null;
+        closed++;
+      } else if(isOldStock){
         sig.status    = "EXPIRED";
-        sig.exitPrice = currentPrice;
+        sig.exitPrice = +currentPrice.toFixed(2);
         sig.exitTime  = istTime;
-        sig.pnlPct    = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null;
+        sig.livePnlPct= null;
+        closed++;
+      } else {
+        // ── 2. Still OPEN — store live price & unrealised P&L ──
+        sig.livePrice  = +currentPrice.toFixed(2);
+        sig.livePnlPct = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+        liveupdated++;
       }
-      if(sig.status!=="OPEN") updated++;
     }
 
     const ok = await ghWriteLog(signals, sha);
-    lg(`Outcomes: updated ${updated} signals, wrote to GitHub: ${ok}`,"o");
+    lg(`Outcomes: closed ${closed}, live-updated ${liveupdated} signals. GitHub: ${ok}`,"o");
     renderLogTab(signals);
     updateLogBadge(signals);
-    if(updated>0) alert(`✅ Updated ${updated} signal outcomes. ${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
-    else alert("No open signals have hit their target or SL yet.");
+    if(closed>0 || liveupdated>0)
+      alert(`✅ Closed: ${closed} · Live P&L updated: ${liveupdated}\n${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
+    else
+      alert("No open signals have hit their target or SL yet.");
   }catch(e){
     lg("checkAllOutcomes: "+e.message,"e");
     document.getElementById("log-entries").innerHTML=`<div class="empty-state">Error: ${e.message}</div>`;
@@ -1754,13 +1776,49 @@ async function renderLogTab(signalsIn){
     const stColor = s.status==="TARGET_HIT"?"#16a34a":s.status==="SL_HIT"?"#dc2626":s.status==="OPEN"?"#d97706":"#94a3b8";
     const stBg    = s.status==="TARGET_HIT"?"#f0fdf4":s.status==="SL_HIT"?"#fef2f2":s.status==="OPEN"?"#fffbeb":"#f8fafc";
     const stLabel = s.status==="TARGET_HIT"?"✅ TARGET HIT":s.status==="SL_HIT"?"❌ SL HIT":s.status==="OPEN"?"🔄 OPEN":"⏳ EXPIRED";
-    const pnlStr  = s.pnlPct!=null?(s.pnlPct>=0?"+":"")+s.pnlPct.toFixed(2)+"%":"—";
-    const pnlColor= s.pnlPct!=null?(s.pnlPct>=0?"#16a34a":"#dc2626"):"#94a3b8";
+
+    // P&L display logic:
+    // - Closed signals: show final pnlPct
+    // - Open signals: show live unrealised P&L if available, else "—"
+    let pnlValue = null;
+    let pnlLabel = "P&L";
+    if(s.status !== "OPEN" && s.pnlPct != null){
+      pnlValue = s.pnlPct;
+      pnlLabel = "P&L";
+    } else if(s.status === "OPEN" && s.livePnlPct != null){
+      pnlValue = s.livePnlPct;
+      pnlLabel = "Live P&L";
+    }
+    const pnlStr   = pnlValue!=null ? (pnlValue>=0?"+":"")+pnlValue.toFixed(2)+"%" : "—";
+    const pnlColor = pnlValue!=null ? (pnlValue>=0?"#16a34a":"#dc2626") : "#94a3b8";
+    const pnlLabelColor = s.status==="OPEN" && s.livePnlPct!=null ? "#0ea5e9" : "#64748b"; // blue label for live
+
+    // Exit row: show actual exit price (may be above target if price ran)
+    const exitAboveTarget = s.status==="TARGET_HIT" && s.exitPrice!=null && s.exitPrice > s.target;
+    const exitRow = s.exitPrice!=null
+      ? `<div style="font-size:9px;color:#64748b;margin-top:2px">
+           Exit: <span style="font-weight:700;color:${s.status==="TARGET_HIT"?"#16a34a":s.status==="SL_HIT"?"#dc2626":"#94a3b8"}">₹${s.exitPrice}</span>
+           ${exitAboveTarget ? `<span style="font-size:8px;color:#16a34a;margin-left:3px">▲ Above target ₹${s.target}</span>` : ""}
+           at ${s.exitTime||"—"}
+         </div>`
+      : "";
+
+    // Live price row for OPEN signals
+    const livePriceRow = s.status==="OPEN" && s.livePrice!=null
+      ? `<div style="font-size:9px;color:#0ea5e9;margin-top:2px">📡 Live: ₹${s.livePrice} (last checked)</div>`
+      : "";
+
+    // Expiry info row
+    const expiryRow = s.expiry
+      ? `<span style="font-size:8px;color:#94a3b8;margin-left:8px">Exp: ${s.expiry}</span>`
+      : "";
+
     return `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:11px 13px;margin-bottom:8px;border-left:4px solid ${stColor}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <div>
           <span style="font-weight:800;font-size:13px;color:#0f172a">${s.name}</span>
           <span style="font-size:9px;color:#94a3b8;margin-left:6px">${s.type}</span>
+          ${expiryRow}
         </div>
         <span style="background:${stBg};color:${stColor};border:1px solid ${stColor}33;border-radius:10px;padding:2px 8px;font-size:9px;font-weight:800">${stLabel}</span>
       </div>
@@ -1768,14 +1826,15 @@ async function renderLogTab(signalsIn){
         <div style="font-size:9px;color:#64748b">Signal<br><span style="font-weight:700;color:#0f172a">${s.signal}</span></div>
         <div style="font-size:9px;color:#64748b">Confidence<br><span style="font-weight:700;color:#0f172a">${s.confidence}%</span></div>
         <div style="font-size:9px;color:#64748b">Strength<br><span style="font-weight:700;color:#0f172a">${s.strength||"—"}</span></div>
-        <div style="font-size:9px;color:#64748b">P&L<br><span style="font-weight:700;color:${pnlColor}">${pnlStr}</span></div>
+        <div style="font-size:9px;color:${pnlLabelColor}">${pnlLabel}<br><span style="font-weight:700;color:${pnlColor}">${pnlStr}</span></div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:6px">
         <div style="font-size:9px;color:#64748b">Entry<br><span style="font-weight:700;color:#1d4ed8">₹${s.entry}</span></div>
         <div style="font-size:9px;color:#64748b">SL<br><span style="font-weight:700;color:#dc2626">₹${s.sl}</span></div>
         <div style="font-size:9px;color:#64748b">Target<br><span style="font-weight:700;color:#16a34a">₹${s.target}</span></div>
       </div>
-      ${s.exitPrice?`<div style="font-size:9px;color:#64748b">Exit: ₹${s.exitPrice} at ${s.exitTime||"—"}</div>`:""}
+      ${exitRow}
+      ${livePriceRow}
       <div style="font-size:9px;color:#94a3b8;margin-top:3px">${s.date} ${s.time}${s.reversal&&s.reversal!=="NONE"?" · 🔄 "+s.reversal:""}</div>
     </div>`;
   }).join("");

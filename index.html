@@ -1551,17 +1551,37 @@ function buildOptionSignal(p, vix){
   };
 }
 
+// ── Show toast notification (non-blocking) ──
+function showToast(msg, color="#16a34a", duration=5000){
+  let t = document.getElementById("friday-toast");
+  if(!t){
+    t = document.createElement("div");
+    t.id = "friday-toast";
+    t.style.cssText = "position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:10px 18px;border-radius:20px;font-size:12px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,0.3);transition:opacity 0.4s;pointer-events:none;max-width:90vw;text-align:center";
+    document.body.appendChild(t);
+  }
+  t.style.borderLeft = "4px solid "+color;
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>{ t.style.opacity="0"; }, duration);
+}
+
 // ── Check outcomes for all open signals ──
-async function checkAllOutcomes(){
-  if(!GH.token){ alert("Configure GitHub token in ⚙ Settings → Signal Log first."); return; }
-  document.getElementById("log-entries").innerHTML=
-    `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking outcomes for open signals...</div>`;
+async function checkAllOutcomes(silent=false){
+  if(!GH.token){
+    if(!silent) alert("Configure GitHub token in ⚙ Settings → Signal Log first.");
+    return;
+  }
+  if(!silent)
+    document.getElementById("log-entries").innerHTML=
+      `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking outcomes for open signals...</div>`;
   try{
     const { signals, sha } = await ghReadLog();
     const openSignals = signals.filter(s=>s.status==="OPEN");
     if(!openSignals.length){
       renderLogTab(signals);
-      alert("No open signals to check.");
+      if(!silent) alert("No open signals to check.");
       return;
     }
 
@@ -1597,7 +1617,7 @@ async function checkAllOutcomes(){
     const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
     for(const sig of openSignals.filter(s=>s.type==="OPTION")){
       try{
-        const isExpiredContract = sig.expiry && sig.expiry < istDate;
+        const isExpiredContract = sig.expiry && sig.expiry <= expiryThreshold;
         if(isExpiredContract){
           // Expired contract — premium is 0 (expired worthless if not closed earlier)
           optPriceMap[sig.id] = 0;
@@ -1613,7 +1633,14 @@ async function checkAllOutcomes(){
       }catch(e){ lg("optPrice fetch "+sig.id+": "+e.message,"w"); }
     }
 
-    const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+    // After 3:30 PM IST, today's expiry contracts are also expired
+    const _istHour = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+    const _mktClosed = !isOpen();
+    const expiryThreshold = (_mktClosed && _istHour >= 15) ? istDate : (() => {
+      // Market open — only contracts strictly before today are expired
+      const d = new Date(); d.setDate(d.getDate()-1);
+      return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    })();
 
     // Update each open signal
     let closed = 0, liveupdated = 0;
@@ -1625,13 +1652,29 @@ async function checkAllOutcomes(){
       if(sig.type==="OPTION") currentPrice = optPriceMap[sig.id];
 
       // ── 1. Expired contract ──
-      const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry < istDate;
+      const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold;
       if(isExpiredContract){
         const exitPx = currentPrice ?? 0; // 0 if we couldn't fetch (expired worthless)
-        sig.status    = "EXPIRED";
-        sig.exitPrice = exitPx;
-        sig.exitTime  = istTime;
-        sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        const isBullExp = sig.signal==="BUY" || sig.signal==="CALL";
+        // Even on an expired contract, check if target/SL was hit at last known price
+        const expiredHitTarget = isBullExp ? exitPx >= sig.target : exitPx <= sig.target;
+        const expiredHitSL     = isBullExp ? exitPx <= sig.sl     : exitPx >= sig.sl;
+        if(expiredHitTarget){
+          sig.status    = "TARGET_HIT";
+          sig.exitPrice = +exitPx.toFixed(2);
+          sig.exitTime  = istTime;
+          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        } else if(expiredHitSL){
+          sig.status    = "SL_HIT";
+          sig.exitPrice = +exitPx.toFixed(2);
+          sig.exitTime  = istTime;
+          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        } else {
+          sig.status    = "EXPIRED";
+          sig.exitPrice = exitPx;
+          sig.exitTime  = istTime;
+          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        }
         sig.livePrice = null;
         sig.livePnlPct= null;
         closed++;
@@ -1683,10 +1726,15 @@ async function checkAllOutcomes(){
     lg(`Outcomes: closed ${closed}, live-updated ${liveupdated} signals. GitHub: ${ok}`,"o");
     renderLogTab(signals);
     updateLogBadge(signals);
-    if(closed>0 || liveupdated>0)
-      alert(`✅ Closed: ${closed} · Live P&L updated: ${liveupdated}\n${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
-    else
-      alert("No open signals have hit their target or SL yet.");
+    if(silent){
+      if(closed>0) showToast(`📊 Auto-updated: ${closed} signal${closed>1?"s":""} closed after market hours`, "#16a34a");
+      else if(liveupdated>0) showToast(`📡 Live P&L refreshed for ${liveupdated} open signal${liveupdated>1?"s":""}`, "#0ea5e9");
+    } else {
+      if(closed>0 || liveupdated>0)
+        alert(`✅ Closed: ${closed} · Live P&L updated: ${liveupdated}\n${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
+      else
+        alert("No open signals have hit their target or SL yet.");
+    }
   }catch(e){
     lg("checkAllOutcomes: "+e.message,"e");
     document.getElementById("log-entries").innerHTML=`<div class="empty-state">Error: ${e.message}</div>`;
@@ -2131,7 +2179,7 @@ function startTimers(){
       if(_istH2===15&&_istM2>=31&&_istM2<=35&&GH.token&&!window._outcomeCheckDone){
         window._outcomeCheckDone=true;
         lg("Auto-checking signal outcomes after market close...","o");
-        setTimeout(()=>checkAllOutcomes(),5000);
+        setTimeout(()=>checkAllOutcomes(true),5000);
       }
       if(_istH2===9&&_istM2<20) window._outcomeCheckDone=false; // reset next morning
     }

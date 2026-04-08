@@ -149,13 +149,13 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 25.03,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "EXPIRED",
+      "exitPrice": 0,
+      "exitTime": "07:59:06",
+      "pnlPct": -100,
       "note": "",
-      "livePrice": 173.4,
-      "livePnlPct": 44.2
+      "livePrice": null,
+      "livePnlPct": null
     },
     {
       "id": "2026-04-07-BIOCON-STOCK",
@@ -306,13 +306,13 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 24.76,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "EXPIRED",
+      "exitPrice": 0,
+      "exitTime": "07:59:06",
+      "pnlPct": -100,
       "note": "",
-      "livePrice": 123.35,
-      "livePnlPct": 2.83
+      "livePrice": null,
+      "livePnlPct": null
     },
     {
       "id": "2026-04-07-NIFTY-23100-CE",
@@ -339,13 +339,13 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 24.76,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "EXPIRED",
+      "exitPrice": 0,
+      "exitTime": "07:59:06",
+      "pnlPct": -100,
       "note": "",
-      "livePrice": 23.6,
-      "livePnlPct": 14.29
+      "livePrice": null,
+      "livePnlPct": null
     },
     {
       "id": "2026-04-07-NIFTY-23050-CE",
@@ -372,13 +372,13 @@
       "rr": 2,
       "winRateEst": 55,
       "vix": 24.76,
-      "status": "OPEN",
-      "exitPrice": null,
-      "exitTime": null,
-      "pnlPct": null,
+      "status": "EXPIRED",
+      "exitPrice": 0,
+      "exitTime": "07:59:06",
+      "pnlPct": -100,
       "note": "",
-      "livePrice": 73.5,
-      "livePnlPct": 4.33
+      "livePrice": null,
+      "livePnlPct": null
     },
     {
       "id": "2026-04-07-SENSEX-75400-CE",
@@ -878,7 +878,9 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 450,
+      "livePnlPct": 0
     },
     {
       "id": "2026-04-08-SENSEX-75600-CE",
@@ -909,16 +911,18 @@
       "exitPrice": null,
       "exitTime": null,
       "pnlPct": null,
-      "note": ""
+      "note": "",
+      "livePrice": 369.55,
+      "livePnlPct": 0
     }
   ],
-  "lastUpdated": "2026-04-08T02:28:55.536Z",
+  "lastUpdated": "2026-04-08T02:29:06.116Z",
   "upstoxId": "132199",
   "stats": {
     "total": 29,
     "hits": 2,
     "sls": 0,
-    "open": 27,
+    "open": 23,
     "winRate": 100,
     "avgConf": 69
   }

@@ -1921,22 +1921,26 @@ function boot(){
   const subEl = document.getElementById("stocks-sub");
   if(subEl) subEl.textContent = `Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
   updateMarketClosedBanner();
-  refreshMarketStatus().then(()=>updateMarketClosedBanner());
   setTimeout(()=>loadPortfolio(),1000);
-  if(isOpen()){
-    // If overdue (timer already at 0), startTimers() fires it; else scan now on first boot
-    const _ts=parseInt(localStorage.getItem("friday_last_scan_ts")||"0");
-    if(!_ts) triggerScan(); // first ever boot — scan immediately
-    setTimeout(()=>loadOptions(false),3000);
-  } else {
-    const status=getMarketStatus();
-    lg("Market closed: "+status.msg,"w");
-    setStatus("scan","Closed"); // amber dot when market closed
-    document.getElementById("loading-stocks").style.display="none";
-    document.getElementById("dash-stocks").style.display="block";
-    document.getElementById("mkt-closed").style.display="block";
-    loadClosedMarketStats();
-  }
+  // Wait for market status API to confirm before deciding whether to auto-scan
+  refreshMarketStatus().then(()=>{
+    updateMarketClosedBanner();
+    if(isOpen()){
+      // Always auto-scan on page load when market is open
+      // Don't rely on last scan timestamp — user expects fresh data on load
+      lg("Boot: market open — auto-scanning","o");
+      setTimeout(()=>triggerScan(), 1500);
+      setTimeout(()=>loadOptions(false), 4000);
+    } else {
+      const status=getMarketStatus();
+      lg("Market closed: "+status.msg,"w");
+      setStatus("scan","Closed");
+      document.getElementById("loading-stocks").style.display="none";
+      document.getElementById("dash-stocks").style.display="block";
+      document.getElementById("mkt-closed").style.display="block";
+      loadClosedMarketStats();
+    }
+  });
 }
 
 window.onload=()=>{
@@ -2115,9 +2119,7 @@ function startTimers(){
   const _remaining=CFG.scanStocks*60-_elapsed;
   scanSecs=_remaining>0?_remaining:0;
 
-  // ── Stocks scan — only when market is open ──
-  // If overdue from previous session, fire immediately after boot
-  if(scanSecs===0&&isOpen()) setTimeout(()=>triggerScan(),2500);
+  // boot() handles the initial scan — startTimers only manages recurring intervals
 
   scanTimer = setInterval(()=>{
     if(isOpen()) triggerScan();

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
- 
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -1506,6 +1506,8 @@ function buildStockSignal(p){
     reversal:    p.reversal?.type||"NONE",
     trigger:     p.entryTrigger?.trigger||p.ltp,
     triggerMethod: p.entryTrigger?.method||"Market",
+    slMethod:    p.slTargets?.consMethod?.includes("R1") ? "S1 support" : "ATR+VIX",
+    tgtMethod:   p.slTargets?.modMethod || "2:1 R:R",
     status:      "OPEN",
     exitPrice:   null,
     exitTime:    null,
@@ -1543,6 +1545,7 @@ function buildOptionSignal(p, vix){
     rr:          p.rr,
     winRateEst:  55,
     vix:         vix||null,
+    slTgtMethod: p.slTgtMethod||null,
     status:      "OPEN",
     exitPrice:   null,
     exitTime:    null,
@@ -1883,7 +1886,7 @@ async function renderLogTab(signalsIn){
       </div>
       ${exitRow}
       ${livePriceRow}
-      <div style="font-size:9px;color:#94a3b8;margin-top:3px">${s.date} ${s.time}${s.reversal&&s.reversal!=="NONE"?" · 🔄 "+s.reversal:""}</div>
+      <div style="font-size:9px;color:#94a3b8;margin-top:3px">${s.date} ${s.time}${s.reversal&&s.reversal!=="NONE"?" · 🔄 "+s.reversal:""}${s.slTgtMethod||s.tgtMethod?` · 📐 ${s.slTgtMethod||((s.slMethod||"")+(s.tgtMethod?" → "+s.tgtMethod:""))}`:""}</div>
     </div>`;
   }).join("");
 
@@ -3059,31 +3062,42 @@ function calcProfessionalEntry(ltp, sr, atr, ma50, ma200){
 
 // PDF METHOD: Professional SL calculation
 // ATR-based (2.0×) verified against swing low
-function calcProfessionalSL(entry, sr, atr, swingL, low){
+// ══════════════════════════════════════════════════════════════
+// SMART STOCK SL — VIX-adjusted ATR + technical levels
+// ══════════════════════════════════════════════════════════════
+function calcProfessionalSL(entry, sr, atr, swingL, low, vix, rsi){
   const v = atr || entry * 0.02;
 
-  // Method 1: ATR-based SL (PDF: 2.0× multiplier for moderate)
-  const atrSL = +(entry - v * 2.0).toFixed(2);
+  // VIX-adjusted ATR multiplier
+  // High VIX = wider stops needed; Low VIX = tighter stops valid
+  const liveVix = vix || 15;
+  const vixMult = 1.3 + (liveVix / 100);  // VIX 15→1.45×  VIX 20→1.50×  VIX 30→1.60×
 
-  // Method 2: Swing low - 0.5% buffer (PDF Method 5)
+  // RSI adjustment
+  // Overbought (RSI>70): tighten — momentum may stall
+  // Oversold  (RSI<35): widen slightly — bounce can be deep
+  const liveRsi = rsi || 50;
+  const rsiAdj = liveRsi > 70 ? -0.15 : liveRsi < 35 ? +0.15 : 0;
+  const finalMult = vixMult + rsiAdj;
+
+  // Method 1: VIX+RSI adjusted ATR stop
+  const atrSL = +(entry - v * finalMult).toFixed(2);
+
+  // Method 2: Swing low - 0.5% buffer
   const sl_swingLow = swingL > 0 ? +(swingL * 0.995).toFixed(2) : 0;
 
-  // Method 3: Pivot S1 - 0.5% buffer (PDF Method 2)
+  // Method 3: Pivot S1 - 0.5% buffer
   const sl_support = sr?.pivotS1 > 0 ? +(sr.pivotS1 * 0.995).toFixed(2) : 0;
 
-  // PDF rule: SL must be BELOW swing low (for long trades)
-  // Use the HIGHER of (ATR-SL, support-SL) but must be below swing low
   let sl = atrSL;
-
-  // If swing low exists and ATR-SL is above it, use swing low - buffer
   if(sl_swingLow > 0 && sl > sl_swingLow) sl = sl_swingLow;
   if(sl_support  > 0 && sl > sl_support)  sl = sl_support;
 
-  // PDF checklist: not too tight (<1 ATR) and not too wide (>3 ATR)
-  const minSL = +(entry - v * 1.0).toFixed(2);  // 1 ATR min
-  const maxSL = +(entry - v * 3.0).toFixed(2);  // 3 ATR max
-  sl = Math.min(sl, minSL);   // not tighter than 1 ATR
-  sl = Math.max(sl, maxSL);   // not wider than 3 ATR
+  // Hard guardrails: between 1× and 3× ATR
+  const minSL = +(entry - v * 1.0).toFixed(2);
+  const maxSL = +(entry - v * 3.0).toFixed(2);
+  sl = Math.min(sl, minSL);
+  sl = Math.max(sl, maxSL);
 
   // Floor: never below day's low × 0.99
   if(low > 0) sl = Math.max(sl, +(low * 0.99).toFixed(2));
@@ -3091,60 +3105,129 @@ function calcProfessionalSL(entry, sr, atr, swingL, low){
   return +sl.toFixed(2);
 }
 
-// PDF METHOD: Professional Targets (Fibonacci Extensions + Resistance)
-function calcProfessionalTargets(entry, sl, sr, atr){
-  const risk = entry - sl;  // risk amount per share
+// ══════════════════════════════════════════════════════════════
+// SMART STOCK TARGET — resistance-pinned + Fibonacci + VIX cap
+// ══════════════════════════════════════════════════════════════
+function calcProfessionalTargets(entry, sl, sr, atr, vix){
+  let risk = entry - sl;
   if(risk <= 0) risk = entry * 0.02;
 
-  // Method 1: Fibonacci Extension (PDF Method 1)
-  // T1 = entry + risk×0.618, T2 = entry + risk×1.0, T3 = entry + risk×1.618
-  const fibT1 = +(entry + risk * 0.618).toFixed(2);
-  const fibT2 = +(entry + risk * 1.000).toFixed(2);
+  const r1   = sr?.pivotR1 || 0;
+  const r2   = sr?.pivotR2 || 0;
+  const w52H = sr?.week52H || 0;
+  const v    = atr || risk;
+
+  const rrOf = (t) => risk > 0 ? (t - entry) / risk : 0;
+
+  // Conservative: prefer R1 if it gives ≥1.2 R:R, else 1.5:1
+  const rrT15 = +(entry + risk * 1.5).toFixed(2);
+  let cons = (r1 > entry && rrOf(r1) >= 1.2 && rrOf(r1) <= 3.0) ? +r1.toFixed(2) : rrT15;
+
+  // Moderate: prefer R2 ≥1.8 R:R, else R1 ≥1.8, else 2:1
+  const rrT20 = +(entry + risk * 2.0).toFixed(2);
+  let mod;
+  if(r2 > entry && rrOf(r2) >= 1.8 && rrOf(r2) <= 4.0)      mod = +r2.toFixed(2);
+  else if(r1 > entry && rrOf(r1) >= 1.8)                      mod = +r1.toFixed(2);
+  else                                                          mod = rrT20;
+
+  // Aggressive: Fib 1.618 or 3:1, capped at 52W high
   const fibT3 = +(entry + risk * 1.618).toFixed(2);
+  const rrT30 = +(entry + risk * 3.0).toFixed(2);
+  let agg = Math.max(fibT3, rrT30);
+  if(w52H > entry && w52H < agg) agg = +w52H.toFixed(2);
 
-  // Method 2: R:R Based (PDF Method 2)
-  const rrT1  = +(entry + risk * 1.5).toFixed(2);   // 1.5:1
-  const rrT2  = +(entry + risk * 2.0).toFixed(2);   // 2:1
-  const rrT3  = +(entry + risk * 3.0).toFixed(2);   // 3:1
+  // High VIX: scale back aggressive target
+  const liveVix = vix || 15;
+  if(liveVix > 22) agg = Math.min(agg, +(entry + risk * 2.5).toFixed(2));
 
-  // Method 3: Resistance levels (PDF Method 3)
-  const r1    = sr?.pivotR1 || 0;
-  const r2    = sr?.pivotR2 || 0;
-  const w52H  = sr?.week52H || 0;
+  // Ensure ordering
+  mod = Math.max(mod, +(cons + risk * 0.5).toFixed(2));
+  agg = Math.max(agg, +(mod  + risk * 0.5).toFixed(2));
 
-  // Method 4: ATR-based (PDF Method 4): T1=2ATR, T2=3ATR, T3=5ATR
-  const v = atr || risk;
-  const atrT1 = +(entry + v * 2).toFixed(2);
-  const atrT2 = +(entry + v * 3).toFixed(2);
-  const atrT3 = +(entry + v * 5).toFixed(2);
+  const rrCons = +rrOf(cons).toFixed(2);
+  const rrMod  = +rrOf(mod).toFixed(2);
+  const rrAgg  = +rrOf(agg).toFixed(2);
 
-  // Build ordered targets: prefer resistance-aligned levels
-  // Conservative = min of (fibT1, rrT1, r1 if exists) — nearest realistic
-  const cons = r1 > entry ? Math.min(rrT1, r1) : rrT1;
-  // Moderate = 2:1 R:R or R2 resistance
-  const mod  = r2 > entry && r2 < rrT3 ? Math.min(rrT2, r2) : rrT2;
-  // Aggressive = 3:1 or Fib 1.618 extension
-  const agg  = Math.max(rrT3, fibT3);
-
-  // PDF Step 5: Verify R:R ≥ 1.5 minimum
-  const rrCons = risk > 0 ? (cons - entry) / risk : 0;
-  const rrMod  = risk > 0 ? (mod  - entry) / risk : 0;
-  const rrAgg  = risk > 0 ? (agg  - entry) / risk : 0;
+  // Legacy fields
+  const rrT1 = +(entry + risk*1.5).toFixed(2);
+  const rrT2 = +(entry + risk*2.0).toFixed(2);
+  const rrT3 = +(entry + risk*3.0).toFixed(2);
+  const fibT1= +(entry + risk*0.618).toFixed(2);
+  const fibT2= +(entry + risk*1.0).toFixed(2);
+  const atrT1= +(entry + v*2).toFixed(2);
+  const atrT2= +(entry + v*3).toFixed(2);
+  const atrT3= +(entry + v*5).toFixed(2);
 
   return {
-    cons: +cons.toFixed(2), mod: +mod.toFixed(2), agg: +agg.toFixed(2),
+    cons, mod, agg,
     fibT1, fibT2, fibT3, rrT1, rrT2, rrT3, atrT1, atrT2, atrT3,
-    rrCons: +rrCons.toFixed(2), rrMod: +rrMod.toFixed(2), rrAgg: +rrAgg.toFixed(2),
-    risk: +risk.toFixed(2)
+    rrCons, rrMod, rrAgg,
+    risk: +risk.toFixed(2),
+    consMethod: (r1>entry && rrOf(r1)>=1.2 && rrOf(r1)<=3.0) ? "R1 resistance" : "1.5:1 R:R",
+    modMethod:  (r2>entry && rrOf(r2)>=1.8 && rrOf(r2)<=4.0) ? "R2 resistance" : (r1>entry && rrOf(r1)>=1.8) ? "R1 resistance" : "2:1 R:R",
   };
 }
 
-// Backward-compatible autoSLTarget (used by scan loop — LTP as entry)
-function autoSLTarget(ltp, high, low, atr, sr){
-  const sl = calcProfessionalSL(ltp, sr||{}, atr, sr?.swingL||low, low);
-  const tgts = calcProfessionalTargets(ltp, sl, sr||{}, atr);
+// ── Stock autoSLTarget: pass vix and rsi through ──
+function autoSLTarget(ltp, high, low, atr, sr, vix, rsi){
+  const sl   = calcProfessionalSL(ltp, sr||{}, atr, sr?.swingL||low, low, vix, rsi);
+  const tgts = calcProfessionalTargets(ltp, sl, sr||{}, atr, vix);
   return { target: tgts.mod, sl, targets: tgts };
 }
+
+// ══════════════════════════════════════════════════════════════
+// SMART OPTIONS SL/TARGET
+// Uses IV × √(1/252) for daily expected move, Delta to convert to premium
+// ══════════════════════════════════════════════════════════════
+function calcSmartOptionSLTarget(entry, spot, strike, iv, delta, theta, expiry, vix, optType){
+  // 1. Days to expiry
+  const today = new Date();
+  const expDate = expiry ? new Date(expiry) : today;
+  const dte = Math.max(0, Math.round((expDate - today) / 86400000));
+
+  // 2. IV-based 1-day expected move of underlying
+  const ivDecimal = (iv || 20) / 100;
+  const dailySpotMove = spot * ivDecimal * Math.sqrt(1 / 252);
+
+  // 3. Convert to premium move via delta
+  const absDelta = Math.abs(delta) || 0.3;
+  const dailyPremiumMove = dailySpotMove * absDelta;
+
+  // 4. VIX adjustment
+  const liveVix = vix || 15;
+  const vixFactor = liveVix > 20 ? 1.2 : liveVix < 13 ? 0.85 : 1.0;
+
+  // 5. DTE tightener — near-expiry theta decay is aggressive
+  const dteFactor = dte <= 1 ? 0.6 : dte <= 3 ? 0.8 : 1.0;
+
+  // 6. ATM vs OTM modifier
+  const moneyness = spot > 0 ? Math.abs(strike - spot) / spot : 0;
+  const atmFactor = moneyness < 0.01 ? 1.15 : moneyness > 0.04 ? 0.85 : 1.0;
+
+  // 7. Theta guard — if theta eating >10% of premium daily, tighten target
+  const dailyThetaLoss = Math.abs(theta || 0);
+  const thetaEatsPct = entry > 0 ? dailyThetaLoss / entry : 0;
+  const thetaTgtAdj = thetaEatsPct > 0.10 ? 0.85 : 1.0;
+
+  // 8. Compute SL and target
+  const baseWidth = dailyPremiumMove * vixFactor * dteFactor * atmFactor;
+
+  // SL: 1.0× base width below entry, bounded between 15%-40% loss
+  const rawSL  = entry - Math.max(baseWidth * 1.0, entry * 0.15);
+  const sl     = +Math.min(entry * 0.85, Math.max(entry * 0.60, rawSL)).toFixed(2);
+
+  // Target: 1.5× base width, minimum 1.5:1 R:R, max 3.5× entry
+  const risk      = entry - sl;
+  const minTarget = +(entry + risk * 1.5).toFixed(2);
+  const rawTarget = +(entry + baseWidth * 1.5 * thetaTgtAdj).toFixed(2);
+  const tgt       = +Math.min(entry * 3.5, Math.max(minTarget, rawTarget)).toFixed(2);
+
+  const rr     = risk > 0 ? +((tgt - entry) / risk).toFixed(2) : 1.5;
+  const method = `IV ${(iv||20).toFixed(0)}% · DTE ${dte} · Δ${absDelta.toFixed(2)}`;
+
+  return { sl, tgt, rr, method, dte, dailyPremiumMove: +dailyPremiumMove.toFixed(2) };
+}
+
 
 // ══════════════════════════════════════
 // TICK — live prices every N sec
@@ -3583,7 +3666,7 @@ async function triggerScan(){
       // S/R proximity: price within 1% of key resistance = caution
       const nearResist = sr.pivotR1 ? Math.abs((ltp-sr.pivotR1)/ltp*100) < 1 : false;
 
-      const {target, sl} = autoSLTarget(ltp, high, low, t.atr);
+      const {target, sl, targets: slTargets} = autoSLTarget(ltp, high, low, t.atr, sr, vix, t.rsi);
       const preRR  = (sl>0&&ltp>sl) ? (target-ltp)/(ltp-sl) : 2;
       const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
 
@@ -3608,7 +3691,7 @@ async function triggerScan(){
        stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
-        target, sl, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger,
+        target, sl, slTargets, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger,
         avgVol20: t.avgVol20||0});
       
     }
@@ -3978,11 +4061,13 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       if (!signals.length && absD >= 0.10 && ltp > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
       if (!signals.length)    continue;
 
-      // Entry / SL / Target
+      // Entry / SL / Target — Smart IV-based calculation
       const entry = ltp;
-      const sl    = +(ltp * (1 - CFG.optSL / 100)).toFixed(2);
-      const tgt   = +(ltp * (1 + CFG.optTgt / 100)).toFixed(2);
-      const rr    = +(CFG.optTgt / CFG.optSL).toFixed(2);
+      const _opt  = calcSmartOptionSLTarget(entry, spot, sp, iv, delta, theta, expiry, vix, optType);
+      const sl    = _opt.sl;
+      const tgt   = _opt.tgt;
+      const rr    = _opt.rr;
+      const slTgtMethod = _opt.method;
 
       // Amount required (lot size × premium)
       const lot = lotSize || 1;
@@ -4015,8 +4100,9 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         score: signals.reduce((a, s) => a + s.s, 0),
         confidence, atm: sp === atm, spot, expiry, und: name,
         lot, amtRequired, maxLoss, maxProfit,
-        trendAligned, // true = with market direction
+        trendAligned,
         trendDir: niftyBullish ? "BULLISH" : "BEARISH",
+        slTgtMethod,
       });
     }
   }
@@ -4174,8 +4260,8 @@ function renderStockCards(picks,totalScanned,containerId){
       <!-- Trade setup: SL, Target (Entry removed — shown in trigger box above) -->
       <div class="trade-setup">
         <div class="ts-box"><div class="ts-l">ENTRY TRIGGER</div><div class="ts-v bl">₹${fmt(p.entryTrigger?.trigger||p.ltp)}</div><div class="ts-s" style="color:#94a3b8">${p.entryTrigger?.method||"Market"}</div></div>
-        <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">${(((p.sl-p.ltp)/p.ltp)*100).toFixed(1)}%</div></div>
-        <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.target)}</div><div class="ts-s up">+${(((p.target-p.ltp)/p.ltp)*100).toFixed(1)}%</div></div>
+        <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">${(((p.sl-p.ltp)/p.ltp)*100).toFixed(1)}% · ${p.slTargets?.consMethod?.includes("R1")||p.slTargets?.consMethod?.includes("R2")?"S1 support":"ATR+VIX"}</div></div>
+        <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.target)}</div><div class="ts-s up">+${(((p.target-p.ltp)/p.ltp)*100).toFixed(1)}% · ${p.slTargets?.modMethod||"2:1 R:R"}</div></div>
       </div>
       <!-- 3 Targets -->
       <div class="c-targets">
@@ -4359,9 +4445,10 @@ function optCard(p,i){
     <!-- Trade setup: Entry, SL, Target -->
     <div class="trade-setup">
       <div class="ts-box"><div class="ts-l">ENTRY</div><div class="ts-v bl">₹${fmt(p.entry)}</div><div class="ts-s" style="color:#64748b">LTP</div></div>
-      <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">−${CFG.optSL}%</div></div>
-      <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.tgt)}</div><div class="ts-s up">+${CFG.optTgt}% R:R ${p.rr}</div></div>
+      <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">−${p.entry>0?((p.entry-p.sl)/p.entry*100).toFixed(0):0}%</div></div>
+      <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.tgt)}</div><div class="ts-s up">+${p.entry>0?((p.tgt-p.entry)/p.entry*100).toFixed(0):0}% · R:R ${p.rr}</div></div>
     </div>
+    ${p.slTgtMethod?`<div style="font-size:8px;color:#94a3b8;margin-top:3px;padding:0 2px">📐 ${p.slTgtMethod}</div>`:""}
     <!-- Confidence bar -->
     <div class="bar-row" style="margin-bottom:8px">
       <span class="bar-lbl">Confidence</span>
@@ -4885,7 +4972,7 @@ async function lookupStock(){
     // Step 4: Score
     const patterns=tech.patterns||{}, sr=tech.sr||{};
     const nearSupp=isNearSupport(ltp,sr,low);
-    const {target,sl}=autoSLTarget(ltp,high,low,tech.atr);
+    const {target,sl}=autoSLTarget(ltp,high,low,tech.atr,sr,null,tech.rsi);
     const preRR=(sl>0&&ltp>sl)?(target-ltp)/(ltp-sl):2;
     const preRec=preRR>=2?"BUY":preRR>=1.5?"MODERATE":"WATCH";
     const volOk=tech.avgVol20?(vol>=tech.avgVol20*1.2):null;

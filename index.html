@@ -3180,49 +3180,60 @@ function autoSLTarget(ltp, high, low, atr, sr, vix, rsi){
 // Uses IV × √(1/252) for daily expected move, Delta to convert to premium
 // ══════════════════════════════════════════════════════════════
 function calcSmartOptionSLTarget(entry, spot, strike, iv, delta, theta, expiry, vix, optType){
-  // 1. Days to expiry
-  const today = new Date();
+  // ── 1. Days to expiry ──
+  const today   = new Date();
   const expDate = expiry ? new Date(expiry) : today;
-  const dte = Math.max(0, Math.round((expDate - today) / 86400000));
+  const dte     = Math.max(0, Math.round((expDate - today) / 86400000));
 
-  // 2. IV-based 1-day expected move of underlying
-  const ivDecimal = (iv || 20) / 100;
-  const dailySpotMove = spot * ivDecimal * Math.sqrt(1 / 252);
+  // ── 2. IV-based intraday expected move of the UNDERLYING ──
+  // Use fraction of day remaining for DTE=0 (assume ~6.25hr trading day)
+  const ivDecimal     = (iv || 20) / 100;
+  const timeFraction  = dte === 0 ? (1 / 252) * 0.5 : (1 / 252);   // DTE=0: half day max
+  const dailySpotMove = spot * ivDecimal * Math.sqrt(timeFraction);
 
-  // 3. Convert to premium move via delta
-  const absDelta = Math.abs(delta) || 0.3;
+  // ── 3. Convert underlying move → premium move via delta ──
+  const absDelta        = Math.abs(delta) || 0.3;
   const dailyPremiumMove = dailySpotMove * absDelta;
 
-  // 4. VIX adjustment
-  const liveVix = vix || 15;
-  const vixFactor = liveVix > 20 ? 1.2 : liveVix < 13 ? 0.85 : 1.0;
+  // ── 4. VIX adjustment on SL width ──
+  const liveVix  = vix || 15;
+  const vixFactor = liveVix > 20 ? 1.15 : liveVix < 13 ? 0.90 : 1.0;
 
-  // 5. DTE tightener — near-expiry theta decay is aggressive
-  const dteFactor = dte <= 1 ? 0.6 : dte <= 3 ? 0.8 : 1.0;
-
-  // 6. ATM vs OTM modifier
+  // ── 5. ATM vs OTM SL modifier ──
   const moneyness = spot > 0 ? Math.abs(strike - spot) / spot : 0;
-  const atmFactor = moneyness < 0.01 ? 1.15 : moneyness > 0.04 ? 0.85 : 1.0;
+  const atmFactor = moneyness < 0.01 ? 1.1 : moneyness > 0.04 ? 0.9 : 1.0;
 
-  // 7. Theta guard — if theta eating >10% of premium daily, tighten target
-  const dailyThetaLoss = Math.abs(theta || 0);
-  const thetaEatsPct = entry > 0 ? dailyThetaLoss / entry : 0;
-  const thetaTgtAdj = thetaEatsPct > 0.10 ? 0.85 : 1.0;
-
-  // 8. Compute SL and target
-  const baseWidth = dailyPremiumMove * vixFactor * dteFactor * atmFactor;
-
-  // SL: 1.0× base width below entry, bounded between 15%-40% loss
-  const rawSL  = entry - Math.max(baseWidth * 1.0, entry * 0.15);
-  const sl     = +Math.min(entry * 0.85, Math.max(entry * 0.60, rawSL)).toFixed(2);
-
-  // Target: 1.5× base width, minimum 1.5:1 R:R, max 3.5× entry
+  // ── 6. Compute SL ──
+  // Use IV-based move for SL width, bounded between 20%-40% loss
+  // (never tighter than 20% — option noise; never wider than 40% — capital protection)
+  const slWidth   = dailyPremiumMove * vixFactor * atmFactor;
+  const rawSL     = entry - Math.max(slWidth, entry * 0.20);
+  const sl        = +Math.min(entry * 0.80, Math.max(entry * 0.60, rawSL)).toFixed(2);
   const risk      = entry - sl;
-  const minTarget = +(entry + risk * 1.5).toFixed(2);
-  const rawTarget = +(entry + baseWidth * 1.5 * thetaTgtAdj).toFixed(2);
-  const tgt       = +Math.min(entry * 3.5, Math.max(minTarget, rawTarget)).toFixed(2);
 
-  const rr     = risk > 0 ? +((tgt - entry) / risk).toFixed(2) : 1.5;
+  // ── 7. Target: DTE-based R:R ratio ──
+  // Logic: the more time left, the bigger the move can be.
+  // DTE=0 (expiry today): can only move during today's session → max ~1.5:1 R:R
+  // DTE=1-2            : one more session possible → up to 2:1
+  // DTE=3-7            : multi-day trend → up to 2.5:1
+  // DTE>7              : full swing trade → up to 3:1
+  const baseRR = dte === 0 ? 1.5 : dte <= 2 ? 2.0 : dte <= 7 ? 2.5 : 3.0;
+
+  // Theta guard: if theta eats >8% of premium per day, reduce target R:R by 0.25
+  const dailyThetaLoss = Math.abs(theta || 0);
+  const thetaEatsPct   = entry > 0 ? dailyThetaLoss / entry : 0;
+  const targetRR       = thetaEatsPct > 0.08 ? Math.max(1.5, baseRR - 0.25) : baseRR;
+
+  const rawTarget = +(entry + risk * targetRR).toFixed(2);
+
+  // ── 8. Realistic cap per DTE ──
+  // DTE=0: max +80% gain intraday (realistic upper bound for index options)
+  // DTE=1-2: max +120%
+  // DTE>2: max +180%
+  const maxGainPct = dte === 0 ? 0.80 : dte <= 2 ? 1.20 : 1.80;
+  const tgt        = +Math.min(entry * (1 + maxGainPct), rawTarget).toFixed(2);
+
+  const rr     = risk > 0 ? +((tgt - entry) / risk).toFixed(2) : targetRR;
   const method = `IV ${(iv||20).toFixed(0)}% | DTE ${dte} | Delta ${absDelta.toFixed(2)}`;
 
   return { sl, tgt, rr, method, dte, dailyPremiumMove: +dailyPremiumMove.toFixed(2) };

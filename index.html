@@ -1658,11 +1658,18 @@ async function checkAllOutcomes(silent=false){
       // ── 1. Expired contract ──
       const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold;
       if(isExpiredContract){
-        const exitPx = currentPrice ?? 0; // 0 if we couldn't fetch (expired worthless)
+        // After market close, Upstox returns 0 for expired options.
+        // If we have a livePrice recorded during market hours, use that as the honest exit.
+        // This captures what the premium was worth when you could still trade it.
+        let exitPx = currentPrice ?? 0;
+        if(exitPx === 0 && sig.livePrice != null && sig.livePrice > 0){
+          exitPx = sig.livePrice; // use last intraday price recorded before expiry
+        }
+
         const isBullExp = sig.signal==="BUY" || sig.signal==="CALL";
-        // Even on an expired contract, check if target/SL was hit at last known price
         const expiredHitTarget = isBullExp ? exitPx >= sig.target : exitPx <= sig.target;
         const expiredHitSL     = isBullExp ? exitPx <= sig.sl     : exitPx >= sig.sl;
+
         if(expiredHitTarget){
           sig.status    = "TARGET_HIT";
           sig.exitPrice = +exitPx.toFixed(2);
@@ -1675,8 +1682,10 @@ async function checkAllOutcomes(silent=false){
           sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         } else {
           sig.status    = "EXPIRED";
-          sig.exitPrice = exitPx;
+          sig.exitPrice = +exitPx.toFixed(2);
           sig.exitTime  = istTime;
+          // If we only had livePrice (not a clean exit), note it
+          sig.note      = sig.note || (sig.livePrice && currentPrice===0 ? "Exit at last live price before expiry" : "");
           sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         }
         sig.livePrice = null;
@@ -1855,10 +1864,12 @@ async function renderLogTab(signalsIn){
          </div>`
       : "";
 
-    // Live price row for OPEN signals
+    // Live price row for OPEN signals / expiry note for EXPIRED with livePrice fallback
     const livePriceRow = s.status==="OPEN" && s.livePrice!=null
       ? `<div style="font-size:9px;color:#0ea5e9;margin-top:2px">📡 Live: ₹${s.livePrice} (last checked)</div>`
-      : "";
+      : (s.status==="EXPIRED" && s.note && s.note.includes("last live"))
+        ? `<div style="font-size:9px;color:#f59e0b;margin-top:2px">⚠ Exited at last live price — post-market value was ₹0</div>`
+        : "";
 
     // Expiry info row
     const expiryRow = s.expiry
@@ -3765,6 +3776,24 @@ async function triggerScan(){
     lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${pcr}`,"o");
     updateNavBadge("stocks", picks.length+" picks");
     checkAlerts(stocks); // check price/confidence alerts
+
+    // ── Intraday DTE=0 outcome check ──
+    // Silently check open options expiring TODAY while market is still live.
+    // This captures target/SL hits before the premium goes to ₹0 post-market.
+    if(GH.token && isOpen()){
+      const todayIST = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+      setTimeout(async ()=>{
+        try{
+          const { signals: _sigs } = await ghReadLog();
+          const _dte0Open = _sigs.filter(s => s.status==="OPEN" && s.type==="OPTION" && s.expiry===todayIST);
+          if(_dte0Open.length > 0){
+            lg(`Intraday check: ${_dte0Open.length} DTE=0 open option(s) — checking live prices`,"o");
+            await checkAllOutcomes(true); // silent, no popup
+          }
+        }catch(e){ lg("Intraday DTE=0 check: "+e.message,"w"); }
+      }, 3000);
+    }
+
     setTimeout(()=>loadOptions(true), 2000);
 
   }catch(e){

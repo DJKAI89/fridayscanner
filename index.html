@@ -1583,7 +1583,7 @@ async function checkAllOutcomes(silent=false){
     const { signals, sha } = await ghReadLog();
     const openSignals = signals.filter(s=>s.status==="OPEN");
     if(!openSignals.length){
-      renderLogTab(signals);
+      window._lastLogRenderTs = Date.now(); renderLogTab(signals);
       if(!silent) alert("No open signals to check.");
       return;
     }
@@ -1618,6 +1618,7 @@ async function checkAllOutcomes(silent=false){
     // Group by expiry so we can also attempt expired contracts
     const optPriceMap = {};
     const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
     for(const sig of openSignals.filter(s=>s.type==="OPTION")){
       try{
         const isExpiredContract = sig.expiry && sig.expiry <= expiryThreshold;
@@ -1727,7 +1728,7 @@ async function checkAllOutcomes(silent=false){
 
     const ok = await ghWriteLog(signals, sha);
     lg(`Outcomes: closed ${closed}, live-updated ${liveupdated} signals. GitHub: ${ok}`,"o");
-    renderLogTab(signals);
+    window._lastLogRenderTs = Date.now(); renderLogTab(signals);
     updateLogBadge(signals);
     if(silent){
       if(closed>0) showToast(`📊 Auto-updated: ${closed} signal${closed>1?"s":""} closed after market hours`, "#16a34a");
@@ -2077,7 +2078,11 @@ function switchTab(t){
   updateRefreshInfo();
   // Load options on first visit
   if(t==="options"&&document.getElementById("dash-options").style.display==="none"&&!optLoading) loadOptions(false);
-  if(t==="log") renderLogTab();
+  if(t==="log"){
+    // Only re-render log if it hasn't been rendered in the last 60 seconds
+    const _lastLogRender = window._lastLogRenderTs || 0;
+    if(Date.now() - _lastLogRender > 60000){ window._lastLogRenderTs = Date.now(); renderLogTab(); }
+  }
 }
 
 // ══════════════════════════════════════
@@ -3600,25 +3605,30 @@ async function triggerScan(){
     // Convenience: build allQ keyed by inst.key for downstream use
     // (already done above via multi-format indexing)
 
-    // ── STEP 4: Candles for top 20 by volume ──
-    updateScanProgress("Step 4/5: Fetching candle history...");
+    // ── STEP 4: Candles for top 20 by volume — fetched in parallel batches ──
+    updateScanProgress("Step 4/5: Fetching candle history (parallel)...");
     const today   = new Date().toISOString().split("T")[0];
     const from60  = new Date(Date.now() - 65*864e5).toISOString().split("T")[0];
-    // quoted is already sorted by volume (Phase D above)
-    const byVol = quoted;
+    const byVol   = quoted;
     const tech    = {};
     let candleOK  = 0;
-    for(let ci = 0; ci < Math.min(20, byVol.length); ci++){
-      const inst = byVol[ci];
-      updateScanProgress(`Step 4/5: Candles ${ci+1}/20 — ${inst.s}`);
-      try{
-        const candles = await fetchCandles(inst.key, from60, today);
+    const top20   = byVol.slice(0, Math.min(20, byVol.length));
+
+    // Process in batches of 5 to avoid rate-limiting while still being parallel
+    const CANDLE_BATCH = 5;
+    for(let b = 0; b < top20.length; b += CANDLE_BATCH){
+      const batch = top20.slice(b, b + CANDLE_BATCH);
+      updateScanProgress(`Step 4/5: Candles ${b+1}–${Math.min(b+CANDLE_BATCH, top20.length)}/20...`);
+      const results = await Promise.allSettled(
+        batch.map(inst => fetchCandles(inst.key, from60, today).then(candles => ({ inst, candles })))
+      );
+      for(const res of results){
+        if(res.status !== "fulfilled") { lg(`Candle batch error: ${res.reason}`, "w"); continue; }
+        const { inst, candles } = res.value;
         if(candles.length >= 5){
-          const closes = candles.map(c=>+c[4]).reverse();
-          const rc     = candles.slice(0,20);
+          const closes   = candles.map(c=>+c[4]).reverse();
+          const rc       = candles.slice(0, 20);
           const avgVol20 = rc.reduce((s,x)=>s+(+x[5]||0),0) / Math.max(1,rc.length);
-          const sr    = calcSR(candles);
-          const vwap  = calcVWAP(candles);
           tech[inst.s] = {
             rsi:      calcRSI(closes),
             macdBull: closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null,
@@ -3626,13 +3636,13 @@ async function triggerScan(){
             a200:     isAboveMA(closes,200),
             atr:      calcATR(candles),
             patterns: detectPatterns(candles),
-            avgVol20, sr, vwap
+            avgVol20, sr: calcSR(candles), vwap: calcVWAP(candles)
           };
           candleOK++;
         }
-      }catch(e){ lg(`Candle ${inst.s}: ${e.message}`,"w"); }
+      }
     }
-    lg(`✅ Candle data: ${candleOK}/${Math.min(20,byVol.length)} stocks`,"o");
+    lg(`✅ Candle data: ${candleOK}/${top20.length} stocks (parallel batches)`, "o");
 
     // ── STEP 5: Analysis ──
     updateScanProgress("Step 5/5: Calculating scores...");

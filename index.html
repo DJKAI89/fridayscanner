@@ -695,7 +695,8 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="text" placeholder="ghp_xxxxxxxxxxxx"></div>
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
-    <button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII Data</button>
+    <div class="set-row"><div><div class="set-lbl">FII/DII Repo Name</div><div class="set-sub">Repo running the FII/DII GitHub Action (e.g. fii-dii)</div></div><input class="set-inp" id="s-fii-repo" type="text" placeholder="fii-dii"></div>
+    <button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII from NSE</button>
     <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn btn-g" style="flex:1;font-size:11px" onclick="saveGitHubSettings()">💾 Save GitHub Settings</button>
@@ -1183,13 +1184,16 @@ async function fetchAndShowUserProfile(){
 // ════════════════════════════════════════════════════════════════
 
 // ── GitHub credentials (loaded from localStorage) ──
-let GH = { token:"", user:"", repo:"" };
+let GH = { token:"", user:"", repo:"", fiiRepo:"fii-dii" };
 let FII_DATA = null; // cached FII/DII data for the session
 
 function loadGHSettings(){
   GH.token = localStorage.getItem("friday_gh_token") || "";
   GH.user  = localStorage.getItem("friday_gh_user")  || "";
   GH.repo    = localStorage.getItem("friday_gh_repo")    || "";
+  GH.fiiRepo = localStorage.getItem("friday_fii_repo")   || "fii-dii";
+  const ui_fr = document.getElementById("s-fii-repo");
+  if(ui_fr) ui_fr.value = GH.fiiRepo;
   const ui_t = document.getElementById("s-gh-token");
   const ui_u = document.getElementById("s-gh-user");
   const ui_r = document.getElementById("s-gh-repo");
@@ -1246,7 +1250,9 @@ function saveGitHubSettings(){
   GH.repo  = repo;
   localStorage.setItem("friday_gh_token", GH.token);
   localStorage.setItem("friday_gh_user",  GH.user);
+  GH.fiiRepo = (document.getElementById("s-fii-repo")?.value||"").trim() || "fii-dii";
   localStorage.setItem("friday_gh_repo",  GH.repo);
+  localStorage.setItem("friday_fii_repo", GH.fiiRepo);
   const el = document.getElementById("gh-status");
   el.textContent = `✅ Saved — ${user}/${repo}. Click Test Connection to verify.`;
   el.style.color = "#16a34a";
@@ -1463,6 +1469,110 @@ async function ghWriteFIIDII(data, sha){
   }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
 }
 
+// ── Fetch live FII/DII from NSE — multi-proxy with fallback ──
+async function fetchFIIDIIFromNSE(){
+  const NSE_CASH = "https://www.nseindia.com/api/fiidiiTradeReact";
+  const NSE_FNO  = "https://www.nseindia.com/api/fiiDerivativeTradeReact";
+  const HEADERS  = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com/"
+  };
+
+  // Try multiple CORS proxies in order — NSE blocks many, so we cycle through
+  const PROXIES = [
+    (url) => "https://corsproxy.io/?" + encodeURIComponent(url),
+    (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+    (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
+  ];
+
+  async function fetchWithProxyFallback(targetUrl) {
+    for (let i = 0; i < PROXIES.length; i++) {
+      const proxyUrl = PROXIES[i](targetUrl);
+      try {
+        if (i === 0) {
+          // Seed NSE session cookie via same proxy (best effort)
+          try { await fetch(PROXIES[i]("https://www.nseindia.com"), { headers: HEADERS }); } catch(e) {}
+        }
+        const resp = await fetch(proxyUrl, { headers: HEADERS });
+        if (resp.ok) {
+          const text = await resp.text();
+          if (!text || text.trim().startsWith("<")) {
+            lg("FII/DII proxy " + (i+1) + " returned HTML — trying next", "w");
+            continue;
+          }
+          return JSON.parse(text);
+        }
+        lg("FII/DII proxy " + (i+1) + " failed HTTP " + resp.status + " — trying next", "w");
+      } catch(e) {
+        lg("FII/DII proxy " + (i+1) + " error: " + e.message + " — trying next", "w");
+      }
+      if (i < PROXIES.length - 1) await sleep(800);
+    }
+    throw new Error("All CORS proxies failed for NSE FII/DII");
+  }
+
+  // Fetch cash market data (required)
+  const cashRaw = await fetchWithProxyFallback(NSE_CASH);
+
+  const result = {
+    date: "", fetched_at: new Date().toISOString(),
+    fii_buy:0, fii_sell:0, fii_net:0,
+    dii_buy:0, dii_sell:0, dii_net:0,
+    fii_idx_fut_long:0, fii_idx_fut_short:0,
+    fii_idx_call_long:0, fii_idx_call_short:0,
+    fii_idx_put_long:0,  fii_idx_put_short:0,
+  };
+
+  // Parse cash market
+  const rows = Array.isArray(cashRaw) ? cashRaw : (cashRaw.data || []);
+  for(const row of rows){
+    const cat = (row.category||row.clientType||"").toUpperCase();
+    if(cat.includes("FII")||cat.includes("FPI")){
+      result.fii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
+      result.fii_sell = parseFloat(row.sellValue || row.sell_value || 0);
+      result.fii_net  = parseFloat(row.netValue  || row.net_value  || 0);
+      result.date     = row.date || "";
+    } else if(cat.includes("DII")){
+      result.dii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
+      result.dii_sell = parseFloat(row.sellValue || row.sell_value || 0);
+      result.dii_net  = parseFloat(row.netValue  || row.net_value  || 0);
+    }
+  }
+
+  // Fetch F&O derivatives data (best effort, same proxy fallback)
+  try{
+    await sleep(1200);
+    const fnoRaw = await fetchWithProxyFallback(NSE_FNO);
+    if(fnoRaw){
+      const fnoRows = Array.isArray(fnoRaw) ? fnoRaw : (fnoRaw.data || fnoRaw.FIIData || []);
+      const gv = (row, ...keys) => {
+        for(const k of keys){
+          const v = row[k];
+          if(v!=null && v!="" && v!="0" && v!="-"){
+            const n = parseFloat(String(v).replace(/,/g,""));
+            if(!isNaN(n) && n!==0) return n;
+          }
+        }
+        return 0;
+      };
+      for(const row of fnoRows){
+        const cat = (row.clientType||row.category||row.participant||"").toUpperCase();
+        if(cat.includes("FII")||cat.includes("FPI")||cat.includes("FOREIGN")){
+          result.fii_idx_fut_long   = gv(row,"futureIndexLong","indexFutLong","futIdxLong");
+          result.fii_idx_fut_short  = gv(row,"futureIndexShort","indexFutShort","futIdxShort");
+          result.fii_idx_call_long  = gv(row,"optionIndexCallLong","idxCallLong","callLong");
+          result.fii_idx_call_short = gv(row,"optionIndexCallShort","idxCallShort","callShort");
+          result.fii_idx_put_long   = gv(row,"optionIndexPutLong","idxPutLong","putLong");
+          result.fii_idx_put_short  = gv(row,"optionIndexPutShort","idxPutShort","putShort");
+        }
+      }
+    }
+  }catch(e){ lg("FII F&O fetch (optional): "+e.message,"w"); }
+
+  return result;
+}
+
 // ── Interpret FII/DII data → bias score and label ──
 function interpretFIIDII(d){
   if(!d) return { bias:0, label:"No Data", color:"#94a3b8", fiiLabel:"—", diiLabel:"—", detail:"" };
@@ -1470,7 +1580,8 @@ function interpretFIIDII(d){
   const fiiNet = d.fii_net || 0;
   const diiNet = d.dii_net || 0;
 
-  // Cash market bias (-10 to +10)
+  // ── Cash market bias (-10 to +10) ──
+  // FII is the primary driver; DII absorption partially offsets
   let cashBias = 0;
   if(fiiNet >  4000) cashBias = +10;
   else if(fiiNet >  2000) cashBias = +7;
@@ -1480,10 +1591,11 @@ function interpretFIIDII(d){
   else if(fiiNet > -4000) cashBias = -7;
   else                    cashBias = -10;
 
-  if(fiiNet < -1000 && diiNet > 1000) cashBias = Math.min(cashBias + 3, 0);
-  if(fiiNet > 1000  && diiNet < -500) cashBias = Math.max(cashBias - 2, 0);
+  // DII absorbing FII selling = partially bullish offset
+  if(fiiNet < -1000 && diiNet > 1000) cashBias = Math.min(cashBias + 3, 0); // DII support
+  if(fiiNet > 1000  && diiNet < -500) cashBias = Math.max(cashBias - 2, 0); // DII distributing
 
-  // Futures positioning bias (-5 to +5)
+  // ── Futures positioning bias (-5 to +5) ──
   let futBias = 0;
   const futLong  = d.fii_idx_fut_long  || 0;
   const futShort = d.fii_idx_fut_short || 0;
@@ -1496,7 +1608,8 @@ function interpretFIIDII(d){
     else                  futBias = -5;
   }
 
-  // Options positioning bias (-5 to +5)
+  // ── Options positioning bias (-5 to +5) ──
+  // FII buying calls or selling puts = bullish
   let optBias = 0;
   const callLong  = d.fii_idx_call_long  || 0;
   const callShort = d.fii_idx_call_short || 0;
@@ -1511,14 +1624,15 @@ function interpretFIIDII(d){
     else if(bearPos > bullPos * 1.1) optBias = -2;
   }
 
-  const totalBias = cashBias + futBias + optBias;
+  const totalBias = cashBias + futBias + optBias; // range -20 to +20
 
+  // Labels
   let label, color;
   if(totalBias >=  8){ label="STRONG BUY";  color="#16a34a"; }
   else if(totalBias >=  3){ label="FII BUYING"; color="#22c55e"; }
-  else if(totalBias >= -2){ label="NEUTRAL";    color="#d97706"; }
-  else if(totalBias >= -7){ label="FII SELLING";color="#f97316"; }
-  else                    { label="HEAVY SELL"; color="#dc2626"; }
+  else if(totalBias >=  -2){ label="NEUTRAL";   color="#d97706"; }
+  else if(totalBias >=  -7){ label="FII SELLING";color="#f97316"; }
+  else                     { label="HEAVY SELL"; color="#dc2626"; }
 
   const crFmt = v => v >= 0 ? "+₹"+Math.abs(v).toFixed(0)+" Cr" : "-₹"+Math.abs(v).toFixed(0)+" Cr";
   const fiiLabel = crFmt(fiiNet);
@@ -1530,54 +1644,89 @@ function interpretFIIDII(d){
            longPct: (futLong+futShort>0) ? Math.round(futLong/(futLong+futShort)*100) : null };
 }
 
-// ── Load FII/DII on boot — read from GitHub repo (written by GH Action) ──
+// ── Load FII/DII on boot: read from GitHub, refresh if stale (>4hr old) ──
 async function loadFIIDII(){
   if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }
   try{
-    const { data } = await ghReadFIIDII();
-    if(!data){
-      lg("FII/DII: fii-dii/latest.json not found — run the GitHub Actions workflow once","w");
-      return;
+    const { data, sha } = await ghReadFIIDII();
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+
+    // Check if stored data is from today
+    const storedDate = data?.date ? new Date(data.date).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}) : null;
+    const isToday = storedDate === istDate;
+    const fetchedAt = data?.fetched_at ? new Date(data.fetched_at) : null;
+    const ageHrs = fetchedAt ? (Date.now() - fetchedAt.getTime()) / 3600000 : 99;
+
+    if(data && isToday && ageHrs < 5){
+      // Fresh enough — use cached
+      FII_DATA = data;
+      lg(`FII/DII: loaded from GitHub (${data.date}, FII ${data.fii_net >= 0 ? "+" : ""}${data.fii_net?.toFixed(0)} Cr)`,"o");
+      renderFIIWidget();
+    } else {
+      // Stale or missing — fetch fresh from NSE
+      lg("FII/DII: fetching fresh from NSE...","o");
+      await refreshFIIDII();
     }
-    FII_DATA = data;
-    renderFIIWidget();
-    lg(`FII/DII loaded: ${data.date} · FII ${data.fii_net>=0?"+":""}${(data.fii_net||0).toFixed(0)} Cr · DII ${(data.dii_net||0).toFixed(0)} Cr`,"o");
   }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
 }
 
-// ── Manual refresh — re-read from GitHub repo ──
+// ── Fetch fresh from NSE and save to GitHub ──
 async function refreshFIIDII(){
-  if(!GH.token||!GH.user||!GH.repo){
-    showToast("❌ Configure GitHub settings first.", "#dc2626", 5000);
-    return;
-  }
-  showToast("📊 Reading FII/DII from GitHub...", "#0ea5e9", 5000);
   try{
-    const { data } = await ghReadFIIDII();
-    if(!data){
-      showToast("⚠️ FII/DII file not found. Run the GitHub Actions workflow in your ScannerFile repo.", "#d97706", 9000);
-      const st = document.getElementById("fii-status");
-      if(st) st.innerHTML = `<span style='color:#d97706'>⚠️ <b>fii-dii/latest.json</b> not found.<br>Go to your <b>ScannerFile</b> repo → Actions → <b>Fetch NSE FII/DII Data Daily</b> → Run workflow.</span>`;
-      return;
+    showToast("📊 Fetching FII/DII from NSE...", "#0ea5e9", 10000);
+
+    let fresh = null;
+    let fromCache = false;
+
+    // Try live NSE fetch first
+    try{
+      fresh = await fetchFIIDIIFromNSE();
+    }catch(liveErr){
+      lg("refreshFIIDII live fetch failed: " + liveErr.message + " — trying GitHub cache", "w");
+
+      // Fall back to last saved GitHub data
+      try{
+        const cached = await ghReadFIIDII();
+        if(cached?.data){
+          fresh = cached.data;
+          fromCache = true;
+          lg("FII/DII: loaded from GitHub cache (date: " + (fresh.date||"?") + ")", "o");
+        }
+      }catch(cacheErr){
+        lg("FII/DII cache read also failed: " + cacheErr.message, "w");
+      }
+
+      if(!fresh) throw new Error(liveErr.message); // nothing worked
     }
-    FII_DATA = data;
+
+    FII_DATA = fresh;
     renderFIIWidget();
-    const age = data.fetched_at ? Math.round((Date.now()-new Date(data.fetched_at))/3600000) : "?";
-    showToast(
-      `📊 FII ${data.fii_net>=0?"+":""}${(data.fii_net||0).toFixed(0)} Cr · DII ${data.dii_net>=0?"+":""}${(data.dii_net||0).toFixed(0)} Cr · ${data.date}`,
-      "#16a34a", 7000
-    );
-    lg(`FII/DII refreshed: ${data.date}, ${age}h ago`,"o");
-    const st = document.getElementById("fii-status");
-    if(st){
-      const {label,color,fiiLabel,diiLabel} = interpretFIIDII(data);
-      st.innerHTML = `<span style="color:${color};font-weight:700">${label}</span> · FII ${fiiLabel} · DII ${diiLabel} · ${data.date} · fetched ${age}h ago`;
+
+    if(fromCache){
+      const age = fresh.fetched_at ? Math.round((Date.now()-new Date(fresh.fetched_at))/3600000) : "?";
+      showToast("⚠️ NSE unreachable — showing cached data (" + age + "h old)", "#d97706", 7000);
+    } else {
+      // Save fresh data to GitHub for next time
+      try{
+        const { sha } = await ghReadFIIDII();
+        const ok = await ghWriteFIIDII(fresh, sha);
+        lg("FII/DII: saved to GitHub: " + ok, "o");
+      }catch(saveErr){
+        lg("FII/DII GitHub save failed: " + saveErr.message, "w");
+      }
+      const fiiNet = (fresh.fii_net||0).toFixed(0);
+      const diiNet = (fresh.dii_net||0).toFixed(0);
+      showToast(
+        "📊 FII/DII live: FII " + (fresh.fii_net>=0?"+":"") + fiiNet + " Cr · DII " + (fresh.dii_net>=0?"+":"") + diiNet + " Cr",
+        "#16a34a"
+      );
     }
   }catch(e){
     lg("refreshFIIDII: "+e.message,"e");
-    showToast("❌ FII/DII read failed: "+e.message, "#dc2626", 7000);
+    showToast("❌ FII/DII unavailable — NSE blocked all proxies. Try again later.", "#dc2626", 8000);
+    // Update status text in settings
     const st = document.getElementById("fii-status");
-    if(st) st.innerHTML = `<span style='color:#dc2626'>❌ ${e.message}</span>`;
+    if(st) st.innerHTML = "<span style='color:#dc2626'>❌ NSE unreachable — " + e.message + "</span>";
   }
 }
 
@@ -1605,6 +1754,67 @@ function renderFIIWidget(){
     const age = FII_DATA.fetched_at ? Math.round((Date.now()-new Date(FII_DATA.fetched_at))/3600000) : "?";
     st.innerHTML = `<span style="color:${color};font-weight:700">${label}</span> · FII ${fiiLabel} · DII ${diiLabel} · ${FII_DATA.date} · fetched ${age}h ago`;
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// OUTCOME-BASED CONFIDENCE CALIBRATION
+// Reads closed signal log → computes actual win rate per band
+// Applied as a calibration multiplier to future confidence scores
+// ══════════════════════════════════════════════════════════════
+let CONF_CALIBRATION = null; // loaded from signal log on boot
+
+async function loadConfCalibration(){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  try{
+    const { signals } = await ghReadLog();
+    if(!signals||!signals.length) return;
+    const closed = signals.filter(s=>s.status==="TARGET_HIT"||s.status==="SL_HIT");
+    if(closed.length < 10){ lg("Calibration: need 10+ closed signals, have "+closed.length,"w"); return; }
+
+    // Compute win rate per confidence band (10-pt buckets)
+    const bands = {};
+    for(const s of closed){
+      const bucket = Math.floor((s.confidence||50)/10)*10; // 50,60,70,80,90
+      if(!bands[bucket]) bands[bucket]={hits:0,total:0};
+      bands[bucket].total++;
+      if(s.status==="TARGET_HIT") bands[bucket].hits++;
+    }
+
+    // Expected win rate for each band (naive prior: conf% = win%)
+    // Calibration factor = actual / expected
+    // If 70% conf band actually wins 80% → factor=1.14 (boost future scores in this band)
+    const calibration = {};
+    for(const [band, data] of Object.entries(bands)){
+      if(data.total < 3) continue; // too few samples
+      const b = parseInt(band);
+      const actualWR  = data.hits / data.total;
+      const expectedWR= b / 100;
+      // Cap adjustment: max ±15 confidence points equivalent
+      const rawAdj = Math.round((actualWR - expectedWR) * 100);
+      calibration[b] = {
+        adj: Math.max(-15, Math.min(15, rawAdj)),
+        hits: data.hits,
+        total: data.total,
+        winRate: Math.round(actualWR*100)
+      };
+    }
+    CONF_CALIBRATION = calibration;
+    const bands_summary = Object.entries(calibration)
+      .map(([b,d])=>`${b}%band:${d.winRate}%WR(${d.total}sig)`)
+      .join(" · ");
+    lg("Calibration loaded: "+bands_summary,"o");
+  }catch(e){ lg("loadConfCalibration: "+e.message,"w"); }
+}
+
+// Apply calibration to a raw confidence score
+function applyCalibration(rawConf, signalType="STOCK"){
+  if(!CONF_CALIBRATION) return rawConf;
+  // Find the band this score falls into
+  const bucket = Math.floor(rawConf/10)*10;
+  const cal = CONF_CALIBRATION[bucket] || CONF_CALIBRATION[bucket-10] || null;
+  if(!cal || cal.total < 5) return rawConf; // not enough data for this band
+  return Math.min(99, Math.max(1, rawConf + cal.adj));
 }
 
 // ── Apply FII bias to signal confidence ──
@@ -2119,6 +2329,8 @@ function boot(){
   startTimers();
   // Load FII/DII data (reads from GitHub, refreshes from NSE if stale)
   setTimeout(()=>loadFIIDII(), 2000);
+  // Load outcome-based confidence calibration from signal history
+  setTimeout(()=>loadConfCalibration(), 3000);
   // Load cached name instantly, then refresh from API
   const _cachedName = localStorage.getItem("friday_user_name");
   const _cachedId   = localStorage.getItem("friday_user_id");
@@ -2606,6 +2818,178 @@ function calcATR(candles){
   }
   return trs.reduce((a,b)=>a+b,0)/14;
 }
+
+// ══════════════════════════════════════════════════════════════
+// REAL MACD — signal line + histogram + crossover
+// closes: oldest→newest array
+// Returns { macdLine, signalLine, histogram, bullCross, bearCross, bullish }
+// ══════════════════════════════════════════════════════════════
+function calcMACD(closes){
+  if(closes.length < 35) return null;
+  // Build MACD line values for last N candles (need 9 for signal EMA)
+  const macdArr = [];
+  // We need EMA12 and EMA26 at each point — compute rolling
+  const k12 = 2/13, k26 = 2/27;
+  let ema12 = closes.slice(0,12).reduce((a,b)=>a+b,0)/12;
+  let ema26 = closes.slice(0,26).reduce((a,b)=>a+b,0)/26;
+  for(let i=12; i<26; i++) ema12 = closes[i]*k12 + ema12*(1-k12);
+  // Now we have ema26 at i=25, build macd from i=25 onward
+  for(let i=26; i<closes.length; i++){
+    ema12 = closes[i]*k12 + ema12*(1-k12);
+    ema26 = closes[i]*k26 + ema26*(1-k26);
+    macdArr.push(+(ema12 - ema26).toFixed(4));
+  }
+  if(macdArr.length < 9) return null;
+  // Signal line = 9-EMA of MACD array
+  const ks = 2/10;
+  let sig = macdArr.slice(0,9).reduce((a,b)=>a+b,0)/9;
+  for(let i=9; i<macdArr.length; i++) sig = macdArr[i]*ks + sig*(1-ks);
+  const prev_macd = macdArr[macdArr.length-2];
+  const curr_macd = macdArr[macdArr.length-1];
+  // Signal line 1 bar ago
+  let sig_prev = macdArr.slice(0,9).reduce((a,b)=>a+b,0)/9;
+  for(let i=9; i<macdArr.length-1; i++) sig_prev = macdArr[i]*ks + sig_prev*(1-ks);
+  const hist     = +(curr_macd - sig).toFixed(4);
+  const hist_prev= +(prev_macd - sig_prev).toFixed(4);
+  const bullCross = prev_macd < sig_prev && curr_macd > sig;  // MACD crossed above signal
+  const bearCross = prev_macd > sig_prev && curr_macd < sig;  // MACD crossed below signal
+  const histRising= hist > hist_prev;                          // histogram growing
+  return {
+    macdLine: +curr_macd.toFixed(4),
+    signalLine: +sig.toFixed(4),
+    histogram: hist,
+    histRising,
+    bullCross,   // fresh bullish crossover
+    bearCross,   // fresh bearish crossover
+    bullish: curr_macd > sig,   // above signal line
+    aboveZero: curr_macd > 0,   // above zero line
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// BOLLINGER BANDS — 20-period, 2 SD
+// Returns { upper, middle, lower, bandwidth, squeeze, percentB }
+// ══════════════════════════════════════════════════════════════
+function calcBollinger(closes, period=20, mult=2){
+  if(closes.length < period) return null;
+  const slice = closes.slice(-period);
+  const mid   = slice.reduce((a,b)=>a+b,0)/period;
+  const variance = slice.reduce((s,x)=>s+(x-mid)**2,0)/period;
+  const sd    = Math.sqrt(variance);
+  const upper = +(mid + mult*sd).toFixed(2);
+  const lower = +(mid - mult*sd).toFixed(2);
+  const bw    = mid > 0 ? +((upper-lower)/mid*100).toFixed(2) : 0; // bandwidth %
+  const ltp   = closes[closes.length-1];
+  // %B: where price is within the bands (0=lower, 1=upper, 0.5=mid)
+  const pctB  = (upper-lower) > 0 ? +((ltp-lower)/(upper-lower)).toFixed(3) : 0.5;
+  // Squeeze: bandwidth in bottom 20% of its 50-bar range
+  let squeeze = false;
+  if(closes.length >= period+30){
+    const bwHistory = [];
+    for(let i=period; i<=closes.length-1; i++){
+      const sl2=closes.slice(i-period,i);
+      const m2=sl2.reduce((a,b)=>a+b,0)/period;
+      const v2=sl2.reduce((s,x)=>s+(x-m2)**2,0)/period;
+      const s2=Math.sqrt(v2);
+      bwHistory.push(m2>0?(m2+2*s2-(m2-2*s2))/m2*100:0);
+    }
+    const minBW=Math.min(...bwHistory), maxBW=Math.max(...bwHistory);
+    squeeze = bw < minBW + (maxBW-minBW)*0.2;
+  }
+  return { upper, middle: +mid.toFixed(2), lower, bandwidth: bw, squeeze, percentB: pctB };
+}
+
+// ══════════════════════════════════════════════════════════════
+// ADX — Average Directional Index (14-period)
+// Returns { adx, plusDI, minusDI, trending, bullTrend, bearTrend }
+// candles: newest-first [ts,o,h,l,c,v]
+// ══════════════════════════════════════════════════════════════
+function calcADX(candles, period=14){
+  if(candles.length < period+2) return null;
+  // Need oldest-first for calculation
+  const c = [...candles].reverse();
+  const trArr=[], plusDMArr=[], minusDMArr=[];
+  for(let i=1; i<c.length; i++){
+    const h=+c[i][2], l=+c[i][3], ph=+c[i-1][2], pl=+c[i-1][3], pc=+c[i-1][4];
+    const tr = Math.max(h-l, Math.abs(h-pc), Math.abs(l-pc));
+    const upMove   = h - ph;
+    const downMove = pl - l;
+    trArr.push(tr);
+    plusDMArr.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDMArr.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+  // Wilder smoothing
+  const wilder = (arr, p) => {
+    let sum = arr.slice(0,p).reduce((a,b)=>a+b,0);
+    const result = [sum];
+    for(let i=p; i<arr.length; i++){ sum = sum - sum/p + arr[i]; result.push(sum); }
+    return result;
+  };
+  const atr14    = wilder(trArr,    period);
+  const plusDM14 = wilder(plusDMArr,  period);
+  const minusDM14= wilder(minusDMArr, period);
+  const dxArr = [];
+  for(let i=0; i<atr14.length; i++){
+    const pdi = atr14[i]>0 ? 100*plusDM14[i]/atr14[i] : 0;
+    const mdi = atr14[i]>0 ? 100*minusDM14[i]/atr14[i] : 0;
+    dxArr.push((pdi+mdi)>0 ? 100*Math.abs(pdi-mdi)/(pdi+mdi) : 0);
+  }
+  // ADX = Wilder MA of DX
+  const adxArr = wilder(dxArr, period);
+  const adx    = +adxArr[adxArr.length-1].toFixed(1);
+  const lastI  = atr14.length-1;
+  const plusDI = atr14[lastI]>0 ? +(100*plusDM14[lastI]/atr14[lastI]).toFixed(1) : 0;
+  const minusDI= atr14[lastI]>0 ? +(100*minusDM14[lastI]/atr14[lastI]).toFixed(1) : 0;
+  return {
+    adx,
+    plusDI,
+    minusDI,
+    trending:   adx >= 25,         // strong trend
+    weakTrend:  adx >= 15 && adx < 25,
+    bullTrend:  adx >= 25 && plusDI > minusDI,
+    bearTrend:  adx >= 25 && minusDI > plusDI,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+// VWAP BANDS — VWAP ± 1SD, 2SD (daily candles)
+// Returns { vwap, upper1, lower1, upper2, lower2, position }
+// ══════════════════════════════════════════════════════════════
+function calcVWAPBands(candles){
+  const recent = candles.slice(0,20);
+  let sumPV=0, sumV=0, sumPV2=0;
+  const tpArr=[];
+  for(const c of recent){
+    const tp=(+c[2]+ +c[3]+ +c[4])/3;
+    const v=+c[5]||1;
+    sumPV+=tp*v; sumV+=v; tpArr.push({tp,v});
+  }
+  if(sumV===0) return null;
+  const vwap=sumPV/sumV;
+  // Variance weighted by volume
+  for(const {tp,v} of tpArr) sumPV2+=(tp-vwap)**2*v;
+  const sd=Math.sqrt(sumPV2/sumV);
+  const ltp=+candles[0][4];
+  let position;
+  if(ltp>vwap+sd*2)      position="FAR_ABOVE";
+  else if(ltp>vwap+sd)   position="ABOVE_1SD";
+  else if(ltp>vwap)      position="ABOVE_VWAP";
+  else if(ltp>vwap-sd)   position="BELOW_VWAP";
+  else if(ltp>vwap-sd*2) position="BELOW_1SD";
+  else                    position="FAR_BELOW";
+  return {
+    vwap:   +vwap.toFixed(2),
+    upper1: +(vwap+sd).toFixed(2),
+    upper2: +(vwap+sd*2).toFixed(2),
+    lower1: +(vwap-sd).toFixed(2),
+    lower2: +(vwap-sd*2).toFixed(2),
+    sd:     +sd.toFixed(2),
+    position,
+    // Mean reversion: price near lower band = buying opportunity
+    nearLowerBand: ltp <= vwap-sd*0.8 && ltp >= vwap-sd*2.2,
+  };
+}
+
 function isAboveMA(closes,p){if(closes.length<p)return null;return closes[closes.length-1]>closes.slice(-p).reduce((a,b)=>a+b,0)/p;}
 // PRO_CandlePatternRecognizer.cs — EXACT PORT
 // candles: Upstox format [timestamp,open,high,low,close,volume], newest first
@@ -2709,16 +3093,22 @@ function countIndicators(rsi, macdBull, a50, a200, vol, avgVol, nearSupp, patter
   const volOk = avgVol > 0 && vol > 0 && avgVol !== vol ? (vol >= avgVol * 1.2) : null;
   return countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec);
 }
-function countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec) {
+function countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec, macdObj, bbObj, adxObj) {
   const isBuy = rec === "BUY" || rec === "STRONG BUY" || rec === "MODERATE";
   let count = 0;
-  if (rsi !== null && rsi !== undefined && rsi >= 40 && rsi <= 70) count++; // RSI 40-70
-  if (macdBull === true && isBuy)                                    count++; // MACD bullish
-  if (a50 === true && isBuy)                                         count++; // Above 50MA
-  if (a200 === true && isBuy)                                        count++; // Above 200MA
-  if (volOk === true)                                                count++; // Volume >1.2x avg
-  if (nearSupp && isBuy)                                             count++; // Near support
+  if (rsi !== null && rsi !== undefined && rsi >= 40 && rsi <= 70) count++; // RSI in healthy range
+  // MACD: count fresh crossover as full indicator; bullish-only as half (handled in confidence)
+  if (macdObj?.bullCross && isBuy)       count++;   // fresh bullish crossover = strong signal
+  else if (macdBull === true && isBuy)   count++;   // above signal line
+  if (a50 === true && isBuy)             count++;   // Above 50MA
+  if (a200 === true && isBuy)            count++;   // Above 200MA
+  if (volOk === true)                    count++;   // Volume >1.2x avg
+  if (nearSupp && isBuy)                 count++;   // Near support
   if (patterns && (patterns.bullishEngulfing||patterns.hammer||patterns.morningStar)) count++;
+  // Bollinger lower band touch = mean reversion setup (bonus indicator)
+  if (bbObj?.nearLowerBand && isBuy)     count++;
+  // ADX trending bull = strong trend confirmation
+  if (adxObj?.bullTrend && isBuy)        count++;
   return count;
 }
 
@@ -3840,14 +4230,23 @@ async function triggerScan(){
           const closes   = candles.map(c=>+c[4]).reverse();
           const rc       = candles.slice(0, 20);
           const avgVol20 = rc.reduce((s,x)=>s+(+x[5]||0),0) / Math.max(1,rc.length);
+          const _macd = calcMACD(closes);
+          const _bb   = calcBollinger(closes);
+          const _adx  = calcADX(candles);
+          const _vwapB= calcVWAPBands(candles);
           tech[inst.s] = {
-            rsi:      calcRSI(closes),
-            macdBull: closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null,
-            a50:      isAboveMA(closes,50),
-            a200:     isAboveMA(closes,200),
-            atr:      calcATR(candles),
-            patterns: detectPatterns(candles),
-            avgVol20, sr: calcSR(candles), vwap: calcVWAP(candles)
+            rsi:        calcRSI(closes),
+            // Real MACD: bullish = above signal line; extra bonus for fresh crossover
+            macdBull:   _macd ? _macd.bullish : (closes.length>=35 ? (calcEMA(closes,12)-calcEMA(closes,26))>0 : null),
+            macd:       _macd,
+            bb:         _bb,
+            adx:        _adx,
+            vwapBands:  _vwapB,
+            a50:        isAboveMA(closes,50),
+            a200:       isAboveMA(closes,200),
+            atr:        calcATR(candles),
+            patterns:   detectPatterns(candles),
+            avgVol20,   sr: calcSR(candles), vwap: calcVWAP(candles)
           };
           candleOK++;
         }
@@ -3910,12 +4309,40 @@ async function triggerScan(){
       // Delivery % boost — high delivery = institutional conviction
       const delivBoost = delivPct!=null ? (delivPct>=60 ? 1 : delivPct<=25 ? -1 : 0) : 0;
 
-      const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec);
+      const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec, t.macd, t.bb, t.adx);
       let conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
+
+      // ── MACD enhancements ──
+      if(t.macd){
+        if(t.macd.bullCross)      conf = Math.min(99, conf + 6);  // fresh crossover = high conviction
+        if(t.macd.histRising && t.macd.bullish) conf = Math.min(99, conf + 3); // momentum building
+        if(t.macd.bearCross)      conf = Math.max(1,  conf - 8);  // crossover against us
+      }
+      // ── Bollinger Band enhancements ──
+      if(t.bb){
+        if(t.bb.squeeze)          conf = Math.min(99, conf + 5);  // squeeze before breakout
+        if(t.bb.nearLowerBand)    conf = Math.min(99, conf + 4);  // mean reversion setup
+        if(t.bb.percentB > 1.0)   conf = Math.max(1,  conf - 5);  // extended above upper band
+      }
+      // ── ADX enhancements ──
+      if(t.adx){
+        if(t.adx.bullTrend)       conf = Math.min(99, conf + 5);  // strong uptrend confirmed
+        if(t.adx.bearTrend)       conf = Math.max(1,  conf - 6);  // strong downtrend = avoid
+        if(!t.adx.trending && !t.adx.weakTrend) conf = Math.max(1, conf - 3); // choppy market
+      }
+      // ── VWAP band position ──
+      if(t.vwapBands){
+        if(t.vwapBands.nearLowerBand) conf = Math.min(99, conf + 3); // near value area
+        if(t.vwapBands.position==="FAR_ABOVE") conf = Math.max(1, conf - 4); // extended, avoid chasing
+      }
+      // ── Multi-timeframe alignment (placeholder for future 30min check) ──
+
       // Apply delivery % adjustment (±5 pts)
       conf = Math.min(100, Math.max(0, conf + delivBoost*5));
-      // Apply FII/DII institutional flow bias (±8 pts based on FII net flow)
+      // Apply FII/DII institutional flow bias (±8 pts)
       conf = applyFIIBias(conf, preRec==="BUY"||preRec==="STRONG BUY");
+      // Apply outcome-based calibration (adjusts based on historical win rate)
+      conf = applyCalibration(conf, "STOCK");
 
       const risk  = calcRisk(ltp, sl, target, t.atr, vix);
       const pot   = calcPotential(ltp, target, sl, numInds, preRec);
@@ -3928,6 +4355,7 @@ async function triggerScan(){
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
         target, sl, slTargets, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger,
+        macd:t.macd, bb:t.bb, adx:t.adx, vwapBands:t.vwapBands,
         avgVol20: t.avgVol20||0});
       
     }
@@ -3965,6 +4393,40 @@ async function triggerScan(){
       vix, vixTxt, pcr, pcrTxt, sent, sentSc, topSec, picks.length);
     renderStockCards(picks, quoted.length);
     updateTicker(nLtp, nChgPct, bLtp, getChgPct(bQ), sent, sentSc, topSec, vix, pcr);
+    // ── MULTI-TIMEFRAME CONFIRMATION for top picks ──
+    // Fetch 30-min candles for top 5 picks, boost confidence if 30min agrees
+    const topPicks = picks.filter(p=>p.passes).sort((a,b)=>b.conf-a.conf).slice(0,5);
+    if(topPicks.length && isOpen()){
+      const from7d = new Date(Date.now()-10*864e5).toISOString().split("T")[0];
+      await Promise.allSettled(topPicks.map(async p=>{
+        try{
+          const c30 = await fetchCandles(p.key, from7d, today, "30minute");
+          if(c30.length < 8) return;
+          const cl30 = c30.map(c=>+c[4]).reverse();
+          const macd30  = calcMACD(cl30);
+          const adx30   = calcADX(c30);
+          const rsi30   = calcRSI(cl30);
+          const trend30 = cl30[cl30.length-1] > cl30[Math.max(0,cl30.length-8)] ? "UP" : "DOWN";
+
+          let mtfBoost = 0;
+          const isBuy = p.rec==="BUY"||p.rec==="STRONG BUY";
+          if(isBuy){
+            if(trend30==="UP")                           mtfBoost += 4;
+            if(macd30?.bullish)                          mtfBoost += 3;
+            if(macd30?.bullCross)                        mtfBoost += 4; // fresh crossover on 30min!
+            if(adx30?.bullTrend)                         mtfBoost += 3;
+            if(rsi30 && rsi30 >= 45 && rsi30 <= 72)     mtfBoost += 2;
+          }
+          if(mtfBoost > 0){
+            p.conf = Math.min(99, p.conf + mtfBoost);
+            p.mtfBoost = mtfBoost;
+            p.mtfNote  = `30min: ${trend30}${macd30?.bullCross?" · MACD✕":""}${adx30?.bullTrend?" · ADX trend":""}`;
+            lg(`MTF ${p.s}: +${mtfBoost} pts (${p.mtfNote})`,"o");
+          }
+        }catch(e){ lg("MTF "+p.s+": "+e.message,"w"); }
+      }));
+    }
+
     // Log only the picks shown on screen (already filtered by conf/pot/risk/rr)
     if(picks.length){
       const stockSigs = picks.map(p=>({...buildStockSignal(p), vix}));
@@ -3975,7 +4437,8 @@ async function triggerScan(){
     document.getElementById("dash-stocks").style.display = "block";
     setStatus("live","Live");
     scanSecs = CFG.scanStocks*60;
-    lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${pcr}`,"o");
+    const calStr = CONF_CALIBRATION ? `Cal:${Object.keys(CONF_CALIBRATION).length}bands` : "Cal:loading";
+    lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${pcr} | ${calStr}`,"o");
     updateNavBadge("stocks", picks.length+" picks");
     checkAlerts(stocks); // check price/confidence alerts
 
@@ -4118,7 +4581,7 @@ async function loadOptions(force=true){
         const maxPain = calcMaxPain(chain);
         const oiWalls = calcOIWalls(chain);
 
-        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain);
+        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null);
         const _cap=CFG.maxOptCapital>0?CFG.maxOptCapital:Infinity;
         const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf&&p.amtRequired<=_cap);
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
@@ -4170,7 +4633,7 @@ async function loadOptions(force=true){
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
         const stkMaxPain = calcMaxPain(chain);
-        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain);
+        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain,pcr);
         lg(`${inst.s}: ${chain.length} strikes → ${picks.length} signals`,picks.length?"o":"");
         if(picks.length) groups.push({name:inst.s,spot,spotChg,spotPts:spotPts2,pcr,expiry,picks,type:"stock",fullName:inst.n});
       }catch(e){lg(inst.s+" opts: "+e.message,"w");}
@@ -4215,7 +4678,7 @@ async function loadOptions(force=true){
 // optType: "CE"=call, "PE"=put
 // niftyBullish: true=market up, false=market down
 // vix: India VIX level
-function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix, maxPain) {
+function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix, maxPain, stockPCR) {
   const absD = Math.abs(delta);
   const isCE = optType === "CE";
   // Aligned = option direction matches market trend
@@ -4276,13 +4739,23 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
     else if(towardMP && mpDist > 0.5) raw += 3;
   }
 
+  // ── Stock-specific PCR boost (point 6) ──
+  // For stock options: stock's own PCR is more relevant than index PCR
+  if(stockPCR && stockPCR > 0){
+    const isCE_ = optType === "CE";
+    if(isCE_ && stockPCR > 1.2)  raw += 5;  // high put OI = hedging, CE likely to rise
+    if(isCE_ && stockPCR < 0.6)  raw -= 4;  // low put OI = bearish pressure on CE
+    if(!isCE_ && stockPCR < 0.7) raw += 5;  // low PCR = bearish = good for PE
+    if(!isCE_ && stockPCR > 1.3) raw -= 4;  // high PCR = too much hedging = PE at risk
+  }
+
   // Apply direction multiplier — counter-trend signals are significantly discounted
   raw = raw * dirMult;
 
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
 
-function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain) {
+function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain, stockPCR) {
   const picks = [];
   for (const row of chain) {
     const sp = row.strike_price;
@@ -4330,8 +4803,9 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       const maxProfit   = +((tgt - ltp) * lot).toFixed(0);
 
       // Confidence score
-      const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain);
-      const confidence  = applyFIIBias(_rawOptConf, optType==="CE" ? niftyBullish : !niftyBullish);
+      const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain, stockPCR);
+      const _fiiConf    = applyFIIBias(_rawOptConf, optType==="CE" ? niftyBullish : !niftyBullish);
+      const confidence  = applyCalibration(_fiiConf, "OPTION");
 
       // Market-direction-aware action
       const isCE   = optType === "CE";
@@ -4358,6 +4832,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         trendAligned,
         trendDir: niftyBullish ? "BULLISH" : "BEARISH",
         slTgtMethod,
+        stockPCR: stockPCR || null,
       });
     }
   }
@@ -4450,7 +4925,7 @@ function renderStockCards(picks,totalScanned,containerId){
     document.getElementById("stocks-sub").textContent=`Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk<${CFG.risk}% · R:R≥${CFG.rr} · EV>0 · Sorted by Confidence`;
     document.getElementById("stocks-title").textContent=`Professional Picks · ${picks.length} signal${picks.length===1?"":"s"}`;
   }
-  const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern"];
+  const indLbls=["RSI OK","MACD↑","50MA↑","200MA↑","Vol↑","Near Supp","Pattern","BB↓","ADX↑"];
   const filteredPicks=picks;
   document.getElementById(cardContainerId).innerHTML=filteredPicks.length?filteredPicks.map((p,i)=>{
     const rc=RC2[p.rec]||"watch";
@@ -4490,6 +4965,19 @@ function renderStockCards(picks,totalScanned,containerId){
       <div class="c-metrics cm2" style="gap:1px;margin-bottom:6px">
         <div class="cbox neutral"><div class="cb-l">LTP · LIVE</div><div class="cb-v ltp-live ${clr(p.chgPct)}" data-sym="${p.s}">₹${fmt(p.ltp)}</div><div class="cb-s ${clr(p.chgPct)}">${p.chgPct>=0?"▲":"▼"}${Math.abs(p.chgPct).toFixed(2)}%</div></div>
         <div class="cbox neutral"><div class="cb-l">R:R | WIN RATE</div><div class="cb-v am">${p.pot.rr}:1</div><div class="cb-s" style="color:#64748b">Win ~${p.pot.wr}%</div></div>
+      </div>
+      <!-- New indicator badges row: MACD / BB / ADX / MTF -->
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin:5px 0 4px">
+        ${p.macd?.bullCross?`<span style="background:#dcfce7;color:#15803d;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">MACD✕↑</span>`:""}
+        ${p.macd?.bullish&&!p.macd?.bullCross?`<span style="background:#f0fdf4;color:#16a34a;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">MACD↑</span>`:""}
+        ${p.bb?.squeeze?`<span style="background:#eff6ff;color:#1d4ed8;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">BB Squeeze</span>`:""}
+        ${p.bb?.nearLowerBand?`<span style="background:#fefce8;color:#854d0e;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">BB Lower</span>`:""}
+        ${p.adx?.bullTrend?`<span style="background:#fdf4ff;color:#7e22ce;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">ADX ${p.adx?.adx||""}↑</span>`:""}
+        ${p.adx&&!p.adx.trending&&!p.adx.weakTrend?`<span style="background:#f8fafc;color:#94a3b8;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">Choppy</span>`:""}
+        ${p.vwapBands?.nearLowerBand?`<span style="background:#fff7ed;color:#c2410c;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">VWAP Value</span>`:""}
+        ${p.mtfBoost?`<span style="background:#ecfdf5;color:#047857;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">MTF+${p.mtfBoost} ${p.mtfNote||""}</span>`:""}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
       </div>
 
       <!-- ── FEATURE 2: Entry Trigger Price ── -->
@@ -4563,12 +5051,14 @@ function renderStockCards(picks,totalScanned,containerId){
         const isBuy=p.rec==="BUY"||p.rec==="STRONG BUY"||p.rec==="MODERATE";
         const di=[
           p.rsi!=null&&p.rsi>=CFG.rsiOS&&p.rsi<=CFG.rsiOB,
-          p.macdBull===true && isBuy,
+          (p.macd?.bullCross||p.macdBull===true) && isBuy,
           p.a50===true && isBuy,
           p.a200===true && isBuy,
-          p.numInds>=5,  // proxy for vol spike when we have it
+          p.numInds>=5,
           p.nearSupp && isBuy,
-          !!(p.patterns?.bullishEngulfing||p.patterns?.hammer||p.patterns?.morningStar)
+          !!(p.patterns?.bullishEngulfing||p.patterns?.hammer||p.patterns?.morningStar),
+          !!(p.bb?.nearLowerBand) && isBuy,
+          !!(p.adx?.bullTrend) && isBuy
         ];
         return indLbls.map((l,j)=>`<span class="ind ${di[j]?'ok':di[j]===false&&p.rsi!=null?'no':'na'}">${l}</span>`).join("");
       })()}
@@ -4705,6 +5195,12 @@ function optCard(p,i){
       <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.tgt)}</div><div class="ts-s up">+${p.entry>0?((p.tgt-p.entry)/p.entry*100).toFixed(0):0}% · R:R ${p.rr}</div></div>
     </div>
     ${p.slTgtMethod?`<div style="font-size:8px;color:#94a3b8;margin-top:3px;padding:0 2px">📐 ${p.slTgtMethod}</div>`:""}
+    <!-- Stock PCR indicator -->
+    ${p.spot&&p.und?`<div style="font-size:8px;color:#64748b;margin-top:2px">
+      Stock PCR: <span style="font-weight:700;color:${
+        p.stockPCR>1.2?"#16a34a":p.stockPCR<0.7?"#dc2626":"#d97706"
+      }">${p.stockPCR?.toFixed(2)||"—"}</span>
+    </div>`:""}
     <!-- Confidence bar -->
     <div class="bar-row" style="margin-bottom:8px">
       <span class="bar-lbl">Confidence</span>
@@ -5305,7 +5801,7 @@ async function lookupStock(){
         const pcr2    = ceOI>0 ? +(peOI/ceOI).toFixed(2) : 1;
         const maxPain2= calcMaxPain(chain);
         const oiWalls2= calcOIWalls(chain);
-        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix,maxPain2);
+        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix,maxPain2,null);
         const picks   = allPicks.filter(p=>p.confidence>=CFG.minOptConf);
         const mp2dist = maxPain2&&ltp ? ((maxPain2-ltp)/ltp*100).toFixed(1) : null;
 

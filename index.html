@@ -385,6 +385,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
       <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-stocks"></div>
+      <div class="stats-g" id="fii-widget" style="margin-top:-4px"></div>
       <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Loading filters...</span></div>
       <div class="cards-g" id="cards-stocks"></div>
       <div class="disc">⚠ AI-assisted analysis from FRIDAY's professional engine. Not SEBI-registered advice. Always do your own research.</div>
@@ -694,6 +695,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="text" placeholder="ghp_xxxxxxxxxxxx"></div>
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
+    <div class="set-row"><div><div class="set-lbl">FII/DII Repo Name</div><div class="set-sub">Repo running the FII/DII GitHub Action (e.g. fii-dii)</div></div><input class="set-inp" id="s-fii-repo" type="text" placeholder="fii-dii"></div>
+    <button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII from NSE</button>
+    <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn btn-g" style="flex:1;font-size:11px" onclick="saveGitHubSettings()">💾 Save GitHub Settings</button>
       <button class="btn" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="testGitHubConnection()">🔗 Test Connection</button>
@@ -1180,12 +1184,16 @@ async function fetchAndShowUserProfile(){
 // ════════════════════════════════════════════════════════════════
 
 // ── GitHub credentials (loaded from localStorage) ──
-let GH = { token:"", user:"", repo:"" };
+let GH = { token:"", user:"", repo:"", fiiRepo:"fii-dii" };
+let FII_DATA = null; // cached FII/DII data for the session
 
 function loadGHSettings(){
   GH.token = localStorage.getItem("friday_gh_token") || "";
   GH.user  = localStorage.getItem("friday_gh_user")  || "";
-  GH.repo  = localStorage.getItem("friday_gh_repo")  || "";
+  GH.repo    = localStorage.getItem("friday_gh_repo")    || "";
+  GH.fiiRepo = localStorage.getItem("friday_fii_repo")   || "fii-dii";
+  const ui_fr = document.getElementById("s-fii-repo");
+  if(ui_fr) ui_fr.value = GH.fiiRepo;
   const ui_t = document.getElementById("s-gh-token");
   const ui_u = document.getElementById("s-gh-user");
   const ui_r = document.getElementById("s-gh-repo");
@@ -1242,7 +1250,9 @@ function saveGitHubSettings(){
   GH.repo  = repo;
   localStorage.setItem("friday_gh_token", GH.token);
   localStorage.setItem("friday_gh_user",  GH.user);
+  GH.fiiRepo = (document.getElementById("s-fii-repo")?.value||"").trim() || "fii-dii";
   localStorage.setItem("friday_gh_repo",  GH.repo);
+  localStorage.setItem("friday_fii_repo", GH.fiiRepo);
   const el = document.getElementById("gh-status");
   el.textContent = `✅ Saved — ${user}/${repo}. Click Test Connection to verify.`;
   el.style.color = "#16a34a";
@@ -1419,6 +1429,275 @@ async function ghWriteLog(signals, sha, retryCount=0){
     lg("ghWriteLog: failed status "+r.status,"w");
     return false;
   }catch(e){ lg("ghWriteLog: "+e.message,"w"); return false; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// FII / DII DATA — stored in GitHub as fii-dii/latest.json
+// Fetched from NSE via corsproxy, same storage pattern as signal log
+// ══════════════════════════════════════════════════════════════
+
+const FII_FILE = "fii-dii/latest.json";
+
+// ── Read FII/DII data from GitHub ──
+async function ghReadFIIDII(){
+  if(!GH.token||!GH.user||!GH.repo) return { data:null, sha:null };
+  try{
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${FII_FILE}`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404) return { data:null, sha:null };
+    const d = await r.json();
+    const data = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    return { data, sha: d.sha };
+  }catch(e){ lg("ghReadFIIDII: "+e.message,"w"); return { data:null, sha:null }; }
+}
+
+// ── Write FII/DII data to GitHub ──
+async function ghWriteFIIDII(data, sha){
+  if(!GH.token||!GH.user||!GH.repo) return false;
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const body = { message:"FRIDAY FII/DII update · "+data.date, content };
+    if(sha) body.sha = sha;
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${FII_FILE}`,
+      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    return r.ok;
+  }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
+}
+
+// ── Fetch live FII/DII from NSE via corsproxy ──
+async function fetchFIIDIIFromNSE(){
+  const NSE_CASH = "https://www.nseindia.com/api/fiidiiTradeReact";
+  const NSE_FNO  = "https://www.nseindia.com/api/fiiDerivativeTradeReact";
+  const HEADERS  = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com/"
+  };
+
+  // NSE requires a session cookie — seed it first
+  try{
+    await fetch("https://corsproxy.io/?"+encodeURIComponent("https://www.nseindia.com"), { headers: HEADERS });
+  }catch(e){}
+
+  // Fetch cash market data
+  const cashResp = await fetch("https://corsproxy.io/?"+encodeURIComponent(NSE_CASH), { headers: HEADERS });
+  if(!cashResp.ok) throw new Error("NSE cash API: HTTP "+cashResp.status);
+  const cashRaw = await cashResp.json();
+
+  const result = {
+    date: "", fetched_at: new Date().toISOString(),
+    fii_buy:0, fii_sell:0, fii_net:0,
+    dii_buy:0, dii_sell:0, dii_net:0,
+    fii_idx_fut_long:0, fii_idx_fut_short:0,
+    fii_idx_call_long:0, fii_idx_call_short:0,
+    fii_idx_put_long:0,  fii_idx_put_short:0,
+  };
+
+  // Parse cash market
+  const rows = Array.isArray(cashRaw) ? cashRaw : (cashRaw.data || []);
+  for(const row of rows){
+    const cat = (row.category||row.clientType||"").toUpperCase();
+    if(cat.includes("FII")||cat.includes("FPI")){
+      result.fii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
+      result.fii_sell = parseFloat(row.sellValue || row.sell_value || 0);
+      result.fii_net  = parseFloat(row.netValue  || row.net_value  || 0);
+      result.date     = row.date || "";
+    } else if(cat.includes("DII")){
+      result.dii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
+      result.dii_sell = parseFloat(row.sellValue || row.sell_value || 0);
+      result.dii_net  = parseFloat(row.netValue  || row.net_value  || 0);
+    }
+  }
+
+  // Fetch F&O derivatives data (best effort)
+  try{
+    await sleep(1500);
+    const fnoResp = await fetch("https://corsproxy.io/?"+encodeURIComponent(NSE_FNO), { headers: HEADERS });
+    if(fnoResp.ok){
+      const fnoRaw  = await fnoResp.json();
+      const fnoRows = Array.isArray(fnoRaw) ? fnoRaw : (fnoRaw.data || fnoRaw.FIIData || []);
+      const gv = (row, ...keys) => {
+        for(const k of keys){
+          const v = row[k];
+          if(v!=null && v!="" && v!="0" && v!="-"){
+            const n = parseFloat(String(v).replace(/,/g,""));
+            if(!isNaN(n) && n!==0) return n;
+          }
+        }
+        return 0;
+      };
+      for(const row of fnoRows){
+        const cat = (row.clientType||row.category||row.participant||"").toUpperCase();
+        if(cat.includes("FII")||cat.includes("FPI")||cat.includes("FOREIGN")){
+          result.fii_idx_fut_long   = gv(row,"futureIndexLong","indexFutLong","futIdxLong");
+          result.fii_idx_fut_short  = gv(row,"futureIndexShort","indexFutShort","futIdxShort");
+          result.fii_idx_call_long  = gv(row,"optionIndexCallLong","idxCallLong","callLong");
+          result.fii_idx_call_short = gv(row,"optionIndexCallShort","idxCallShort","callShort");
+          result.fii_idx_put_long   = gv(row,"optionIndexPutLong","idxPutLong","putLong");
+          result.fii_idx_put_short  = gv(row,"optionIndexPutShort","idxPutShort","putShort");
+        }
+      }
+    }
+  }catch(e){ lg("FII F&O fetch (optional): "+e.message,"w"); }
+
+  return result;
+}
+
+// ── Interpret FII/DII data → bias score and label ──
+function interpretFIIDII(d){
+  if(!d) return { bias:0, label:"No Data", color:"#94a3b8", fiiLabel:"—", diiLabel:"—", detail:"" };
+
+  const fiiNet = d.fii_net || 0;
+  const diiNet = d.dii_net || 0;
+
+  // ── Cash market bias (-10 to +10) ──
+  // FII is the primary driver; DII absorption partially offsets
+  let cashBias = 0;
+  if(fiiNet >  4000) cashBias = +10;
+  else if(fiiNet >  2000) cashBias = +7;
+  else if(fiiNet >   500) cashBias = +4;
+  else if(fiiNet >  -500) cashBias = 0;
+  else if(fiiNet > -2000) cashBias = -4;
+  else if(fiiNet > -4000) cashBias = -7;
+  else                    cashBias = -10;
+
+  // DII absorbing FII selling = partially bullish offset
+  if(fiiNet < -1000 && diiNet > 1000) cashBias = Math.min(cashBias + 3, 0); // DII support
+  if(fiiNet > 1000  && diiNet < -500) cashBias = Math.max(cashBias - 2, 0); // DII distributing
+
+  // ── Futures positioning bias (-5 to +5) ──
+  let futBias = 0;
+  const futLong  = d.fii_idx_fut_long  || 0;
+  const futShort = d.fii_idx_fut_short || 0;
+  if(futLong + futShort > 0){
+    const longPct = futLong / (futLong + futShort) * 100;
+    if(longPct > 65)      futBias = +5;
+    else if(longPct > 55) futBias = +3;
+    else if(longPct > 45) futBias = 0;
+    else if(longPct > 35) futBias = -3;
+    else                  futBias = -5;
+  }
+
+  // ── Options positioning bias (-5 to +5) ──
+  // FII buying calls or selling puts = bullish
+  let optBias = 0;
+  const callLong  = d.fii_idx_call_long  || 0;
+  const callShort = d.fii_idx_call_short || 0;
+  const putLong   = d.fii_idx_put_long   || 0;
+  const putShort  = d.fii_idx_put_short  || 0;
+  if(callLong + putLong > 0){
+    const bullPos = callLong + putShort;
+    const bearPos = putLong  + callShort;
+    if(bullPos > bearPos * 1.5)      optBias = +5;
+    else if(bullPos > bearPos * 1.1) optBias = +2;
+    else if(bearPos > bullPos * 1.5) optBias = -5;
+    else if(bearPos > bullPos * 1.1) optBias = -2;
+  }
+
+  const totalBias = cashBias + futBias + optBias; // range -20 to +20
+
+  // Labels
+  let label, color;
+  if(totalBias >=  8){ label="STRONG BUY";  color="#16a34a"; }
+  else if(totalBias >=  3){ label="FII BUYING"; color="#22c55e"; }
+  else if(totalBias >=  -2){ label="NEUTRAL";   color="#d97706"; }
+  else if(totalBias >=  -7){ label="FII SELLING";color="#f97316"; }
+  else                     { label="HEAVY SELL"; color="#dc2626"; }
+
+  const crFmt = v => v >= 0 ? "+₹"+Math.abs(v).toFixed(0)+" Cr" : "-₹"+Math.abs(v).toFixed(0)+" Cr";
+  const fiiLabel = crFmt(fiiNet);
+  const diiLabel = crFmt(diiNet);
+  const detail   = `FII ${fiiLabel} · DII ${diiLabel}`;
+
+  return { bias: totalBias, label, color, fiiLabel, diiLabel, detail,
+           cashBias, futBias, optBias,
+           longPct: (futLong+futShort>0) ? Math.round(futLong/(futLong+futShort)*100) : null };
+}
+
+// ── Load FII/DII on boot: read from GitHub, refresh if stale (>4hr old) ──
+async function loadFIIDII(){
+  if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }
+  try{
+    const { data, sha } = await ghReadFIIDII();
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+
+    // Check if stored data is from today
+    const storedDate = data?.date ? new Date(data.date).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}) : null;
+    const isToday = storedDate === istDate;
+    const fetchedAt = data?.fetched_at ? new Date(data.fetched_at) : null;
+    const ageHrs = fetchedAt ? (Date.now() - fetchedAt.getTime()) / 3600000 : 99;
+
+    if(data && isToday && ageHrs < 5){
+      // Fresh enough — use cached
+      FII_DATA = data;
+      lg(`FII/DII: loaded from GitHub (${data.date}, FII ${data.fii_net >= 0 ? "+" : ""}${data.fii_net?.toFixed(0)} Cr)`,"o");
+      renderFIIWidget();
+    } else {
+      // Stale or missing — fetch fresh from NSE
+      lg("FII/DII: fetching fresh from NSE...","o");
+      await refreshFIIDII();
+    }
+  }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
+}
+
+// ── Fetch fresh from NSE and save to GitHub ──
+async function refreshFIIDII(){
+  try{
+    showToast("📊 Fetching FII/DII data from NSE...", "#0ea5e9", 8000);
+    const fresh = await fetchFIIDIIFromNSE();
+    FII_DATA = fresh;
+    const { sha } = await ghReadFIIDII();
+    const ok = await ghWriteFIIDII(fresh, sha);
+    lg(`FII/DII: fetched & ${ok?"saved to GitHub":"GitHub save failed"} | FII ${fresh.fii_net>=0?"+":""}${fresh.fii_net?.toFixed(0)} Cr | DII ${fresh.dii_net>=0?"+":""}${fresh.dii_net?.toFixed(0)} Cr`,"o");
+    renderFIIWidget();
+    if(ok) showToast(`📊 FII/DII updated: FII ${interpretFIIDII(fresh).fiiLabel}`, "#16a34a");
+  }catch(e){
+    lg("refreshFIIDII: "+e.message,"e");
+    showToast("❌ FII/DII fetch failed: "+e.message, "#dc2626");
+  }
+}
+
+// ── Render FII/DII widget in stats bar ──
+function renderFIIWidget(){
+  const el = document.getElementById("fii-widget");
+  if(el){
+    if(!FII_DATA){ el.innerHTML=""; }
+    else {
+      const { label, color, fiiLabel, diiLabel, longPct } = interpretFIIDII(FII_DATA);
+      const lpTxt = longPct!=null ? ` · Fut Long ${longPct}%` : "";
+      el.innerHTML = `
+        <div class="sc" style="border-color:${color}33;cursor:pointer" onclick="refreshFIIDII()" title="Tap to refresh">
+          <div class="sc-lbl">FII/DII FLOW</div>
+          <div class="sc-val" style="color:${color};font-size:11px">${label}</div>
+          <div class="sc-sub" style="color:#64748b;font-size:8px">FII ${fiiLabel}${lpTxt}</div>
+          <div class="sc-note" style="font-size:8px">DII ${diiLabel}</div>
+        </div>`;
+    }
+  }
+  // Also update settings status
+  const st = document.getElementById("fii-status");
+  if(st && FII_DATA){
+    const { label, color, fiiLabel, diiLabel } = interpretFIIDII(FII_DATA);
+    const age = FII_DATA.fetched_at ? Math.round((Date.now()-new Date(FII_DATA.fetched_at))/3600000) : "?";
+    st.innerHTML = `<span style="color:${color};font-weight:700">${label}</span> · FII ${fiiLabel} · DII ${diiLabel} · ${FII_DATA.date} · fetched ${age}h ago`;
+  }
+}
+
+// ── Apply FII bias to signal confidence ──
+// Call after calcConfidence / calcOptConfidence to adjust score
+function applyFIIBias(baseConf, isBuySignal){
+  if(!FII_DATA) return baseConf;
+  const { bias } = interpretFIIDII(FII_DATA);
+  // Scale: full ±20 bias maps to ±8 confidence points
+  // Buy signals boosted when FII buying, penalised when selling (and vice versa)
+  const direction = isBuySignal ? 1 : -1;
+  const adjustment = Math.round((bias / 20) * 8 * direction);
+  return Math.min(99, Math.max(1, baseConf + adjustment));
 }
 
 // ── Compute summary stats from signal array ──
@@ -1919,6 +2198,8 @@ function boot(){
   updateTokenInfo();
   loadGHSettings();
   startTimers();
+  // Load FII/DII data (reads from GitHub, refreshes from NSE if stale)
+  setTimeout(()=>loadFIIDII(), 2000);
   // Load cached name instantly, then refresh from API
   const _cachedName = localStorage.getItem("friday_user_name");
   const _cachedId   = localStorage.getItem("friday_user_id");
@@ -3714,6 +3995,8 @@ async function triggerScan(){
       let conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
       // Apply delivery % adjustment (±5 pts)
       conf = Math.min(100, Math.max(0, conf + delivBoost*5));
+      // Apply FII/DII institutional flow bias (±8 pts based on FII net flow)
+      conf = applyFIIBias(conf, preRec==="BUY"||preRec==="STRONG BUY");
 
       const risk  = calcRisk(ltp, sl, target, t.atr, vix);
       const pot   = calcPotential(ltp, target, sl, numInds, preRec);
@@ -4128,7 +4411,8 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       const maxProfit   = +((tgt - ltp) * lot).toFixed(0);
 
       // Confidence score
-      const confidence = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain);
+      const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain);
+      const confidence  = applyFIIBias(_rawOptConf, optType==="CE" ? niftyBullish : !niftyBullish);
 
       // Market-direction-aware action
       const isCE   = optType === "CE";
@@ -4237,6 +4521,7 @@ function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,cnt){
     <div class="sc"><div class="sc-lbl">NIFTY PCR</div><div class="sc-val ${pcr>1?"up":pcr>0.7?"am":"dn"}">${pcr}</div><div class="sc-sub ${pcr>1?"up":pcr>0.7?"am":"dn"}">${pcrTxt}</div></div>
     <div class="sc" style="border-color:${sc}22"><div class="sc-lbl">SENTIMENT</div><div class="sc-val" style="color:${sc}">${sent}</div><div style="display:flex;gap:2px;margin-top:5px">${Array(10).fill(0).map((_,i)=>`<div style="flex:1;height:4px;border-radius:2px;background:${i<sentSc?sc:"#e2e8f0"}"></div>`).join("")}</div></div>
     <div class="sc"><div class="sc-lbl">PICKS FOUND</div><div class="sc-val bl">${cnt}</div><div class="sc-sub" style="color:#64748b">${topSec} leads</div></div>`;
+  renderFIIWidget(); // inject FII widget if data available
 }
 
 function renderStockCards(picks,totalScanned,containerId){

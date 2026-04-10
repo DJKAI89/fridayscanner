@@ -1469,7 +1469,7 @@ async function ghWriteFIIDII(data, sha){
   }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
 }
 
-// ── Fetch live FII/DII from NSE via corsproxy ──
+// ── Fetch live FII/DII from NSE — multi-proxy with fallback ──
 async function fetchFIIDIIFromNSE(){
   const NSE_CASH = "https://www.nseindia.com/api/fiidiiTradeReact";
   const NSE_FNO  = "https://www.nseindia.com/api/fiiDerivativeTradeReact";
@@ -1479,15 +1479,41 @@ async function fetchFIIDIIFromNSE(){
     "Referer": "https://www.nseindia.com/"
   };
 
-  // NSE requires a session cookie — seed it first
-  try{
-    await fetch("https://corsproxy.io/?"+encodeURIComponent("https://www.nseindia.com"), { headers: HEADERS });
-  }catch(e){}
+  // Try multiple CORS proxies in order — NSE blocks many, so we cycle through
+  const PROXIES = [
+    (url) => "https://corsproxy.io/?" + encodeURIComponent(url),
+    (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
+    (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
+  ];
 
-  // Fetch cash market data
-  const cashResp = await fetch("https://corsproxy.io/?"+encodeURIComponent(NSE_CASH), { headers: HEADERS });
-  if(!cashResp.ok) throw new Error("NSE cash API: HTTP "+cashResp.status);
-  const cashRaw = await cashResp.json();
+  async function fetchWithProxyFallback(targetUrl) {
+    for (let i = 0; i < PROXIES.length; i++) {
+      const proxyUrl = PROXIES[i](targetUrl);
+      try {
+        if (i === 0) {
+          // Seed NSE session cookie via same proxy (best effort)
+          try { await fetch(PROXIES[i]("https://www.nseindia.com"), { headers: HEADERS }); } catch(e) {}
+        }
+        const resp = await fetch(proxyUrl, { headers: HEADERS });
+        if (resp.ok) {
+          const text = await resp.text();
+          if (!text || text.trim().startsWith("<")) {
+            lg("FII/DII proxy " + (i+1) + " returned HTML — trying next", "w");
+            continue;
+          }
+          return JSON.parse(text);
+        }
+        lg("FII/DII proxy " + (i+1) + " failed HTTP " + resp.status + " — trying next", "w");
+      } catch(e) {
+        lg("FII/DII proxy " + (i+1) + " error: " + e.message + " — trying next", "w");
+      }
+      if (i < PROXIES.length - 1) await sleep(800);
+    }
+    throw new Error("All CORS proxies failed for NSE FII/DII");
+  }
+
+  // Fetch cash market data (required)
+  const cashRaw = await fetchWithProxyFallback(NSE_CASH);
 
   const result = {
     date: "", fetched_at: new Date().toISOString(),
@@ -1514,12 +1540,11 @@ async function fetchFIIDIIFromNSE(){
     }
   }
 
-  // Fetch F&O derivatives data (best effort)
+  // Fetch F&O derivatives data (best effort, same proxy fallback)
   try{
-    await sleep(1500);
-    const fnoResp = await fetch("https://corsproxy.io/?"+encodeURIComponent(NSE_FNO), { headers: HEADERS });
-    if(fnoResp.ok){
-      const fnoRaw  = await fnoResp.json();
+    await sleep(1200);
+    const fnoRaw = await fetchWithProxyFallback(NSE_FNO);
+    if(fnoRaw){
       const fnoRows = Array.isArray(fnoRaw) ? fnoRaw : (fnoRaw.data || fnoRaw.FIIData || []);
       const gv = (row, ...keys) => {
         for(const k of keys){
@@ -1648,17 +1673,60 @@ async function loadFIIDII(){
 // ── Fetch fresh from NSE and save to GitHub ──
 async function refreshFIIDII(){
   try{
-    showToast("📊 Fetching FII/DII data from NSE...", "#0ea5e9", 8000);
-    const fresh = await fetchFIIDIIFromNSE();
+    showToast("📊 Fetching FII/DII from NSE...", "#0ea5e9", 10000);
+
+    let fresh = null;
+    let fromCache = false;
+
+    // Try live NSE fetch first
+    try{
+      fresh = await fetchFIIDIIFromNSE();
+    }catch(liveErr){
+      lg("refreshFIIDII live fetch failed: " + liveErr.message + " — trying GitHub cache", "w");
+
+      // Fall back to last saved GitHub data
+      try{
+        const cached = await ghReadFIIDII();
+        if(cached?.data){
+          fresh = cached.data;
+          fromCache = true;
+          lg("FII/DII: loaded from GitHub cache (date: " + (fresh.date||"?") + ")", "o");
+        }
+      }catch(cacheErr){
+        lg("FII/DII cache read also failed: " + cacheErr.message, "w");
+      }
+
+      if(!fresh) throw new Error(liveErr.message); // nothing worked
+    }
+
     FII_DATA = fresh;
-    const { sha } = await ghReadFIIDII();
-    const ok = await ghWriteFIIDII(fresh, sha);
-    lg(`FII/DII: fetched & ${ok?"saved to GitHub":"GitHub save failed"} | FII ${fresh.fii_net>=0?"+":""}${fresh.fii_net?.toFixed(0)} Cr | DII ${fresh.dii_net>=0?"+":""}${fresh.dii_net?.toFixed(0)} Cr`,"o");
     renderFIIWidget();
-    if(ok) showToast(`📊 FII/DII updated: FII ${interpretFIIDII(fresh).fiiLabel}`, "#16a34a");
+
+    if(fromCache){
+      const age = fresh.fetched_at ? Math.round((Date.now()-new Date(fresh.fetched_at))/3600000) : "?";
+      showToast("⚠️ NSE unreachable — showing cached data (" + age + "h old)", "#d97706", 7000);
+    } else {
+      // Save fresh data to GitHub for next time
+      try{
+        const { sha } = await ghReadFIIDII();
+        const ok = await ghWriteFIIDII(fresh, sha);
+        lg("FII/DII: saved to GitHub: " + ok, "o");
+      }catch(saveErr){
+        lg("FII/DII GitHub save failed: " + saveErr.message, "w");
+      }
+      const fiiNet = (fresh.fii_net||0).toFixed(0);
+      const diiNet = (fresh.dii_net||0).toFixed(0);
+      showToast(
+        "📊 FII/DII live: FII " + (fresh.fii_net>=0?"+":"") + fiiNet + " Cr · DII " + (fresh.dii_net>=0?"+":"") + diiNet + " Cr",
+        "#16a34a"
+      );
+    }
   }catch(e){
     lg("refreshFIIDII: "+e.message,"e");
-    showToast("❌ FII/DII fetch failed: "+e.message, "#dc2626");
+    showToast("❌ FII/DII unavailable — NSE blocked all proxies. Try again later.", "#dc2626", 8000);
+    // Update status text in settings
+    const st = document.getElementById("fii-status");
+    if(st) st.innerHTML = "<span style='color:#dc2626'>❌ NSE unreachable — " + e.message + "</span>";
   }
 }
 

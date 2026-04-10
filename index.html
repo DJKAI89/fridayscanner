@@ -1463,6 +1463,73 @@ async function ghWriteFIIDII(data, sha){
   }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
 }
 
+// ── Interpret FII/DII data → bias score and label ──
+function interpretFIIDII(d){
+  if(!d) return { bias:0, label:"No Data", color:"#94a3b8", fiiLabel:"—", diiLabel:"—", detail:"" };
+
+  const fiiNet = d.fii_net || 0;
+  const diiNet = d.dii_net || 0;
+
+  // Cash market bias (-10 to +10)
+  let cashBias = 0;
+  if(fiiNet >  4000) cashBias = +10;
+  else if(fiiNet >  2000) cashBias = +7;
+  else if(fiiNet >   500) cashBias = +4;
+  else if(fiiNet >  -500) cashBias = 0;
+  else if(fiiNet > -2000) cashBias = -4;
+  else if(fiiNet > -4000) cashBias = -7;
+  else                    cashBias = -10;
+
+  if(fiiNet < -1000 && diiNet > 1000) cashBias = Math.min(cashBias + 3, 0);
+  if(fiiNet > 1000  && diiNet < -500) cashBias = Math.max(cashBias - 2, 0);
+
+  // Futures positioning bias (-5 to +5)
+  let futBias = 0;
+  const futLong  = d.fii_idx_fut_long  || 0;
+  const futShort = d.fii_idx_fut_short || 0;
+  if(futLong + futShort > 0){
+    const longPct = futLong / (futLong + futShort) * 100;
+    if(longPct > 65)      futBias = +5;
+    else if(longPct > 55) futBias = +3;
+    else if(longPct > 45) futBias = 0;
+    else if(longPct > 35) futBias = -3;
+    else                  futBias = -5;
+  }
+
+  // Options positioning bias (-5 to +5)
+  let optBias = 0;
+  const callLong  = d.fii_idx_call_long  || 0;
+  const callShort = d.fii_idx_call_short || 0;
+  const putLong   = d.fii_idx_put_long   || 0;
+  const putShort  = d.fii_idx_put_short  || 0;
+  if(callLong + putLong > 0){
+    const bullPos = callLong + putShort;
+    const bearPos = putLong  + callShort;
+    if(bullPos > bearPos * 1.5)      optBias = +5;
+    else if(bullPos > bearPos * 1.1) optBias = +2;
+    else if(bearPos > bullPos * 1.5) optBias = -5;
+    else if(bearPos > bullPos * 1.1) optBias = -2;
+  }
+
+  const totalBias = cashBias + futBias + optBias;
+
+  let label, color;
+  if(totalBias >=  8){ label="STRONG BUY";  color="#16a34a"; }
+  else if(totalBias >=  3){ label="FII BUYING"; color="#22c55e"; }
+  else if(totalBias >= -2){ label="NEUTRAL";    color="#d97706"; }
+  else if(totalBias >= -7){ label="FII SELLING";color="#f97316"; }
+  else                    { label="HEAVY SELL"; color="#dc2626"; }
+
+  const crFmt = v => v >= 0 ? "+₹"+Math.abs(v).toFixed(0)+" Cr" : "-₹"+Math.abs(v).toFixed(0)+" Cr";
+  const fiiLabel = crFmt(fiiNet);
+  const diiLabel = crFmt(diiNet);
+  const detail   = `FII ${fiiLabel} · DII ${diiLabel}`;
+
+  return { bias: totalBias, label, color, fiiLabel, diiLabel, detail,
+           cashBias, futBias, optBias,
+           longPct: (futLong+futShort>0) ? Math.round(futLong/(futLong+futShort)*100) : null };
+}
+
 // ── Load FII/DII on boot — read from GitHub repo (written by GH Action) ──
 async function loadFIIDII(){
   if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }

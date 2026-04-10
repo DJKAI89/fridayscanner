@@ -1426,16 +1426,13 @@ async function ghWriteLog(signals, sha, retryCount=0){
 }
 
 // ══════════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════════
-// FII / DII DATA
-// Stored in THIS repo as fii-dii/latest.json (common for all users)
-// Updated automatically by GitHub Actions workflow daily at 4:30 PM IST
-// App just reads it — same pattern as user-settings
+// FII / DII DATA — stored in GitHub as fii-dii/latest.json
+// Fetched from NSE via corsproxy, same storage pattern as signal log
 // ══════════════════════════════════════════════════════════════
 
 const FII_FILE = "fii-dii/latest.json";
 
-// ── Read fii-dii/latest.json from the main FRIDAY repo ──
+// ── Read FII/DII data from GitHub ──
 async function ghReadFIIDII(){
   if(!GH.token||!GH.user||!GH.repo) return { data:null, sha:null };
   try{
@@ -1450,13 +1447,29 @@ async function ghReadFIIDII(){
   }catch(e){ lg("ghReadFIIDII: "+e.message,"w"); return { data:null, sha:null }; }
 }
 
-// ── Load FII/DII on boot — read from repo, use in-memory cache ──
+// ── Write FII/DII data to GitHub ──
+async function ghWriteFIIDII(data, sha){
+  if(!GH.token||!GH.user||!GH.repo) return false;
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const body = { message:"FRIDAY FII/DII update · "+data.date, content };
+    if(sha) body.sha = sha;
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${FII_FILE}`,
+      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    return r.ok;
+  }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
+}
+
+// ── Load FII/DII on boot — read from GitHub repo (written by GH Action) ──
 async function loadFIIDII(){
   if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }
   try{
     const { data } = await ghReadFIIDII();
     if(!data){
-      lg("FII/DII: fii-dii/latest.json not found in repo — add the GitHub Actions workflow","w");
+      lg("FII/DII: fii-dii/latest.json not found — run the GitHub Actions workflow once","w");
       return;
     }
     FII_DATA = data;
@@ -1465,7 +1478,7 @@ async function loadFIIDII(){
   }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
 }
 
-// ── Manual refresh: re-read from repo ──
+// ── Manual refresh — re-read from GitHub repo ──
 async function refreshFIIDII(){
   if(!GH.token||!GH.user||!GH.repo){
     showToast("❌ Configure GitHub settings first.", "#dc2626", 5000);
@@ -1475,16 +1488,16 @@ async function refreshFIIDII(){
   try{
     const { data } = await ghReadFIIDII();
     if(!data){
-      showToast("⚠️ FII/DII file not found. Add the GitHub Actions workflow to your repo.", "#d97706", 9000);
+      showToast("⚠️ FII/DII file not found. Run the GitHub Actions workflow in your ScannerFile repo.", "#d97706", 9000);
       const st = document.getElementById("fii-status");
-      if(st) st.innerHTML = `<span style='color:#d97706'>⚠️ <b>fii-dii/latest.json</b> not found in repo.<br>Add <b>.github/workflows/fetch-fii-dii.yml</b> and run it once from GitHub Actions.</span>`;
+      if(st) st.innerHTML = `<span style='color:#d97706'>⚠️ <b>fii-dii/latest.json</b> not found.<br>Go to your <b>ScannerFile</b> repo → Actions → <b>Fetch NSE FII/DII Data Daily</b> → Run workflow.</span>`;
       return;
     }
     FII_DATA = data;
     renderFIIWidget();
     const age = data.fetched_at ? Math.round((Date.now()-new Date(data.fetched_at))/3600000) : "?";
     showToast(
-      `📊 FII ${data.fii_net>=0?"+":""}${(data.fii_net||0).toFixed(0)} Cr · DII ${(data.dii_net||0).toFixed(0)} Cr · ${data.date}`,
+      `📊 FII ${data.fii_net>=0?"+":""}${(data.fii_net||0).toFixed(0)} Cr · DII ${data.dii_net>=0?"+":""}${(data.dii_net||0).toFixed(0)} Cr · ${data.date}`,
       "#16a34a", 7000
     );
     lg(`FII/DII refreshed: ${data.date}, ${age}h ago`,"o");
@@ -1496,6 +1509,8 @@ async function refreshFIIDII(){
   }catch(e){
     lg("refreshFIIDII: "+e.message,"e");
     showToast("❌ FII/DII read failed: "+e.message, "#dc2626", 7000);
+    const st = document.getElementById("fii-status");
+    if(st) st.innerHTML = `<span style='color:#dc2626'>❌ ${e.message}</span>`;
   }
 }
 

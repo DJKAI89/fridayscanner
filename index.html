@@ -712,6 +712,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
 
 <!-- Notifications -->
+
 <div style="margin-top:12px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
   <div style="font-size:11px;font-weight:700;color:#15803d;margin-bottom:4px">🔔 Browser Notifications</div>
   <div style="font-size:10px;color:#166534;margin-bottom:8px">Get notified for: high confidence signals (≥80%), RSI divergence, BB squeeze, target hit, SL hit.</div>
@@ -2289,9 +2290,11 @@ async function checkAllOutcomes(silent=false){
 
 // ── Update nav badge ──
 function updateLogBadge(signals){
-  const open = (signals||[]).filter(s=>s.status==="OPEN").length;
+  const todayIST = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const todaySignals = (signals||[]).filter(s=>s.date===todayIST);
+  const todayOpen   = todaySignals.filter(s=>s.status==="OPEN").length;
   const el = document.getElementById("nb-log");
-  if(el) el.textContent = open>0 ? open+" open" : signals?.length||"—";
+  if(el) el.textContent = todayOpen>0 ? todayOpen+" open" : todaySignals.length>0 ? todaySignals.length+" today" : "—";
 }
 
 
@@ -4965,6 +4968,16 @@ async function loadOptions(force=true){
     renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
     renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
     renderOptionsGroups(groups);
+
+    // ── Badge: count exactly what renderOptionsGroups shows (with-trend + conf + cap filters) ──
+    const _badgeCapLimit = CFG.maxOptCapital > 0 ? CFG.maxOptCapital : Infinity;
+    const _badgeIdxPicks = groups.filter(g=>g.type==="index").flatMap(g=>g.picks)
+      .filter(p=>p.trendAligned && p.confidence>=CFG.minOptConf && p.amtRequired<=_badgeCapLimit);
+    const _badgeStkPicks = groups.filter(g=>g.type==="stock").flatMap(g=>g.picks)
+      .filter(p=>p.trendAligned && p.confidence>=CFG.minOptConf && p.amtRequired<=_badgeCapLimit);
+    const _totalWithTrend = _badgeIdxPicks.length + _badgeStkPicks.length;
+    updateNavBadge("options", _totalWithTrend > 0 ? _totalWithTrend+" signals" : "—");
+
     // Log exactly what is shown on screen — apply same filters as renderOptionsGroups
     const _logCapLimit = CFG.maxOptCapital > 0 ? CFG.maxOptCapital : Infinity;
     const optSigsToLog = groups.flatMap(g=>
@@ -4984,7 +4997,7 @@ async function loadOptions(force=true){
     document.getElementById("dash-options").style.display="block";
     const idxCount=groups.filter(g=>g.type==="index").reduce((s,g)=>s+g.picks.length,0);
     const stkCount=groups.filter(g=>g.type==="stock").reduce((s,g)=>s+g.picks.length,0);
-    lg(`✅ Options: ${idxCount} index + ${stkCount} stock signals (${groups.filter(g=>g.type==="stock").length} stocks scanned)`,"o");
+    lg(`✅ Options: ${idxCount} index + ${stkCount} stock signals · ${_totalWithTrend} with-trend shown`,"o");
     if(stkCount===0) lg("⚠ 0 stock options — try lowering Delta/OI thresholds in Settings","w");
 
   }catch(e){

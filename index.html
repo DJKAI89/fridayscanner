@@ -1957,7 +1957,8 @@ function applyFIIBias(baseConf, isBuySignal){
 // ── Compute summary stats from signal array ──
 function computeLogStats(signals){
   const total    = signals.length;
-  const closed   = signals.filter(s=>s.status!=="OPEN"&&s.status!=="EXPIRED");
+  // Win rate: only TARGET_HIT vs SL_HIT — EXPIRED (worthless/theta decay) excluded
+  const closed   = signals.filter(s=>s.status==="TARGET_HIT"||s.status==="SL_HIT");
   const hits     = signals.filter(s=>s.status==="TARGET_HIT").length;
   const sls      = signals.filter(s=>s.status==="SL_HIT").length;
   const winRate  = closed.length>0 ? Math.round(hits/closed.length*100) : null;
@@ -2191,38 +2192,39 @@ async function checkAllOutcomes(silent=false){
       // ── 1. Expired contract ──
       const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold;
       if(isExpiredContract){
-        // After market close, Upstox returns 0 for expired options.
-        // If we have a livePrice recorded during market hours, use that as the honest exit.
-        // This captures what the premium was worth when you could still trade it.
-        let exitPx = currentPrice ?? 0;
-        if(exitPx === 0 && sig.livePrice != null && sig.livePrice > 0){
-          exitPx = sig.livePrice; // use last intraday price recorded before expiry
-        }
-
+        // KEY RULE: exitPx=0 means expired worthless — NOT a stop-loss hit.
+        // SL is only valid during live market hours when you can actually exit at that price.
+        // Use livePrice (captured during market hours) to check if target was hit intraday.
+        const livePx    = (sig.livePrice ?? 0);
+        const exitPx    = (currentPrice ?? 0);
         const isBullExp = sig.signal==="BUY" || sig.signal==="CALL";
-        const expiredHitTarget = isBullExp ? exitPx >= sig.target : exitPx <= sig.target;
-        const expiredHitSL     = isBullExp ? exitPx <= sig.sl     : exitPx >= sig.sl;
+
+        // Check target using last live price recorded during market hours
+        const checkPx          = livePx > 0 ? livePx : exitPx;
+        const expiredHitTarget = checkPx > 0 && (isBullExp ? checkPx >= sig.target : checkPx <= sig.target);
 
         if(expiredHitTarget){
+          // Target was hit intraday before expiry
           sig.status    = "TARGET_HIT";
-          sig.exitPrice = +exitPx.toFixed(2);
+          sig.exitPrice = +checkPx.toFixed(2);
           sig.exitTime  = istTime;
-          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
-        } else if(expiredHitSL){
-          sig.status    = "SL_HIT";
-          sig.exitPrice = +exitPx.toFixed(2);
+          sig.pnlPct    = +(((checkPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        } else if(exitPx === 0 || exitPx < sig.entry * 0.02){
+          // Expired worthless — theta decay to zero, NOT a SL hit.
+          // Real P&L = -100%. Excluded from SL count and win rate denominator.
+          sig.status    = "EXPIRED";
+          sig.exitPrice = 0;
           sig.exitTime  = istTime;
-          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+          sig.pnlPct    = -100;
         } else {
+          // Expired with some residual value but didn't hit target
           sig.status    = "EXPIRED";
           sig.exitPrice = +exitPx.toFixed(2);
           sig.exitTime  = istTime;
-          // If we only had livePrice (not a clean exit), note it
-          sig.note      = sig.note || (sig.livePrice && currentPrice===0 ? "Exit at last live price before expiry" : "");
           sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         }
-        sig.livePrice = null;
-        sig.livePnlPct= null;
+        sig.livePrice  = null;
+        sig.livePnlPct = null;
         closed++;
         continue;
       }
@@ -2509,22 +2511,21 @@ async function renderLogTab(signalsIn){
   filtered = filtered.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.time.localeCompare(a.time));
 
   // Stats — computed from filtered set so cards and stats stay in sync
-  const statsBase  = filtered;
-  const stats      = computeLogStats(statsBase);
-  const openCount  = statsBase.filter(s=>s.status==="OPEN").length;
-  const hitCount   = statsBase.filter(s=>s.status==="TARGET_HIT").length;
-  const slCount    = statsBase.filter(s=>s.status==="SL_HIT").length;
-  const closedCount= hitCount+slCount;
+  const statsBase   = filtered;
+  const stats       = computeLogStats(statsBase);
+  const openCount   = statsBase.filter(s=>s.status==="OPEN").length;
+  const hitCount    = statsBase.filter(s=>s.status==="TARGET_HIT").length;
+  const slCount     = statsBase.filter(s=>s.status==="SL_HIT").length;
+  const closedCount = hitCount+slCount;
   const wr = closedCount>0 ? Math.round(hitCount/closedCount*100) : null;
   const avgConf    = statsBase.length>0 ? Math.round(statsBase.reduce((a,s)=>a+s.confidence,0)/statsBase.length) : 0;
 
   document.getElementById("log-stats").innerHTML=`
     <div class="sc"><div class="sc-lbl">TOTAL SIGNALS</div><div class="sc-val bl">${filtered.length}</div><div class="sc-sub">${dateF==="today"?"today":dateF==="week"?"this week":dateF==="month"?"this month":"all time"}</div></div>
-    <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val ${wr>=60?"up":wr>=45?"am":"dn"}">${wr!=null?wr+"%":"—"}</div><div class="sc-sub">${closedCount} closed signals</div></div>
+    <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val ${wr>=60?"up":wr>=45?"am":"dn"}">${wr!=null?wr+"%":"—"}</div><div class="sc-sub">${closedCount} target/SL closed</div></div>
     <div class="sc"><div class="sc-lbl">TARGET HIT ✅</div><div class="sc-val up">${hitCount}</div><div class="sc-sub">reached target</div></div>
     <div class="sc"><div class="sc-lbl">SL HIT ❌</div><div class="sc-val dn">${slCount}</div><div class="sc-sub">stopped out</div></div>
     <div class="sc"><div class="sc-lbl">OPEN 🔄</div><div class="sc-val am">${openCount}</div><div class="sc-sub">watching</div></div>
-    <div class="sc"><div class="sc-lbl">AVG CONFIDENCE</div><div class="sc-val">${avgConf}%</div><div class="sc-sub">${dateF==="today"?"today":dateF==="week"?"this week":dateF==="month"?"this month":"all time"}</div></div>
   `;
 
   if(!filtered.length){

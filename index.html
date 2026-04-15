@@ -4467,10 +4467,10 @@ async function triggerScan(){
     // ── STEP 3: Curated scan universe (hardcoded list only) ──
     updateScanProgress("Step 3/5: Loading stock universe...");
 
-    // Scan only our curated list (NIFTY50 + Next50 + Top F&O stocks)
-    // This keeps scan fast and focused on liquid, high-quality stocks
-    const scanList = NIFTY50;
-    lg(`Scanning ${scanList.length} curated stocks...`,"o");
+    // Scan full STOCKS list — same universe as the Analysis tab
+    // This ensures any stock analysable in the Analysis tab also appears in Stocks picks
+    const scanList = STOCKS;
+    lg(`Scanning ${scanList.length} stocks...`,"o");
 
     // Phase B: Quote all stocks in batches of 50
     // fetchQ normalizes keys, so allQ[key] will match scanList[i].key format

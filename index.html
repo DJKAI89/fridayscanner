@@ -993,6 +993,9 @@ let scanTimer,optTimer,tickTimer,portTimer,cdTimer,moodTimer,scanSecs;
 let lastPrices={},rsiCache={};
 let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
+// Sector data — populated by triggerScan, read by analysis tab for consistent confidence scoring
+let _sectorIdxMap = {}; // sector name → index change %
+let _secMap       = {}; // sector name → {g: gains count, c: total count}
 
 // ══════════════════════════════════════
 // BOOT & TOKEN
@@ -3414,10 +3417,7 @@ function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patte
 
 // ── CountConfirmingIndicators ──
 // C#: MACD/50MA/200MA/NearSupport only count when direction aligns with Buy/StrongBuy
-function countIndicators(rsi, macdBull, a50, a200, vol, avgVol, nearSupp, patterns, rec) {
-  const volOk = avgVol > 0 && vol > 0 && avgVol !== vol ? (vol >= avgVol * 1.2) : null;
-  return countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec);
-}
+
 function countIndicatorsEx(rsi, macdBull, a50, a200, volOk, nearSupp, patterns, rec, macdObj, bbObj, adxObj, rsiDivObj) {
   const isBuy = rec === "BUY" || rec === "STRONG BUY" || rec === "MODERATE";
   let count = 0;
@@ -4432,7 +4432,7 @@ async function triggerScan(){
     // ── Sector index performance ──
     // Fetch key Nifty sector indices to compute real sector strength
     const SECTOR_KEYS = "NSE_INDEX|Nifty Bank,NSE_INDEX|Nifty IT,NSE_INDEX|Nifty Auto,NSE_INDEX|Nifty Pharma,NSE_INDEX|Nifty FMCG,NSE_INDEX|Nifty Metal,NSE_INDEX|Nifty Realty,NSE_INDEX|Nifty Energy,NSE_INDEX|Nifty Infra";
-    const sectorIdxMap = {}; // sec name → change%
+    const sectorIdxMap = {}; // local — also written to module-level _sectorIdxMap
     try{
       const sD = await fetchQ(SECTOR_KEYS);
       const secIdxPairs = [
@@ -4446,6 +4446,7 @@ async function triggerScan(){
         const q = sD[key];
         if(q) sectorIdxMap[sec] = getChgPct(q);
       });
+      Object.assign(_sectorIdxMap, sectorIdxMap); // publish to module scope
       lg(`Sector indices: ${Object.keys(sectorIdxMap).length} loaded`);
     }catch(e){ lg("Sector idx: "+e.message,"w"); }
 
@@ -4590,6 +4591,7 @@ async function triggerScan(){
       if(chg > 0) secMap[sec].g++;
       secMap[sec].c++;
     }
+    Object.assign(_secMap, secMap); // publish to module scope for analysis tab
 
     // Score each stock
     const stocks = [];
@@ -6056,12 +6058,13 @@ async function lookupStock(){
     const preRR=(sl>0&&ltp>sl)?(target-ltp)/(ltp-sl):2;
     const preRec=preRR>=2?"BUY":preRR>=1.5?"MODERATE":"WATCH";
     const volOk=tech.avgVol20?(vol>=tech.avgVol20*1.2):null;
-    // Use real sector score same as scan
+    // Use real sector score — reads from module-level cache populated by triggerScan
+    // Falls back to 50 (neutral) if scan hasn't run yet
     const sec_lkp   = getSector(inst.s);
-    const secIdxChg_lkp = sectorIdxMap?.[sec_lkp] ?? null;
+    const secIdxChg_lkp = _sectorIdxMap[sec_lkp] ?? null;
     const secSc_lkp = secIdxChg_lkp != null
       ? Math.round(Math.min(100, Math.max(0, 50 + secIdxChg_lkp * 8)))
-      : (secMap?.[sec_lkp] ? Math.round(secMap[sec_lkp].g/secMap[sec_lkp].c*100) : 50);
+      : (_secMap[sec_lkp] ? Math.round(_secMap[sec_lkp].g/_secMap[sec_lkp].c*100) : 50);
     const numInds=countIndicatorsEx(tech.rsi,tech.macdBull,tech.a50,tech.a200,volOk,nearSupp,patterns,preRec,tech.macd,tech.bb,tech.adx,tech.rsiDiv);
     let conf=calcConfidence(null,vixSc,pcrSc,nBull,secSc_lkp,vol,tech.avgVol20||vol,patterns,preRec,numInds);
     // MACD enhancements

@@ -990,6 +990,8 @@ try{
 
 let scanning=false,optLoading=false,portLoading=false;
 let scanTimer,optTimer,tickTimer,portTimer,cdTimer,moodTimer,scanSecs;
+let liveTrackTimer=null;          // auto-refreshes live P&L for open signals every 60s
+let _liveTrackLastGHWrite=0;      // throttle GitHub writes to every 5 min
 let lastPrices={},rsiCache={};
 let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
@@ -1988,13 +1990,14 @@ async function logSignals(newSignals){
         // Same day, same symbol — update values but preserve status/exit data
         const ex = existingMap.get(ns.id);
         const preservedFields = {
-          status:     ex.status,
-          exitPrice:  ex.exitPrice,
-          exitTime:   ex.exitTime,
-          pnlPct:     ex.pnlPct,
-          note:       ex.note,
-          livePrice:  ex.livePrice  ?? null,
-          livePnlPct: ex.livePnlPct ?? null
+          status:         ex.status,
+          exitPrice:      ex.exitPrice,
+          exitTime:       ex.exitTime,
+          pnlPct:         ex.pnlPct,
+          note:           ex.note,
+          livePrice:      ex.livePrice      ?? null,
+          livePnlPct:     ex.livePnlPct     ?? null,
+          targetProgress: ex.targetProgress ?? null
         };
         Object.assign(ex, ns, preservedFields);
         updatedCount++;
@@ -2105,6 +2108,88 @@ function showToast(msg, color="#16a34a", duration=5000){
   t.style.opacity = "1";
   clearTimeout(t._timer);
   t._timer = setTimeout(()=>{ t.style.opacity="0"; }, duration);
+}
+
+// ── Refresh live P&L for all OPEN signals (lightweight, runs every minute) ──
+// Does NOT change status — only updates livePrice/livePnlPct and progress toward target.
+// Writes to GitHub at most once every 5 minutes to avoid rate limits.
+async function refreshLivePnL(){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  try{
+    const { signals, sha } = await ghReadLog();
+    const openSignals = signals.filter(s=>s.status==="OPEN");
+    if(!openSignals.length) return;
+
+    // Fetch prices for open stocks
+    const stockSyms = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
+    const priceMap  = {};
+    if(stockSyms.length){
+      const keys = stockSyms.map(sym=>{
+        const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym);
+        return inst?.key;
+      }).filter(Boolean).join(",");
+      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      try{
+        const quotes = await fetchQ(keys+","+idxKeys);
+        stockSyms.forEach(sym=>{
+          const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym);
+          if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
+        });
+        priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
+        priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
+        priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
+        priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
+      }catch(e){}
+    }
+
+    // Fetch option premiums for open option signals
+    const optPriceMap = {};
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    for(const sig of openSignals.filter(s=>s.type==="OPTION")){
+      if(sig.expiry && sig.expiry < istDate) continue; // skip expired
+      try{
+        const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock)||INDEX_OPTS.find(s=>s.name===sig.stock);
+        if(!inst) continue;
+        const chain = await fetchOptions(inst.key, sig.expiry);
+        const row = chain.find(r=>r.strike_price===sig.strike);
+        if(!row) continue;
+        const opt = sig.optType==="CE" ? row.call_options : row.put_options;
+        if(opt?.market_data?.ltp!=null) optPriceMap[sig.id] = opt.market_data.ltp;
+      }catch(e){}
+    }
+
+    // Update live fields on open signals
+    let changed = 0;
+    for(const sig of signals){
+      if(sig.status !== "OPEN") continue;
+      let currentPrice = sig.type==="STOCK" ? priceMap[sig.stock] : optPriceMap[sig.id];
+      if(currentPrice==null) continue;
+      const newPnl = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+      if(sig.livePrice !== +currentPrice.toFixed(2) || sig.livePnlPct !== newPnl){
+        sig.livePrice  = +currentPrice.toFixed(2);
+        sig.livePnlPct = newPnl;
+        // Progress toward target: 0% = at entry, 100% = at target
+        const totalMove = Math.abs(sig.target - sig.entry);
+        const actualMove = sig.signal==="BUY"||sig.signal==="CALL"
+          ? currentPrice - sig.entry
+          : sig.entry - currentPrice;
+        sig.targetProgress = totalMove>0 ? Math.round(Math.max(0,Math.min(120,actualMove/totalMove*100))) : 0;
+        changed++;
+      }
+    }
+
+    if(!changed) return;
+
+    // Always re-render the log tab if it's visible
+    if(activeTab==="log") renderLogTab(signals);
+
+    // Write to GitHub at most every 5 minutes
+    const now = Date.now();
+    if(now - _liveTrackLastGHWrite > 5*60*1000){
+      const ok = await ghWriteLog(signals, sha);
+      if(ok){ _liveTrackLastGHWrite = now; lg(`Live P&L: updated ${changed} signals, saved to GitHub`,"o"); }
+    }
+  }catch(e){ lg("refreshLivePnL: "+e.message,"w"); }
 }
 
 // ── Check outcomes for all open signals ──
@@ -2568,12 +2653,25 @@ async function renderLogTab(signalsIn){
          </div>`
       : "";
 
-    // Live price row for OPEN signals / expiry note for EXPIRED with livePrice fallback
-    const livePriceRow = s.status==="OPEN" && s.livePrice!=null
-      ? `<div style="font-size:9px;color:#0ea5e9;margin-top:2px">📡 Live: ₹${fmt(s.livePrice)} (last checked)</div>`
-      : (s.status==="EXPIRED" && s.note && s.note.includes("last live"))
-        ? `<div style="font-size:9px;color:#f59e0b;margin-top:2px">⚠ Exited at last live price — post-market value was ₹0</div>`
-        : "";
+    // Live price row for OPEN signals with progress bar toward target
+    let livePriceRow = "";
+    if(s.status==="OPEN" && s.livePrice!=null){
+      const prog = s.targetProgress ?? 0;
+      const progColor = prog>=100?"#16a34a":prog>=50?"#d97706":"#0ea5e9";
+      const progLabel = prog>=100?"🎯 Target zone!":prog>=75?"Almost there":prog>=50?"Halfway":prog>=25?"In progress":"Just started";
+      livePriceRow = `
+        <div style="margin-top:5px">
+          <div style="display:flex;justify-content:space-between;font-size:8px;color:#64748b;margin-bottom:2px">
+            <span>📡 Live: <b style="color:#0f172a">₹${fmt(s.livePrice)}</b></span>
+            <span style="color:${progColor};font-weight:700">${prog}% to target · ${progLabel}</span>
+          </div>
+          <div style="background:#e2e8f0;border-radius:4px;height:5px;overflow:hidden">
+            <div style="width:${Math.min(100,prog)}%;height:100%;background:${progColor};border-radius:4px;transition:width 0.4s"></div>
+          </div>
+        </div>`;
+    } else if(s.status==="EXPIRED" && s.note && s.note.includes("last live")){
+      livePriceRow = `<div style="font-size:9px;color:#f59e0b;margin-top:2px">⚠ Exited at last live price — post-market value was ₹0</div>`;
+    }
 
     // Expiry info row
     const expiryRow = s.expiry
@@ -2841,7 +2939,7 @@ async function refreshMarketMood(){
   }
 }
 
-function clearTimers(){clearInterval(scanTimer);clearInterval(optTimer);clearInterval(tickTimer);clearInterval(portTimer);clearInterval(cdTimer);clearInterval(moodTimer);}
+function clearTimers(){clearInterval(scanTimer);clearInterval(optTimer);clearInterval(tickTimer);clearInterval(portTimer);clearInterval(cdTimer);clearInterval(moodTimer);clearInterval(liveTrackTimer);}
 function startTimers(){
   // Restore remaining countdown from previous session (persists across browser close)
   const _lastTs=parseInt(localStorage.getItem("friday_last_scan_ts")||"0");
@@ -2878,6 +2976,13 @@ function startTimers(){
   moodTimer = setInterval(()=>{
     refreshMarketMood();
   }, (CFG.moodRefresh||10) * 60 * 1000);
+
+  // ── Live P&L tracker — refreshes open signal prices every 60s during market hours ──
+  liveTrackTimer = setInterval(()=>{
+    if(isOpen() && GH.token && GH.user && GH.repo){
+      refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
+    }
+  }, 60*1000);
 
   // ── Countdown + market status check (runs every second always) ──
   cdTimer = setInterval(()=>{

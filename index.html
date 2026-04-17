@@ -2110,6 +2110,30 @@ function showToast(msg, color="#16a34a", duration=5000){
   t._timer = setTimeout(()=>{ t.style.opacity="0"; }, duration);
 }
 
+// ── Compute live P&L fields for a signal given current market price ──
+// Used by both refreshLivePnL (auto-tracker) and checkAllOutcomes (Update button)
+function computeLiveFields(sig, currentPrice){
+  const isBull = sig.signal==="BUY" || sig.signal==="CALL";
+  // P&L % from entry
+  const livePnlPct = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+  // Progress toward target: 0%=at entry, 100%=at target, negative=moving toward SL
+  const totalMove  = Math.abs(sig.target - sig.entry);
+  const actualMove = isBull ? currentPrice - sig.entry : sig.entry - currentPrice;
+  const targetProgress = totalMove > 0
+    ? Math.round(Math.max(-50, Math.min(120, actualMove / totalMove * 100)))
+    : 0;
+  // SL distance: % gap between current price and SL (negative = SL breached)
+  const slDistance = isBull
+    ? +((currentPrice - sig.sl) / sig.entry * 100).toFixed(1)
+    : +((sig.sl - currentPrice) / sig.entry * 100).toFixed(1);
+  return {
+    livePrice:      +currentPrice.toFixed(2),
+    livePnlPct,
+    targetProgress,
+    slDistance
+  };
+}
+
 // ── Refresh live P&L for all OPEN signals (lightweight, runs every minute) ──
 // Does NOT change status — only updates livePrice/livePnlPct and progress toward target.
 // Writes to GitHub at most once every 5 minutes to avoid rate limits.
@@ -2164,18 +2188,9 @@ async function refreshLivePnL(){
       if(sig.status !== "OPEN") continue;
       let currentPrice = sig.type==="STOCK" ? priceMap[sig.stock] : optPriceMap[sig.id];
       if(currentPrice==null) continue;
-      const newPnl = +(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
-      if(sig.livePrice !== +currentPrice.toFixed(2) || sig.livePnlPct !== newPnl){
-        sig.livePrice  = +currentPrice.toFixed(2);
-        sig.livePnlPct = newPnl;
-        // Progress toward target: 0% = at entry, 100% = at target
-        const totalMove = Math.abs(sig.target - sig.entry);
-        const actualMove = sig.signal==="BUY"||sig.signal==="CALL"
-          ? currentPrice - sig.entry
-          : sig.entry - currentPrice;
-        sig.targetProgress = totalMove>0 ? Math.round(Math.max(0,Math.min(120,actualMove/totalMove*100))) : 0;
-        changed++;
-      }
+      const live = computeLiveFields(sig, currentPrice);
+      Object.assign(sig, live);
+      changed++;
     }
 
     if(!changed) return;
@@ -2351,9 +2366,8 @@ async function checkAllOutcomes(silent=false){
         sig.livePnlPct= null;
         closed++;
       } else {
-        // ── 2. Still OPEN — store live price & unrealised P&L ──
-        sig.livePrice  = +currentPrice.toFixed(2);
-        sig.livePnlPct = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+        // ── 2. Still OPEN — store live price, P&L, progress toward target/SL ──
+        Object.assign(sig, computeLiveFields(sig, currentPrice));
         liveupdated++;
       }
     }
@@ -2653,20 +2667,33 @@ async function renderLogTab(signalsIn){
          </div>`
       : "";
 
-    // Live price row for OPEN signals with progress bar toward target
+    // Live price row for OPEN signals with dual progress bar (toward target AND SL distance)
     let livePriceRow = "";
     if(s.status==="OPEN" && s.livePrice!=null){
-      const prog = s.targetProgress ?? 0;
-      const progColor = prog>=100?"#16a34a":prog>=50?"#d97706":"#0ea5e9";
-      const progLabel = prog>=100?"🎯 Target zone!":prog>=75?"Almost there":prog>=50?"Halfway":prog>=25?"In progress":"Just started";
+      const prog     = s.targetProgress ?? 0;
+      const slDist   = s.slDistance ?? null;
+      const progColor = prog>=100?"#16a34a":prog<0?"#dc2626":prog>=50?"#d97706":"#0ea5e9";
+      const progLabel = prog>=100?"🎯 Target reached!":prog>=75?"Almost at target":prog>=50?"Halfway to target":prog>=25?"Moving toward target":prog<0?"⚠ Moving toward SL":"Waiting for move";
+      const slLabel   = slDist!=null ? (slDist<=5?"⚠ Near SL":slDist<0?"🔴 SL breached":"+"+slDist.toFixed(1)+"% from SL") : "";
       livePriceRow = `
-        <div style="margin-top:5px">
-          <div style="display:flex;justify-content:space-between;font-size:8px;color:#64748b;margin-bottom:2px">
-            <span>📡 Live: <b style="color:#0f172a">₹${fmt(s.livePrice)}</b></span>
-            <span style="color:${progColor};font-weight:700">${prog}% to target · ${progLabel}</span>
+        <div style="margin-top:6px;padding:6px 8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-size:9px;color:#64748b">📡 Live: <b style="color:#0f172a;font-size:10px">₹${fmt(s.livePrice)}</b></span>
+            <span style="font-size:8px;color:${progColor};font-weight:700">${progLabel}</span>
           </div>
-          <div style="background:#e2e8f0;border-radius:4px;height:5px;overflow:hidden">
-            <div style="width:${Math.min(100,prog)}%;height:100%;background:${progColor};border-radius:4px;transition:width 0.4s"></div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+            <span style="font-size:8px;color:#94a3b8;width:20px">SL</span>
+            <div style="flex:1;background:#fee2e2;border-radius:3px;height:4px;overflow:hidden">
+              <div style="width:${Math.min(100,Math.max(0,100-(slDist??50)))}%;height:100%;background:#dc2626;border-radius:3px"></div>
+            </div>
+            <span style="font-size:8px;color:${slDist!=null&&slDist<=5?"#dc2626":"#94a3b8"}">${slLabel}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:8px;color:#94a3b8;width:20px">Tgt</span>
+            <div style="flex:1;background:#dcfce7;border-radius:3px;height:4px;overflow:hidden">
+              <div style="width:${Math.min(100,Math.max(0,prog))}%;height:100%;background:${progColor};border-radius:3px"></div>
+            </div>
+            <span style="font-size:8px;color:${progColor};font-weight:700">${prog}%</span>
           </div>
         </div>`;
     } else if(s.status==="EXPIRED" && s.note && s.note.includes("last live")){
@@ -2977,11 +3004,14 @@ function startTimers(){
     refreshMarketMood();
   }, (CFG.moodRefresh||10) * 60 * 1000);
 
-  // ── Live P&L tracker — refreshes open signal prices every 60s during market hours ──
+  // ── Live P&L tracker — refreshes open signal prices every 60s (market hours + 30min after close) ──
   liveTrackTimer = setInterval(()=>{
-    if(isOpen() && GH.token && GH.user && GH.repo){
-      refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
-    }
+    if(!GH.token||!GH.user||!GH.repo) return;
+    // Run during market hours and up to 30 min after close (for final price capture)
+    const _h=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+    const _m=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
+    const _inWindow = isOpen() || (_h===15 && _m<=59) || (_h===16 && _m<=0);
+    if(_inWindow) refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
   }, 60*1000);
 
   // ── Countdown + market status check (runs every second always) ──

@@ -707,9 +707,11 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">GitHub Token (PAT)</div><div class="set-sub">repo scope required · stored locally only</div></div><input class="set-inp" id="s-gh-token" type="text" placeholder="ghp_xxxxxxxxxxxx"></div>
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
-    <div class="set-row"><div><div class="set-lbl">FII/DII Repo Name</div><div class="set-sub">Repo running the FII/DII GitHub Action (e.g. fii-dii)</div></div><input class="set-inp" id="s-fii-repo" type="text" placeholder="fii-dii"></div>
-    <button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII from NSE</button>
-    <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
+
+```
+<button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII from NSE</button>
+<div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
+```
 
 <!-- Notifications -->
 
@@ -1214,16 +1216,14 @@ async function fetchAndShowUserProfile(){
 // ════════════════════════════════════════════════════════════════
 
 // ── GitHub credentials (loaded from localStorage) ──
-let GH = { token:"", user:"", repo:"", fiiRepo:"fii-dii" };
+let GH = { token:"", user:"", repo:"" };
 let FII_DATA = null; // cached FII/DII data for the session
 
 function loadGHSettings(){
   GH.token = localStorage.getItem("friday_gh_token") || "";
   GH.user  = localStorage.getItem("friday_gh_user")  || "";
   GH.repo    = localStorage.getItem("friday_gh_repo")    || "";
-  GH.fiiRepo = localStorage.getItem("friday_fii_repo")   || "fii-dii";
-  const ui_fr = document.getElementById("s-fii-repo");
-  if(ui_fr) ui_fr.value = GH.fiiRepo;
+
   const ui_t = document.getElementById("s-gh-token");
   const ui_u = document.getElementById("s-gh-user");
   const ui_r = document.getElementById("s-gh-repo");
@@ -1280,9 +1280,7 @@ function saveGitHubSettings(){
   GH.repo  = repo;
   localStorage.setItem("friday_gh_token", GH.token);
   localStorage.setItem("friday_gh_user",  GH.user);
-  GH.fiiRepo = (document.getElementById("s-fii-repo")?.value||"").trim() || "fii-dii";
   localStorage.setItem("friday_gh_repo",  GH.repo);
-  localStorage.setItem("friday_fii_repo", GH.fiiRepo);
   const el = document.getElementById("gh-status");
   el.textContent = `✅ Saved — ${user}/${repo}. Click Test Connection to verify.`;
   el.style.color = "#16a34a";

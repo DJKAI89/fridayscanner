@@ -708,8 +708,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
 
-<button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="refreshFIIDII()">📊 Refresh FII/DII from NSE</button>
+```
+<button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_fiidii_loaded_date');loadFIIDII(true)">📊 Refresh FII/DII from NSE</button>
 <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
+```
 
 <!-- Notifications -->
 
@@ -727,6 +729,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <button class="btn" style="font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="testGitHubConnection()">🔗 Test Connection</button>
 </div>
 <div id="gh-status" style="margin-top:8px;font-size:10px;color:#64748b"></div>
+
+<div style="margin-top:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px">
+  <div style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:4px">📋 Dynamic Stock List</div>
+  <div style="font-size:9px;color:#64748b;margin-bottom:6px">Place your stock list at <code style="background:#dcfce7;padding:1px 4px;border-radius:3px">ScannerFile/stocks/stocks.json</code> in your repo. App loads it on startup.</div>
+  <div id="stocks-file-status" style="font-size:10px;color:#64748b;margin-bottom:6px">Not loaded yet</div>
+  <button class="btn" style="font-size:10px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_stocks_loaded_date');loadStocksFromGitHub(true)">🔄 Reload Stock List</button>
+</div>
 
   </div>
 </div>
@@ -957,8 +966,8 @@ const STOCKS=[
   {key:"NSE_EQ|INE914M01019",s:"WAAREEENER",n:"Waaree Energies",sec:"Power",scan:false,fo:true,lot:150,step:10},
 ];
 // ── Derived — do NOT edit, edit STOCKS above ──
-const NIFTY50=STOCKS.filter(s=>s.scan);
-const FO_STOCK_LIST=STOCKS.filter(s=>s.lot>0);
+let NIFTY50=STOCKS.filter(s=>s.scan);
+let FO_STOCK_LIST=STOCKS.filter(s=>s.lot>0);
 const INST_MAP={}; NIFTY50.forEach(i=>INST_MAP[i.key]=i);
 
 // Index options underlyings (for F&O Options tab)
@@ -1458,6 +1467,156 @@ async function ghWriteLog(signals, sha, retryCount=0){
 }
 
 // ══════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════
+// DYNAMIC STOCK LIST — ScannerFile/stocks/stocks.json
+// ══════════════════════════════════════
+const STOCKS_FILE = "ScannerFile/stocks/stocks.json";
+
+// Rebuild all derived arrays after STOCKS is updated
+function rebuildStockUniverse(newStocks){
+  if(!newStocks||!newStocks.length) return;
+  // Replace STOCKS contents in-place
+  STOCKS.length = 0;
+  newStocks.forEach(s=>STOCKS.push(s));
+  // Rebuild derived arrays
+  NIFTY50       = STOCKS.filter(s=>s.scan);
+  FO_STOCK_LIST = STOCKS.filter(s=>s.lot>0);
+  // Rebuild STOCK_MASTER_MAP
+  Object.keys(STOCK_MASTER_MAP).forEach(k=>delete STOCK_MASTER_MAP[k]);
+  [...NIFTY50,...FO_STOCK_LIST,...STOCK_MASTER,...STOCK_MASTER_EXTRA].forEach(s=>{
+    if(s.s&&!STOCK_MASTER_MAP[s.s])
+      STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:!!s.fo};
+  });
+  ALL_STOCKS = Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
+  lg(`Stock universe rebuilt: ${NIFTY50.length} scan stocks · ${FO_STOCK_LIST.length} F&O stocks · ${ALL_STOCKS.length} total`,"o");
+}
+
+// Fetch stocks.json from GitHub and apply if found
+async function loadStocksFromGitHub(forceReload=false){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  // Skip if already loaded today (once-per-day rule)
+  const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  if(!forceReload){
+    const lastLoaded = localStorage.getItem("friday_stocks_loaded_date");
+    if(lastLoaded === istToday){
+      lg("stocks.json: already loaded today — skipping fetch","o");
+      updateStocksStatus("✅ Using today's list ("+STOCKS.length+" stocks)", "#16a34a");
+      return;
+    }
+  }
+  try{
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404){
+      lg("stocks.json not found in repo — using built-in list","w");
+      updateStocksStatus("Not found — using built-in list ("+STOCKS.length+" stocks)", "#d97706");
+      return;
+    }
+    if(!r.ok){ lg("stocks.json fetch failed: HTTP "+r.status,"w"); return; }
+    const d = await r.json();
+    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
+
+    // Support multiple JSON formats:
+    // Format A (your format): { updated_at, count, data: [{symbol, isin, name, key}] }
+    // Format B (our format):  { updated, stocks: [{s, n, key, scan, fo, lot, step}] }
+    // Format C: plain array
+    const rawList = parsed.data || parsed.stocks || (Array.isArray(parsed) ? parsed : null);
+    if(!rawList||!rawList.length) throw new Error("Empty or invalid stocks.json");
+
+    // Build a lookup from the built-in STOCKS for F&O data cross-reference
+    const builtInMap = {};
+    STOCKS.forEach(s=>{ builtInMap[s.s] = s; });
+    // Also map by ISIN for more reliable matching
+    STOCKS.forEach(s=>{ 
+      const isin = s.key.replace("NSE_EQ|","");
+      builtInMap[isin] = s;
+    });
+
+    const list = rawList.map(item=>{
+      // Normalise field names
+      const sym  = item.s      || item.symbol   || "";
+      const name = item.n      || item.name      || sym;
+      const key  = item.key    || (sym ? "NSE_EQ|"+(item.isin||sym) : "");
+      const isin = item.isin   || key.replace("NSE_EQ|","");
+      const sec  = item.sec    || item.sector    || "NSE";
+
+      // Cross-reference built-in data for F&O fields (by symbol first, then ISIN)
+      const ref  = builtInMap[sym] || builtInMap[isin] || {};
+
+      return {
+        key,
+        s:    sym,
+        n:    name,
+        sec:  ref.sec  || sec,
+        scan: item.scan  !== undefined ? item.scan  : (ref.scan  !== undefined ? ref.scan  : true),
+        fo:   item.fo    !== undefined ? item.fo    : (ref.fo    || false),
+        lot:  item.lot   !== undefined ? item.lot   : (ref.lot   || 0),
+        step: item.step  !== undefined ? item.step  : (ref.step  || 0),
+      };
+    }).filter(s=>s.key && s.s); // drop any entries with missing key or symbol
+
+    rebuildStockUniverse(list);
+    // Mark as loaded today — subsequent boots will skip the fetch
+    localStorage.setItem("friday_stocks_loaded_date", new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
+    // Background: verify F&O for stocks that didn't have fo data in JSON
+    // Run silently after initial load — updates lot/fo flags from live API
+    const unknownFO = list.filter(s=>!s.fo && s.key);
+    if(unknownFO.length){
+      lg(`Checking F&O eligibility for ${unknownFO.length} stocks in background...`,"o");
+      setTimeout(()=>verifyFOEligibility(unknownFO), 3000);
+    }
+    const updatedAt = parsed.updated_at || parsed.updated || "";
+    const dateStr   = updatedAt ? " · Updated "+updatedAt.split("T")[0] : "";
+    const foCount   = list.filter(s=>s.fo).length;
+    updateStocksStatus(`✅ Loaded ${list.length} stocks (${foCount} F&O)${dateStr}`, "#16a34a");
+    lg(`stocks.json loaded: ${list.length} stocks · scan:${NIFTY50.length} · fo:${FO_STOCK_LIST.length}`,"o");
+  }catch(e){
+    lg("loadStocksFromGitHub: "+e.message,"w");
+    updateStocksStatus("⚠ Error: "+e.message+" — using built-in list", "#dc2626");
+  }
+}
+
+function updateStocksStatus(msg, color){
+  const el = document.getElementById("stocks-file-status");
+  if(el){ el.textContent=msg; el.style.color=color||"#64748b"; }
+}
+
+// ── Background F&O eligibility check via option/contract API ──
+// Called after loading stocks.json to fill in fo/lot flags for unknown stocks
+async function verifyFOEligibility(stocks){
+  let foFound = 0;
+  for(let i=0; i<stocks.length; i++){
+    const s = stocks[i];
+    try{
+      const { expiries, lotSize } = await fetchContractInfo(s.key);
+      if(expiries.length){
+        // Stock has options — update fo flag and real lot size
+        s.fo  = true;
+        s.lot = lotSize || s.lot || 1;
+        // Keep STOCKS array in sync
+        const inStocks = STOCKS.find(x=>x.s===s.s);
+        if(inStocks){ inStocks.fo=true; inStocks.lot=s.lot; }
+        // Keep STOCK_MASTER_MAP in sync
+        if(STOCK_MASTER_MAP[s.s]) STOCK_MASTER_MAP[s.s].fo=true;
+        foFound++;
+        lg(`${s.s}: F&O confirmed · lot ${s.lot}`,"o");
+      }
+    }catch(e){}
+    if(i%3===2) await sleep(1000);
+  }
+  if(foFound){
+    FO_STOCK_LIST = STOCKS.filter(s=>s.fo||s.lot>0);
+    lg(`verifyFOEligibility: ${foFound} F&O stocks confirmed with lot sizes`,"o");
+    const statusEl = document.getElementById("stocks-file-status");
+    if(statusEl){
+      statusEl.textContent = statusEl.textContent.replace(/\d+ F&O/, FO_STOCK_LIST.length+" F&O");
+    }
+  }
+}
+
 // FII / DII DATA — stored in GitHub as fii-dii/latest.json
 // Fetched from NSE via corsproxy, same storage pattern as signal log
 // ══════════════════════════════════════════════════════════════
@@ -1671,28 +1830,37 @@ function interpretFIIDII(d){
 }
 
 // ── Load FII/DII on boot: read from GitHub, refresh if stale (>4hr old) ──
-async function loadFIIDII(){
+async function loadFIIDII(forceReload=false){
   if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }
+  const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   try{
     const { data, sha } = await ghReadFIIDII();
-    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
 
-    // Check if stored data is from today
+    // Once-per-day: if we already have today's data, use it without hitting NSE
     const storedDate = data?.date ? new Date(data.date).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}) : null;
-    const isToday = storedDate === istDate;
-    const fetchedAt = data?.fetched_at ? new Date(data.fetched_at) : null;
-    const ageHrs = fetchedAt ? (Date.now() - fetchedAt.getTime()) / 3600000 : 99;
+    const alreadyToday = storedDate === istToday;
+    const lastFetched  = localStorage.getItem("friday_fiidii_loaded_date");
 
-    if(data && isToday && ageHrs < 5){
-      // Fresh enough — use cached
+    if(!forceReload && alreadyToday && lastFetched === istToday){
       FII_DATA = data;
-      lg(`FII/DII: loaded from GitHub (${data.date}, FII ${data.fii_net >= 0 ? "+" : ""}${data.fii_net?.toFixed(0)} Cr)`,"o");
+      lg(`FII/DII: using today's cached data (FII ${data.fii_net>=0?"+":""}${data.fii_net?.toFixed(0)} Cr)`,"o");
       renderFIIWidget();
-    } else {
-      // Stale or missing — fetch fresh from NSE
-      lg("FII/DII: fetching fresh from NSE...","o");
-      await refreshFIIDII();
+      return;
     }
+
+    if(!forceReload && alreadyToday && data){
+      // Data is today's but localStorage flag missing (e.g. cleared) — still use it
+      FII_DATA = data;
+      localStorage.setItem("friday_fiidii_loaded_date", istToday);
+      lg(`FII/DII: using today's GitHub data`,"o");
+      renderFIIWidget();
+      return;
+    }
+
+    // Need fresh data — fetch from NSE and save to GitHub
+    lg("FII/DII: fetching fresh from NSE...","o");
+    await refreshFIIDII();
+    localStorage.setItem("friday_fiidii_loaded_date", istToday);
   }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
 }
 
@@ -2743,6 +2911,8 @@ function boot(){
   loadSettingsUI();
   updateTokenInfo();
   loadGHSettings();
+  // Load dynamic stock list from GitHub (async — app works with built-in list while loading)
+  setTimeout(()=>loadStocksFromGitHub(), 1500);
   startTimers();
   // Request browser notification permission
   initNotifications();
@@ -3168,6 +3338,17 @@ async function fetchOptions(key,expiry){
 async function fetchExpiries(key){
   const d=await withRetry(()=>apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key)),"expiry:"+key.slice(0,20));
   return(d?.data||[]).map(e=>e.expiry||e).filter(Boolean).sort();
+}
+
+// Fetches expiries AND lot size from the same option/contract API call
+async function fetchContractInfo(key){
+  const d=await withRetry(()=>apiGet("/v2/option/contract?instrument_key="+encodeURIComponent(key)),"contract:"+key.slice(0,20));
+  const contracts = d?.data||[];
+  if(!contracts.length) return { expiries:[], lotSize:0 };
+  const expiries = [...new Set(contracts.map(e=>e.expiry||e.expiry_date).filter(Boolean))].sort();
+  // lot_size is same across all contracts for a given underlying — take from first
+  const lotSize  = contracts[0]?.lot_size || contracts[0]?.minimum_lot || 0;
+  return { expiries, lotSize };
 }
 
 
@@ -5954,7 +6135,7 @@ const STOCK_MASTER_MAP={};
   if(s.s&&!STOCK_MASTER_MAP[s.s])
     STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:!!s.fo};
 });
-const ALL_STOCKS=Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
+let ALL_STOCKS=Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
 
 // ══════════════════════════════════════
 // SEARCHABLE DROPDOWN
@@ -6248,38 +6429,33 @@ async function lookupStock(){
     // Render stock card
     renderStockCards([stockObj],1,"lkp-stock-card");
 
-    // Step 5: F&O Options
+    // Step 5: F&O Options — dynamically check via API instead of relying on hardcoded fo flag
+    // This works for any stock, including ones loaded from stocks.json without fo metadata
     const foSec=document.getElementById("lkp-fo-section");
-    const isFO=inst.fo===true||FO_STOCK_LIST.some(f=>f.s===sym)||NIFTY50.find(i=>i.s===sym)?.fo;
-    if(isFO){
-      foSec.style.display="block";
-      document.getElementById("lkp-fo-badge").textContent="F&O Eligible";
-      document.getElementById("lkp-fo-cards").innerHTML="";
-      document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#7c3aed;padding:8px">Loading options chain...</div>';
-      document.getElementById("lkp-progress").textContent="Loading F&O chain for "+sym+"...";
-      try{
-        // Resolve F&O instrument — prefer FO_STOCK_LIST (has lot size), fall back to inst
-        const foInst = FO_STOCK_LIST.find(f=>f.s===sym)
-                    || NIFTY50.find(i=>i.s===sym)
-                    || inst;
-        lg("F&O key: "+foInst.key+" lot:"+(foInst.lot||1));
+    foSec.style.display="block";
+    document.getElementById("lkp-fo-badge").textContent="Checking F&O...";
+    document.getElementById("lkp-fo-cards").innerHTML="";
+    document.getElementById("lkp-fo-stats").innerHTML='<div style="font-size:11px;color:#94a3b8;padding:8px">Checking if options are available...</div>';
+    document.getElementById("lkp-progress").textContent="Checking F&O contracts for "+sym+"...";
+    try{
+      const foInst = FO_STOCK_LIST.find(f=>f.s===sym) || NIFTY50.find(i=>i.s===sym) || inst;
 
-        const expiries = await fetchExpiries(foInst.key);
-        const expiry  = pickBestExpiry(expiries);
+      // Use fetchContractInfo to get both expiries AND real lot size in one API call
+      const { expiries, lotSize } = await fetchContractInfo(foInst.key);
+      // Use API lot size if available, fall back to hardcoded, then 1
+      const realLot = lotSize || foInst.lot || 1;
+      lg(`F&O check: ${foInst.key} · expiries:${expiries.length} · lot:${realLot}`);
 
-        // ── Handle: no expiries available ──
-        if(!expiries.length || !expiry){
-          document.getElementById("lkp-fo-stats").innerHTML="";
-          document.getElementById("lkp-fo-badge").textContent="F&O — No active expiry found";
-          document.getElementById("lkp-fo-cards").innerHTML=
-            `<div style="font-size:11px;color:#64748b;padding:8px">
-              No option contracts found for ${sym}.<br>
-              <span style="color:#94a3b8;font-size:10px">
-                This stock may not have active F&O contracts this expiry, or the instrument key may need updating.
-              </span>
-            </div>`;
-          lg(sym+": no expiries found","w");
-        } else {
+      // No expiries = stock has no options on NSE
+      if(!expiries.length){
+        document.getElementById("lkp-fo-stats").innerHTML="";
+        document.getElementById("lkp-fo-badge").textContent="No F&O";
+        document.getElementById("lkp-fo-cards").innerHTML=
+          `<div style="font-size:11px;color:#94a3b8;padding:8px 0">
+            No options contracts found for ${sym} on NSE.
+           </div>`;
+        lg(sym+": no F&O contracts on NSE","o");
+      } else {
 
         // expiry already set by pickBestExpiry above
         const chain  = await fetchOptions(foInst.key, expiry);
@@ -6304,7 +6480,7 @@ async function lookupStock(){
         const pcr2    = ceOI>0 ? +(peOI/ceOI).toFixed(2) : 1;
         const maxPain2= calcMaxPain(chain);
         const oiWalls2= calcOIWalls(chain);
-        const allPicks= scanChain(chain,atm,ltp,sym,expiry,foInst.lot||1,optBullForStock,vix,maxPain2,null);
+        const allPicks= scanChain(chain,atm,ltp,sym,expiry,realLot,optBullForStock,vix,maxPain2,null);
         const picks   = allPicks.filter(p=>p.confidence>=CFG.minOptConf);
         const mp2dist = maxPain2&&ltp ? ((maxPain2-ltp)/ltp*100).toFixed(1) : null;
 
@@ -6361,9 +6537,6 @@ async function lookupStock(){
           </div>`;
         lg(sym+" F&O: "+e.message,"e");
       }
-    } else {
-      foSec.style.display="none";
-    }
 
     document.getElementById("lkp-results").style.display="block";
     document.getElementById("lkp-loading").style.display="none";

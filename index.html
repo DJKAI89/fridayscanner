@@ -976,6 +976,33 @@ const INDEX_OPTS=[
   {key:"BSE_INDEX|SENSEX",        name:"SENSEX",     step:100, lot:20},
   {key:"NSE_INDEX|Nifty Fin Service",name:"FINNIFTY", step:50,  lot:65},
 ];
+// ── Refresh INDEX_OPTS lot sizes from live API (option/contract endpoint) ──
+// Runs once per day on boot — updates lot sizes without touching hardcoded step values
+async function refreshIndexLots(){
+  const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const lastLoaded = localStorage.getItem("friday_index_lots_date");
+  if(lastLoaded === istToday){
+    lg("Index lots: already loaded today — skipping","o");
+    return;
+  }
+  let updated = 0;
+  for(const idx of INDEX_OPTS){
+    try{
+      const { lotSize } = await fetchContractInfo(idx.key);
+      if(lotSize && lotSize !== idx.lot){
+        lg(`Index lot update: ${idx.name} ${idx.lot} → ${lotSize}`,"o");
+        idx.lot = lotSize;
+        updated++;
+      } else if(lotSize){
+        idx.lot = lotSize; // confirm even if same
+      }
+    }catch(e){ lg("refreshIndexLots "+idx.name+": "+e.message,"w"); }
+  }
+  localStorage.setItem("friday_index_lots_date", istToday);
+  lg(`Index lots refreshed: ${INDEX_OPTS.map(i=>i.name+"="+i.lot).join(" · ")}`,"o");
+}
+
+
 
 // ══════════════════════════════════════
 // STATE
@@ -2917,6 +2944,7 @@ function boot(){
   initNotifications();
   // Load FII/DII data (reads from GitHub, refreshes from NSE if stale)
   setTimeout(()=>loadFIIDII(), 2000);
+  setTimeout(()=>refreshIndexLots(), 2500); // fetch live index lot sizes from API
   // Load outcome-based confidence calibration from signal history
   setTimeout(()=>loadConfCalibration(), 3500);
   // Load cached name instantly, then refresh from API

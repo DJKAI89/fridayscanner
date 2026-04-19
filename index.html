@@ -594,7 +594,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="setting-card" style="grid-column:1/-1">
     <h4>🎯 Confidence Filter — Minimum Threshold</h4>
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
-      Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
+      Only results with Confidence ≥ threshold are shown.
     </div>
 
 <!-- Formula display -->
@@ -753,217 +753,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 // lot>0 = F&O eligible (options scanning)
 // To add a stock: one entry here, done.
 // ══════════════════════════════════════
-const STOCKS=[
-  // ── SCAN UNIVERSE (Nifty50 + Next50 + Top F&O) ──
-  {key:"NSE_EQ|INE002A01018",s:"RELIANCE",n:"Reliance Industries",sec:"Energy",scan:true,fo:true,lot:250,step:5},
-  {key:"NSE_EQ|INE467B01029",s:"TCS",n:"TCS",sec:"IT",scan:true,fo:true,lot:175,step:5},
-  {key:"NSE_EQ|INE040A01034",s:"HDFCBANK",n:"HDFC Bank",sec:"Banking",scan:true,fo:true,lot:550,step:5},
-  {key:"NSE_EQ|INE009A01021",s:"INFY",n:"Infosys",sec:"IT",scan:true,fo:true,lot:400,step:5},
-  {key:"NSE_EQ|INE090A01021",s:"ICICIBANK",n:"ICICI Bank",sec:"Banking",scan:true,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE030A01027",s:"HINDUNILVR",n:"Hindustan Unilever",sec:"FMCG",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE154A01025",s:"ITC",n:"ITC",sec:"FMCG",scan:true,fo:true,lot:3200,step:1},
-  {key:"NSE_EQ|INE062A01020",s:"SBIN",n:"State Bank of India",sec:"Banking",scan:true,fo:true,lot:750,step:5},
-  {key:"NSE_EQ|INE397D01024",s:"BHARTIARTL",n:"Bharti Airtel",sec:"Telecom",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE237A01028",s:"KOTAKBANK",n:"Kotak Mahindra Bank",sec:"Banking",scan:true,fo:true,lot:400,step:5},
-  {key:"NSE_EQ|INE018A01030",s:"LT",n:"Larsen & Toubro",sec:"Infra",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE238A01034",s:"AXISBANK",n:"Axis Bank",sec:"Banking",scan:true,fo:true,lot:625,step:5},
-  {key:"NSE_EQ|INE021A01026",s:"ASIANPAINT",n:"Asian Paints",sec:"Consumer",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE860A01027",s:"HCLTECH",n:"HCL Technologies",sec:"IT",scan:true,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE585B01010",s:"MARUTI",n:"Maruti Suzuki",sec:"Auto",scan:true,fo:true,lot:75,step:10},
-  {key:"NSE_EQ|INE044A01036",s:"SUNPHARMA",n:"Sun Pharma",sec:"Pharma",scan:true,fo:true,lot:350,step:5},
-  {key:"NSE_EQ|INE280A01028",s:"TITAN",n:"Titan Company",sec:"Consumer",scan:true,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE296A01024",s:"BAJFINANCE",n:"Bajaj Finance",sec:"NBFC",scan:true,fo:true,lot:125,step:10},
-  {key:"NSE_EQ|INE075A01022",s:"WIPRO",n:"Wipro",sec:"IT",scan:true,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE239A01016",s:"NESTLEIND",n:"Nestle India",sec:"FMCG",scan:true,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE669C01036",s:"TECHM",n:"Tech Mahindra",sec:"IT",scan:true,fo:true,lot:600,step:5},
-  {key:"NSE_EQ|INE101A01026",s:"M&M",n:"Mahindra & Mahindra",sec:"Auto",scan:true,fo:true,lot:350,step:5},
-  {key:"NSE_EQ|INE752E01010",s:"POWERGRID",n:"Power Grid Corp",sec:"Power",scan:true,fo:true,lot:2700,step:1},
-  {key:"NSE_EQ|INE733E01010",s:"NTPC",n:"NTPC",sec:"Power",scan:true,fo:true,lot:2250,step:1},
-  {key:"NSE_EQ|INE155A01022",s:"TATAMOTORS",n:"Tata Motors",sec:"Auto",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE081A01020",s:"TATASTEEL",n:"Tata Steel",sec:"Metals",scan:true,fo:true,lot:3375,step:1},
-  {key:"NSE_EQ|INE423A01024",s:"ADANIENT",n:"Adani Enterprises",sec:"Conglom",scan:true,fo:true,lot:250,step:10},
-  {key:"NSE_EQ|INE361B01024",s:"DIVISLAB",n:"Divi\'s Laboratories",sec:"Pharma",scan:true,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE918I01026",s:"BAJAJFINSV",n:"Bajaj Finserv",sec:"NBFC",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE019A01038",s:"JSWSTEEL",n:"JSW Steel",sec:"Metals",scan:true,fo:true,lot:675,step:5},
-  {key:"NSE_EQ|INE038A01020",s:"HINDALCO",n:"Hindalco Industries",sec:"Metals",scan:true,fo:true,lot:1400,step:1},
-  {key:"NSE_EQ|INE059A01026",s:"CIPLA",n:"Cipla",sec:"Pharma",scan:true,fo:true,lot:650,step:5},
-  {key:"NSE_EQ|INE089A01031",s:"DRREDDY",n:"Dr Reddy\'s Labs",sec:"Pharma",scan:true,fo:true,lot:175,step:5},
-  {key:"NSE_EQ|INE213A01029",s:"ONGC",n:"ONGC",sec:"Energy",scan:true,fo:true,lot:1925,step:1},
-  {key:"NSE_EQ|INE522F01014",s:"COALINDIA",n:"Coal India",sec:"Mining",scan:true,fo:true,lot:1350,step:1},
-  {key:"NSE_EQ|INE047A01021",s:"GRASIM",n:"Grasim Industries",sec:"Conglom",scan:true,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE066A01021",s:"EICHERMOT",n:"Eicher Motors",sec:"Auto",scan:true,fo:true,lot:175,step:10},
-  {key:"NSE_EQ|INE095A01012",s:"INDUSINDBK",n:"IndusInd Bank",sec:"Banking",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE437A01024",s:"APOLLOHOSP",n:"Apollo Hospitals",sec:"Healthcare",scan:true,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE742F01042",s:"ADANIPORTS",n:"Adani Ports",sec:"Logistics",scan:true,fo:true,lot:625,step:5},
-  {key:"NSE_EQ|INE029A01011",s:"BPCL",n:"BPCL",sec:"Energy",scan:true,fo:true,lot:1800,step:1},
-  {key:"NSE_EQ|INE158A01026",s:"HEROMOTOCO",n:"Hero MotoCorp",sec:"Auto",scan:true,fo:true,lot:150,step:5},
-  {key:"NSE_EQ|INE192A01025",s:"TATACONSUM",n:"Tata Consumer",sec:"FMCG",scan:true,fo:true,lot:1150,step:1},
-  {key:"NSE_EQ|INE216A01030",s:"BRITANNIA",n:"Britannia Industries",sec:"FMCG",scan:true,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE123W01016",s:"SBILIFE",n:"SBI Life Insurance",sec:"Insurance",scan:true,fo:true,lot:750,step:5},
-  {key:"NSE_EQ|INE795G01014",s:"HDFCLIFE",n:"HDFC Life Insurance",sec:"Insurance",scan:true,fo:true,lot:1100,step:1},
-  {key:"NSE_EQ|INE214T01019",s:"LTIM",n:"LTIMindtree",sec:"IT",scan:true,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE917I01010",s:"BAJAJ-AUTO",n:"Bajaj Auto",sec:"Auto",scan:true,fo:true,lot:75,step:10},
-  {key:"NSE_EQ|INE721I01017",s:"SHRIRAMFIN",n:"Shriram Finance",sec:"NBFC",scan:true,fo:true,lot:600,step:5},
-  {key:"NSE_EQ|INE481G01011",s:"ULTRACEMCO",n:"UltraTech Cement",sec:"Cement",scan:true,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE765G01017",s:"ICICIGI",n:"ICICI Lombard",sec:"Insurance",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE505B01027",s:"ICICIPRULI",n:"ICICI Pru Life",sec:"Insurance",scan:true,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE018B01017",s:"SBICARD",n:"SBI Cards",sec:"NBFC",scan:true,fo:true,lot:800,step:5},
-  {key:"NSE_EQ|INE670A01023",s:"TATAELXSI",n:"Tata Elxsi",sec:"IT",scan:true,fo:true,lot:175,step:10},
-  {key:"NSE_EQ|INE248U01004",s:"MOTHERSON",n:"Samvardhana Motherson",sec:"Auto",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE129A01019",s:"GAIL",n:"GAIL India",sec:"Energy",scan:true,fo:true,lot:4500,step:1},
-  {key:"NSE_EQ|INE819I01022",s:"HAVELLS",n:"Havells India",sec:"Consumer",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE628A01036",s:"PIDILITIND",n:"Pidilite Industries",sec:"Chemical",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE663F01024",s:"NAUKRI",n:"Info Edge (Naukri)",sec:"IT",scan:true,fo:true,lot:125,step:10},
-  {key:"NSE_EQ|INE148O01028",s:"DELHIVERY",n:"Delhivery",sec:"Logistics",scan:true,fo:true,lot:1200,step:1},
-  {key:"NSE_EQ|INE326A01037",s:"LUPIN",n:"Lupin",sec:"Pharma",scan:true,fo:true,lot:425,step:5},
-  {key:"NSE_EQ|INE437G01011",s:"NUVAMA",n:"Nuvama Wealth",sec:"NBFC",scan:true,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE813H01021",s:"TORNTPOWER",n:"Torrent Power",sec:"Power",scan:true,fo:true,lot:750,step:5},
-  {key:"NSE_EQ|INE406A01037",s:"AUROPHARMA",n:"Aurobindo Pharma",sec:"Pharma",scan:true,fo:true,lot:650,step:5},
-  {key:"NSE_EQ|INE376G01013",s:"BIOCON",n:"Biocon",sec:"Pharma",scan:true,fo:true,lot:2300,step:1},
-  {key:"NSE_EQ|INE028A01039",s:"BANKBARODA",n:"Bank of Baroda",sec:"Banking",scan:true,fo:true,lot:2700,step:1},
-  {key:"NSE_EQ|INE476A01022",s:"CANBK",n:"Canara Bank",sec:"Banking",scan:true,fo:true,lot:2800,step:1},
-  {key:"NSE_EQ|INE084A01016",s:"BANKINDIA",n:"Bank of India",sec:"Banking",scan:true,fo:true,lot:2600,step:1},
-  {key:"NSE_EQ|INE692A01016",s:"UNIONBANK",n:"Union Bank of India",sec:"Banking",scan:true,fo:true,lot:7600,step:1},
-  {key:"NSE_EQ|INE528G01035",s:"YESBANK",n:"Yes Bank",sec:"Banking",scan:true,fo:true,lot:40000,step:1},
-  {key:"NSE_EQ|INE545U01014",s:"BANDHANBNK",n:"Bandhan Bank",sec:"Banking",scan:true,fo:true,lot:2500,step:1},
-  {key:"NSE_EQ|INE649A01019",s:"FEDERALBNK",n:"Federal Bank",sec:"Banking",scan:true,fo:true,lot:5000,step:1},
-  {key:"NSE_EQ|INE092T01019",s:"IDFCFIRSTB",n:"IDFC First Bank",sec:"Banking",scan:true,fo:true,lot:7500,step:1},
-  {key:"NSE_EQ|INE160A01022",s:"PNB",n:"Punjab National Bank",sec:"Banking",scan:true,fo:true,lot:8000,step:1},
-  {key:"NSE_EQ|INE648A01021",s:"RBLBANK",n:"RBL Bank",sec:"Banking",scan:true,fo:true,lot:3500,step:1},
-  {key:"NSE_EQ|INE234A01023",s:"ETERNAL",n:"Eternal (Zomato)",sec:"Consumer",scan:true,fo:true,lot:4750,step:1},
-  {key:"NSE_EQ|INE335Y01020",s:"IRCTC",n:"IRCTC",sec:"Travel",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE114A01011",s:"SAIL",n:"SAIL",sec:"Metals",scan:true,fo:true,lot:8500,step:1},
-  {key:"NSE_EQ|INE205A01025",s:"VEDL",n:"Vedanta",sec:"Metals",scan:true,fo:true,lot:2900,step:1},
-  {key:"NSE_EQ|INE848E01016",s:"NHPC",n:"NHPC",sec:"Power",scan:true,fo:true,lot:6000,step:1},
-  {key:"NSE_EQ|INE00MH01021",s:"IREDA",n:"IREDA",sec:"Power",scan:true,fo:true,lot:4250,step:1},
-  {key:"NSE_EQ|INE263A01024",s:"BEL",n:"Bharat Electronics",sec:"Defence",scan:true,fo:true,lot:2900,step:1},
-  {key:"NSE_EQ|INE257A01026",s:"BHEL",n:"BHEL",sec:"Infra",scan:true,fo:true,lot:4500,step:1},
-  {key:"NSE_EQ|INE208A01029",s:"ASHOKLEY",n:"Ashok Leyland",sec:"Auto",scan:true,fo:true,lot:2800,step:1},
-  {key:"NSE_EQ|INE494B01023",s:"TVSMOTOR",n:"TVS Motor",sec:"Auto",scan:true,fo:true,lot:350,step:5},
-  {key:"NSE_EQ|INE935N01020",s:"DIXON",n:"Dixon Technologies",sec:"Consumer",scan:true,fo:true,lot:75,step:25},
-  {key:"NSE_EQ|INE591G01017",s:"COFORGE",n:"Coforge",sec:"IT",scan:true,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE262H01021",s:"PERSISTENT",n:"Persistent Systems",sec:"IT",scan:true,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE010B01027",s:"ZYDUSLIFE",n:"Zydus Lifesciences",sec:"Pharma",scan:true,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE685A01028",s:"TORNTPHARM",n:"Torrent Pharma",sec:"Pharma",scan:true,fo:true,lot:250,step:10},
-  {key:"NSE_EQ|INE540L01014",s:"ALKEM",n:"Alkem Laboratories",sec:"Pharma",scan:true,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE271C01023",s:"DLF",n:"DLF",sec:"Realty",scan:true,fo:true,lot:825,step:5},
-  {key:"NSE_EQ|INE484J01027",s:"GODREJPROP",n:"Godrej Properties",sec:"Realty",scan:true,fo:true,lot:400,step:5},
-  {key:"NSE_EQ|INE670K01029",s:"LODHA",n:"Lodha (Macrotech)",sec:"Realty",scan:true,fo:true,lot:800,step:5},
-  {key:"NSE_EQ|INE670K01036",s:"PRESTIGE",n:"Prestige Estates",sec:"Realty",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE093I01010",s:"OBEROIRLTY",n:"Oberoi Realty",sec:"Realty",scan:true,fo:true,lot:400,step:5},
-  {key:"NSE_EQ|INE484A01027",s:"PHOENIXLTD",n:"Phoenix Mills",sec:"Realty",scan:true,fo:true,lot:400,step:5},
-  {key:"NSE_EQ|INE188B01013",s:"HFCL",n:"HFCL",sec:"Telecom",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE088H01020",s:"INDUSTOWER",n:"Indus Towers",sec:"Telecom",scan:true,fo:true,lot:1400,step:1},
-  {key:"NSE_EQ|INE245A01021",s:"TATAPOWER",n:"Tata Power",sec:"Power",scan:true,fo:true,lot:2250,step:1},
-  {key:"NSE_EQ|INE364U01010",s:"ADANIGREEN",n:"Adani Green Energy",sec:"Power",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE931S01010",s:"ADANIENSOL",n:"Adani Energy Solutions",sec:"Power",scan:true,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE486A01021",s:"CESC",n:"CESC",sec:"Power",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE849H01027",s:"TRENT",n:"Trent",sec:"Consumer",scan:true,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE414G01012",s:"MUTHOOTFIN",n:"Muthoot Finance",sec:"NBFC",scan:true,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE121A01024",s:"CHOLAFIN",n:"Cholamandalam Finance",sec:"NBFC",scan:true,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE688I01017",s:"M&MFIN",n:"M&M Financial",sec:"NBFC",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE148I01020",s:"BAJAJHFL",n:"Bajaj Housing Finance",sec:"NBFC",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE115A01026",s:"LICHSGFIN",n:"LIC Housing Finance",sec:"NBFC",scan:true,fo:true,lot:1200,step:1},
-  {key:"NSE_EQ|INE736A01011",s:"CDSL",n:"CDSL",sec:"Finance",scan:true,fo:true,lot:600,step:5},
-  {key:"NSE_EQ|INE174A01027",s:"MFSL",n:"Max Financial Services",sec:"Insurance",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE334A01023",s:"STARHEALTH",n:"Star Health Insurance",sec:"Insurance",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE613D01019",s:"NIACL",n:"New India Assurance",sec:"Insurance",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE079A01024",s:"AMBUJACEM",n:"Ambuja Cements",sec:"Cement",scan:true,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE012A01025",s:"ACC",n:"ACC",sec:"Cement",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE500A01026",s:"SHREECEM",n:"Shree Cement",sec:"Cement",scan:true,fo:true,lot:25,step:50},
-  {key:"NSE_EQ|INE331A01037",s:"RAMCOCEM",n:"Ramco Cements",sec:"Cement",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE523B01011",s:"JKCEMENT",n:"JK Cement",sec:"Cement",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE094A01015",s:"HINDPETRO",n:"HPCL",sec:"Energy",scan:true,fo:true,lot:1800,step:1},
-  {key:"NSE_EQ|INE242A01010",s:"IOC",n:"Indian Oil Corp",sec:"Energy",scan:true,fo:true,lot:3750,step:1},
-  {key:"NSE_EQ|INE347G01014",s:"PETRONET",n:"Petronet LNG",sec:"Energy",scan:true,fo:true,lot:3000,step:1},
-  {key:"NSE_EQ|INE111A01025",s:"CONCOR",n:"Container Corp",sec:"Logistics",scan:true,fo:true,lot:1000,step:1},
-  {key:"NSE_EQ|INE053F01010",s:"IRFC",n:"IRFC",sec:"Finance",scan:true,fo:true,lot:4800,step:1},
-  {key:"NSE_EQ|INE066F01012",s:"HAL",n:"HAL",sec:"Defence",scan:true,fo:true,lot:150,step:5},
-  {key:"NSE_EQ|INE171Z01026",s:"BDL",n:"Bharat Dynamics",sec:"Defence",scan:true,fo:true,lot:250,step:5},
-  {key:"NSE_EQ|INE465A01025",s:"BHARATFORG",n:"Bharat Forge",sec:"Auto",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE298J01013",s:"CUMMINSIND",n:"Cummins India",sec:"Industrial",scan:true,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE152A01029",s:"THERMAX",n:"Thermax",sec:"Industrial",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE702C01027",s:"APLAPOLLO",n:"APL Apollo Tubes",sec:"Metals",scan:true,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE854D01024",s:"VBL",n:"Varun Beverages",sec:"FMCG",scan:true,fo:true,lot:1200,step:1},
-  {key:"NSE_EQ|INE196A01026",s:"MARICO",n:"Marico",sec:"FMCG",scan:true,fo:true,lot:1200,step:1},
-  {key:"NSE_EQ|INE016A01026",s:"DABUR",n:"Dabur India",sec:"FMCG",scan:true,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE179A01014",s:"COLPAL",n:"Colgate-Palmolive",sec:"FMCG",scan:true,fo:true,lot:350,step:5},
-  {key:"NSE_EQ|INE126A01031",s:"EMAMILTD",n:"Emami",sec:"FMCG",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE797F01012",s:"JUBLFOOD",n:"Jubilant FoodWorks",sec:"Consumer",scan:true,fo:true,lot:1250,step:1},
-  {key:"NSE_EQ|INE388Y01029",s:"NYKAA",n:"Nykaa",sec:"Consumer",scan:true,fo:true,lot:2800,step:1},
-  {key:"NSE_EQ|INE421A01028",s:"PAGEIND",n:"Page Industries",sec:"Consumer",scan:true,fo:true,lot:30,step:50},
-  {key:"NSE_EQ|INE455K01017",s:"POLYCAB",n:"Polycab India",sec:"Industrial",scan:true,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE647O01011",s:"ABFRL",n:"Aditya Birla Fashion",sec:"Consumer",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE083N01014",s:"ZOMATO",n:"Zomato",sec:"Consumer",scan:true,fo:true,lot:0,step:0},
-  {key:"NSE_EQ|INE982J01020",s:"PAYTM",n:"Paytm (One97 Comm)",sec:"FinTech",scan:true,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE732I01013",s:"ANGELONE",n:"Angel One",sec:"Finance",scan:true,fo:true,lot:250,step:10},
-  // ── F&O ONLY (options-eligible, not in main scan) ──
-  {key:"NSE_EQ|INE073H01019",s:"360ONE",n:"360 One Wam",sec:"Finance",scan:false,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE117A01022",s:"ABB",n:"ABB India",sec:"Industrial",scan:false,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE949L01017",s:"AUBANK",n:"AU Small Finance Bank",sec:"Banking",scan:false,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE674K01013",s:"ABCAPITAL",n:"Aditya Birla Capital",sec:"Finance",scan:false,fo:true,lot:2800,step:1},
-  {key:"NSE_EQ|INE371P01015",s:"AMBER",n:"Amber Enterprises",sec:"Industrial",scan:false,fo:true,lot:200,step:10},
-  {key:"NSE_EQ|INE006I01046",s:"ASTRAL",n:"Astral Ltd",sec:"Industrial",scan:false,fo:true,lot:450,step:5},
-  {key:"NSE_EQ|INE192R01011",s:"DMART",n:"Avenue Supermarts",sec:"Retail",scan:false,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE118H01025",s:"BSE",n:"BSE Ltd",sec:"NSE",scan:false,fo:true,lot:250,step:10},
-  {key:"NSE_EQ|INE118A01012",s:"BAJAJHLDNG",n:"Bajaj Holdings",sec:"Finance",scan:false,fo:true,lot:25,step:50},
-  {key:"NSE_EQ|INE550H01010",s:"BLUESTARCO",n:"Blue Star Ltd",sec:"Industrial",scan:false,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE323A01026",s:"BOSCHLTD",n:"Bosch Ltd",sec:"NSE",scan:false,fo:true,lot:25,step:50},
-  {key:"NSE_EQ|INE067A01029",s:"CGPOWER",n:"CG Power",sec:"NSE",scan:false,fo:true,lot:1300,step:1},
-  {key:"NSE_EQ|INE596I01020",s:"CAMS",n:"CAMS",sec:"NSE",scan:false,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE548C01032",s:"CROMPTON",n:"Crompton Greaves",sec:"Industrial",scan:false,fo:true,lot:1800,step:1},
-  {key:"NSE_EQ|INE232C01012",s:"DALBHARAT",n:"Dalmia Bharat",sec:"Cement",scan:false,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE302A01020",s:"EXIDEIND",n:"Exide Industries",sec:"Auto",scan:false,fo:true,lot:2700,step:1},
-  {key:"NSE_EQ|INE061F01013",s:"FORTIS",n:"Fortis Healthcare",sec:"Healthcare",scan:false,fo:true,lot:1600,step:1},
-  {key:"NSE_EQ|INE043D01016",s:"GMRAIRPORT",n:"GMR Airports",sec:"Infra",scan:false,fo:true,lot:8500,step:1},
-  {key:"NSE_EQ|INE935A01035",s:"GLENMARK",n:"Glenmark Pharma",sec:"Pharma",scan:false,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE102D01028",s:"GODREJCP",n:"Godrej Consumer",sec:"FMCG",scan:false,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE127D01025",s:"HDFCAMC",n:"HDFC AMC",sec:"NSE",scan:false,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE267A01025",s:"HINDZINC",n:"Hindustan Zinc",sec:"Metals",scan:false,fo:true,lot:1500,step:1},
-  {key:"NSE_EQ|INE031A01017",s:"HUDCO",n:"HUDCO",sec:"Finance",scan:false,fo:true,lot:4400,step:1},
-  {key:"NSE_EQ|INE562A01011",s:"INDIANB",n:"Indian Bank",sec:"Banking",scan:false,fo:true,lot:900,step:1},
-  {key:"NSE_EQ|INE022Q01020",s:"IEX",n:"IEX",sec:"Finance",scan:false,fo:true,lot:3750,step:1},
-  {key:"NSE_EQ|INE069I01010",s:"INOXWIND",n:"Inox Wind",sec:"Power",scan:false,fo:true,lot:3400,step:1},
-  {key:"NSE_EQ|INE646Q01024",s:"INDIGO",n:"IndiGo",sec:"Aviation",scan:false,fo:true,lot:150,step:10},
-  {key:"NSE_EQ|INE749A01030",s:"JINDALSTEL",n:"Jindal Steel & Power",sec:"NSE",scan:false,fo:true,lot:1000,step:1},
-  {key:"NSE_EQ|INE121E01018",s:"JSWENERGY",n:"JSW Energy",sec:"NSE",scan:false,fo:true,lot:1750,step:1},
-  {key:"NSE_EQ|INE758T01015",s:"JIOFIN",n:"Jio Financial Services",sec:"Finance",scan:false,fo:true,lot:6250,step:1},
-  {key:"NSE_EQ|INE237M01017",s:"KEI",n:"KEI Industries",sec:"Industrial",scan:false,fo:true,lot:275,step:5},
-  {key:"NSE_EQ|INE058I01030",s:"KPITTECH",n:"KPIT Technologies",sec:"IT",scan:false,fo:true,lot:600,step:5},
-  {key:"NSE_EQ|INE303R01014",s:"KALYANKJIL",n:"Kalyan Jewellers",sec:"Consumer",scan:false,fo:true,lot:1250,step:1},
-  {key:"NSE_EQ|INE617H01014",s:"KAYNES",n:"Kaynes Technology",sec:"Industrial",scan:false,fo:true,lot:125,step:10},
-  {key:"NSE_EQ|INE115H01027",s:"LTF",n:"L&T Finance",sec:"NBFC",scan:false,fo:true,lot:4200,step:1},
-  {key:"NSE_EQ|INE010D01018",s:"LAURUSLABS",n:"Laurus Labs",sec:"Pharma",scan:false,fo:true,lot:2000,step:1},
-  {key:"NSE_EQ|INE0J1Y01017",s:"LICI",n:"LIC of India",sec:"Insurance",scan:false,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE522D01027",s:"MANAPPURAM",n:"Manappuram Finance",sec:"NBFC",scan:false,fo:true,lot:4000,step:1},
-  {key:"NSE_EQ|INE634S01028",s:"MANKIND",n:"Mankind Pharma",sec:"Pharma",scan:false,fo:true,lot:300,step:5},
-  {key:"NSE_EQ|INE974X01010",s:"MAXHEALTH",n:"Max Healthcare",sec:"Healthcare",scan:false,fo:true,lot:700,step:5},
-  {key:"NSE_EQ|INE101E01011",s:"MAZDOCK",n:"Mazagon Dock",sec:"Defence",scan:false,fo:true,lot:250,step:10},
-  {key:"NSE_EQ|INE356A01018",s:"MPHASIS",n:"Mphasis",sec:"IT",scan:false,fo:true,lot:250,step:10},
-  {key:"NSE_EQ|INE745G01035",s:"MCX",n:"MCX India",sec:"Finance",scan:false,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE095N01023",s:"NBCC",n:"NBCC India",sec:"Infra",scan:false,fo:true,lot:7000,step:1},
-  {key:"NSE_EQ|INE584A01023",s:"NMDC",n:"NMDC",sec:"Metals",scan:false,fo:true,lot:3500,step:1},
-  {key:"NSE_EQ|INE274J01014",s:"OFSS",n:"Oracle Financial Services",sec:"IT",scan:false,fo:true,lot:100,step:10},
-  {key:"NSE_EQ|INE417T01026",s:"POLICYBZR",n:"PB Fintech (PolicyBazaar)",sec:"Finance",scan:false,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE260B01028",s:"PIIND",n:"PI Industries",sec:"Chemical",scan:false,fo:true,lot:200,step:5},
-  {key:"NSE_EQ|INE134E01011",s:"PFC",n:"Power Finance Corp",sec:"Finance",scan:false,fo:true,lot:2400,step:1},
-  {key:"NSE_EQ|INE020B01018",s:"RECLTD",n:"REC Ltd",sec:"Finance",scan:false,fo:true,lot:2550,step:1},
-  {key:"NSE_EQ|INE415G01027",s:"RVNL",n:"Rail Vikas Nigam",sec:"Infra",scan:false,fo:true,lot:3350,step:1},
-  {key:"NSE_EQ|INE647A01010",s:"SRF",n:"SRF",sec:"Chemical",scan:false,fo:true,lot:250,step:5},
-  {key:"NSE_EQ|INE003A01024",s:"SIEMENS",n:"Siemens India",sec:"Industrial",scan:false,fo:true,lot:175,step:10},
-  {key:"NSE_EQ|INE343H01021",s:"SOLARINDS",n:"Solar Industries",sec:"Chemical",scan:false,fo:true,lot:100,step:25},
-  {key:"NSE_EQ|INE429C01035",s:"SUPREMEIND",n:"Supreme Industries",sec:"Industrial",scan:false,fo:true,lot:175,step:10},
-  {key:"NSE_EQ|INE040H01021",s:"SUZLON",n:"Suzlon Energy",sec:"NSE",scan:false,fo:true,lot:7100,step:1},
-  {key:"NSE_EQ|INE519A01011",s:"SYNGENE",n:"Syngene International",sec:"Pharma",scan:false,fo:true,lot:875,step:1},
-  {key:"NSE_EQ|INE155R01011",s:"TATATECH",n:"Tata Technologies",sec:"NSE",scan:false,fo:true,lot:650,step:5},
-  {key:"NSE_EQ|INE083B01026",s:"INDHOTEL",n:"Indian Hotels",sec:"Hotels",scan:false,fo:true,lot:1400,step:1},
-  {key:"NSE_EQ|INE592I01027",s:"TIINDIA",n:"Tube Investments of India",sec:"Industrial",scan:false,fo:true,lot:350,step:5},
-  {key:"NSE_EQ|INE516G01027",s:"UNOMINDA",n:"Uno Minda",sec:"Auto",scan:false,fo:true,lot:1000,step:1},
-  {key:"NSE_EQ|INE628A01028",s:"UPL",n:"UPL",sec:"Chemical",scan:false,fo:true,lot:1300,step:1},
-  {key:"NSE_EQ|INE726G01027",s:"UNITDSPR",n:"United Spirits",sec:"Consumer",scan:false,fo:true,lot:375,step:5},
-  {key:"NSE_EQ|INE669E01016",s:"VOLTAS",n:"Voltas",sec:"Industrial",scan:false,fo:true,lot:500,step:5},
-  {key:"NSE_EQ|INE914M01019",s:"WAAREEENER",n:"Waaree Energies",sec:"Power",scan:false,fo:true,lot:150,step:10},
-];
+const STOCKS=[]; // Populated from ScannerFile/stocks/stocks.json at boot
 // ── Derived — do NOT edit, edit STOCKS above ──
 let NIFTY50=STOCKS.filter(s=>s.scan);
 let FO_STOCK_LIST=STOCKS.filter(s=>s.lot>0);
@@ -1499,109 +1289,116 @@ async function ghWriteLog(signals, sha, retryCount=0){
 // ══════════════════════════════════════
 const STOCKS_FILE = "/stocks/stocks.json";
 
-// Rebuild all derived arrays after STOCKS is updated
+// Rebuild all derived arrays after stocks.json is loaded
 function rebuildStockUniverse(newStocks){
   if(!newStocks||!newStocks.length) return;
-  // Replace STOCKS contents in-place
+  // Normalise field names from stocks.json format to internal format
+  const normalised = newStocks.map(item=>{
+    const sym  = item.s      || item.symbol  || "";
+    const name = item.n      || item.name    || sym;
+    const key  = item.key    || "";
+    const sec  = item.sec    || item.sector  || "NSE";
+    // hasOption in JSON maps to fo internally
+    const hasOpt = item.hasOption !== undefined ? item.hasOption
+                 : item.fo        !== undefined ? item.fo : null; // null = unknown, check API
+    const lot    = item.lot  || 0;
+    const step   = item.step || 0;
+    return { key, s:sym, n:name, sec, scan:true,
+             fo: hasOpt===true, lot, step,
+             _needsFOCheck: hasOpt===null || hasOpt===undefined }; // flag for API check
+  }).filter(s=>s.key && s.s);
+
+  // Replace STOCKS in-place
   STOCKS.length = 0;
-  newStocks.forEach(s=>STOCKS.push(s));
+  normalised.forEach(s=>STOCKS.push(s));
+
   // Rebuild derived arrays
-  NIFTY50       = STOCKS.filter(s=>s.scan);
-  FO_STOCK_LIST = STOCKS.filter(s=>s.lot>0);
-  // Rebuild STOCK_MASTER_MAP
+  NIFTY50       = STOCKS.slice(); // all stocks are scan candidates
+  FO_STOCK_LIST = STOCKS.filter(s=>s.fo && s.lot>0);
+
+  // Rebuild STOCK_MASTER_MAP (single lookup map for everything)
   Object.keys(STOCK_MASTER_MAP).forEach(k=>delete STOCK_MASTER_MAP[k]);
-  [...NIFTY50,...FO_STOCK_LIST,...STOCK_MASTER,...STOCK_MASTER_EXTRA].forEach(s=>{
-    if(s.s&&!STOCK_MASTER_MAP[s.s])
-      STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:!!s.fo};
+  STOCKS.forEach(s=>{
+    if(s.s) STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:s.fo,lot:s.lot};
   });
   ALL_STOCKS = Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
-  lg(`Stock universe rebuilt: ${NIFTY50.length} scan stocks · ${FO_STOCK_LIST.length} F&O stocks · ${ALL_STOCKS.length} total`,"o");
+  lg(`Universe: ${STOCKS.length} stocks · ${FO_STOCK_LIST.length} with options · ${STOCKS.filter(s=>s._needsFOCheck).length} pending API check`,"o");
 }
 
 // Fetch stocks.json from GitHub and apply if found
 async function loadStocksFromGitHub(forceReload=false){
   if(!GH.token||!GH.user||!GH.repo) return;
-  // Skip if already loaded today (once-per-day rule)
+
+  // Once-per-day: skip if already loaded today (stocks.json updates weekly, no need to re-fetch daily)
   const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   if(!forceReload){
     const lastLoaded = localStorage.getItem("friday_stocks_loaded_date");
-    if(lastLoaded === istToday){
-      lg("stocks.json: already loaded today — skipping fetch","o");
-      updateStocksStatus("✅ Using today's list ("+STOCKS.length+" stocks)", "#16a34a");
+    if(lastLoaded === istToday && STOCKS.length > 0){
+      lg("stocks.json: already loaded today","o");
+      updateStocksStatus("✅ "+STOCKS.length+" stocks · "+FO_STOCK_LIST.length+" F&O (today's list)", "#16a34a");
       return;
     }
   }
+
   try{
+    updateStocksStatus("⏳ Loading stocks.json from GitHub...", "#d97706");
     const r = await fetch(
       `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
       { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
     );
     if(r.status===404){
-      lg("stocks.json not found in repo — using built-in list","w");
-      updateStocksStatus("Not found — using built-in list ("+STOCKS.length+" stocks)", "#d97706");
+      lg("stocks.json not found at "+STOCKS_FILE,"w");
+      updateStocksStatus("⚠ stocks.json not found in repo", "#dc2626");
       return;
     }
-    if(!r.ok){ lg("stocks.json fetch failed: HTTP "+r.status,"w"); return; }
-    const d = await r.json();
-    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    if(!r.ok) throw new Error("HTTP "+r.status);
 
-    // Support multiple JSON formats:
-    // Format A (your format): { updated_at, count, data: [{symbol, isin, name, key}] }
-    // Format B (our format):  { updated, stocks: [{s, n, key, scan, fo, lot, step}] }
-    // Format C: plain array
+    const d = await r.json();
+    const parsed  = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    const fileSha = d.sha; // needed to write back updated data
+
+    // Support { data:[...] }  or  { stocks:[...] }  or  plain array
     const rawList = parsed.data || parsed.stocks || (Array.isArray(parsed) ? parsed : null);
     if(!rawList||!rawList.length) throw new Error("Empty or invalid stocks.json");
 
-    // Build a lookup from the built-in STOCKS for F&O data cross-reference
-    const builtInMap = {};
-    STOCKS.forEach(s=>{ builtInMap[s.s] = s; });
-    // Also map by ISIN for more reliable matching
-    STOCKS.forEach(s=>{ 
-      const isin = s.key.replace("NSE_EQ|","");
-      builtInMap[isin] = s;
-    });
-
+    // Build the normalised list
+    // hasOption (bool|null) + lot (number) per entry:
+    //   Both present  → use directly, skip API call
+    //   Either missing → queue for API check
     const list = rawList.map(item=>{
-      // Normalise field names
-      const sym  = item.s      || item.symbol   || "";
-      const name = item.n      || item.name      || sym;
-      const key  = item.key    || (sym ? "NSE_EQ|"+(item.isin||sym) : "");
-      const isin = item.isin   || key.replace("NSE_EQ|","");
-      const sec  = item.sec    || item.sector    || "NSE";
-
-      // Cross-reference built-in data for F&O fields (by symbol first, then ISIN)
-      const ref  = builtInMap[sym] || builtInMap[isin] || {};
-
-      return {
-        key,
-        s:    sym,
-        n:    name,
-        sec:  ref.sec  || sec,
-        scan: item.scan  !== undefined ? item.scan  : (ref.scan  !== undefined ? ref.scan  : true),
-        fo:   item.fo    !== undefined ? item.fo    : (ref.fo    || false),
-        lot:  item.lot   !== undefined ? item.lot   : (ref.lot   || 0),
-        step: item.step  !== undefined ? item.step  : (ref.step  || 0),
-      };
-    }).filter(s=>s.key && s.s); // drop any entries with missing key or symbol
+      const sym  = item.s || item.symbol || "";
+      const name = item.n || item.name   || sym;
+      const key  = item.key || "";
+      const sec  = item.sec || item.sector || "NSE";
+      // hasOption field (JSON) maps to fo internally
+      const hasOpt = item.hasOption !== undefined ? item.hasOption
+                   : item.fo        !== undefined ? item.fo        : null;
+      const lot    = (item.lot && item.lot > 0) ? item.lot : 0;
+      const step   = item.step || 0;
+      const needsCheck = (hasOpt === null || hasOpt === undefined || (hasOpt === true && lot === 0));
+      return { key, s:sym, n:name, sec, scan:true,
+               fo: hasOpt===true, lot, step, _needsFOCheck: needsCheck, _rawItem: item };
+    }).filter(s=>s.key && s.s);
 
     rebuildStockUniverse(list);
-    // Mark as loaded today — subsequent boots will skip the fetch
-    localStorage.setItem("friday_stocks_loaded_date", new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
-    // Background: verify F&O for stocks that didn't have fo data in JSON
-    // Run silently after initial load — updates lot/fo flags from live API
-    const unknownFO = list.filter(s=>!s.fo && s.key);
-    if(unknownFO.length){
-      lg(`Checking F&O eligibility for ${unknownFO.length} stocks in background...`,"o");
-      setTimeout(()=>verifyFOEligibility(unknownFO), 3000);
-    }
+    localStorage.setItem("friday_stocks_loaded_date", istToday);
+
+    const needCheck = list.filter(s=>s._needsFOCheck);
+    const knownFO   = list.filter(s=>s.fo && s.lot>0).length;
     const updatedAt = parsed.updated_at || parsed.updated || "";
-    const dateStr   = updatedAt ? " · Updated "+updatedAt.split("T")[0] : "";
-    const foCount   = list.filter(s=>s.fo).length;
-    updateStocksStatus(`✅ Loaded ${list.length} stocks (${foCount} F&O)${dateStr}`, "#16a34a");
-    lg(`stocks.json loaded: ${list.length} stocks · scan:${NIFTY50.length} · fo:${FO_STOCK_LIST.length}`,"o");
+    const dateStr   = updatedAt ? " · "+updatedAt.split("T")[0] : "";
+    updateStocksStatus(`✅ ${list.length} stocks · ${FO_STOCK_LIST.length} F&O known · ${needCheck.length} pending${dateStr}`, "#16a34a");
+    lg(`stocks.json: ${list.length} total · ${knownFO} F&O known · ${needCheck.length} need API check`,"o");
+
+    // Background: for stocks missing hasOption/lot — call option/contract API
+    // Then write the enriched data back to GitHub so next load is instant
+    if(needCheck.length){
+      lg(`Checking ${needCheck.length} stocks for F&O eligibility via API...`,"o");
+      setTimeout(()=>enrichAndSaveStocks(list, rawList, parsed, fileSha, needCheck), 2000);
+    }
   }catch(e){
     lg("loadStocksFromGitHub: "+e.message,"w");
-    updateStocksStatus("⚠ Error: "+e.message+" — using built-in list", "#dc2626");
+    updateStocksStatus("⚠ Error loading stocks.json: "+e.message, "#dc2626");
   }
 }
 
@@ -1610,36 +1407,66 @@ function updateStocksStatus(msg, color){
   if(el){ el.textContent=msg; el.style.color=color||"#64748b"; }
 }
 
-// ── Background F&O eligibility check via option/contract API ──
-// Called after loading stocks.json to fill in fo/lot flags for unknown stocks
-async function verifyFOEligibility(stocks){
-  let foFound = 0;
-  for(let i=0; i<stocks.length; i++){
-    const s = stocks[i];
+// ── Enrich stocks missing hasOption/lot via API, then write back to GitHub ──
+// Runs in background after loadStocksFromGitHub — enriches the JSON once, then
+// subsequent loads are instant (no API calls needed for known stocks)
+async function enrichAndSaveStocks(normList, rawList, parsed, fileSha, toCheck){
+  let changed = 0;
+  // Build a map from symbol → index in rawList for fast update
+  const rawMap = {};
+  rawList.forEach((item,i)=>{ const sym=item.s||item.symbol||""; if(sym) rawMap[sym]=i; });
+
+  for(let i=0; i<toCheck.length; i++){
+    const s = toCheck[i];
     try{
       const { expiries, lotSize } = await fetchContractInfo(s.key);
-      if(expiries.length){
-        // Stock has options — update fo flag and real lot size
-        s.fo  = true;
-        s.lot = lotSize || s.lot || 1;
-        // Keep STOCKS array in sync
-        const inStocks = STOCKS.find(x=>x.s===s.s);
-        if(inStocks){ inStocks.fo=true; inStocks.lot=s.lot; }
-        // Keep STOCK_MASTER_MAP in sync
-        if(STOCK_MASTER_MAP[s.s]) STOCK_MASTER_MAP[s.s].fo=true;
-        foFound++;
-        lg(`${s.s}: F&O confirmed · lot ${s.lot}`,"o");
+      const hasOption = expiries.length > 0;
+      const lot = hasOption ? (lotSize || s.lot || 1) : 0;
+
+      // Update in-memory STOCKS
+      s.fo  = hasOption;
+      s.lot = lot;
+      const inStocks = STOCKS.find(x=>x.s===s.s);
+      if(inStocks){ inStocks.fo=hasOption; inStocks.lot=lot; }
+      if(STOCK_MASTER_MAP[s.s]){ STOCK_MASTER_MAP[s.s].fo=hasOption; STOCK_MASTER_MAP[s.s].lot=lot; }
+
+      // Update the raw JSON item so we can write it back
+      const rawIdx = rawMap[s.s];
+      if(rawIdx!==undefined){
+        rawList[rawIdx].hasOption = hasOption;
+        rawList[rawIdx].lot       = lot;
+        if(!rawList[rawIdx].step && lot>0) rawList[rawIdx].step = s.step||0;
       }
-    }catch(e){}
+      if(hasOption) lg(`${s.s}: hasOption=true lot=${lot}`,"o");
+      changed++;
+    }catch(e){ lg("enrichStocks "+s.s+": "+e.message,"w"); }
+    // Throttle: ~3 calls/sec
     if(i%3===2) await sleep(1000);
   }
-  if(foFound){
-    FO_STOCK_LIST = STOCKS.filter(s=>s.fo||s.lot>0);
-    lg(`verifyFOEligibility: ${foFound} F&O stocks confirmed with lot sizes`,"o");
-    const statusEl = document.getElementById("stocks-file-status");
-    if(statusEl){
-      statusEl.textContent = statusEl.textContent.replace(/\d+ F&O/, FO_STOCK_LIST.length+" F&O");
-    }
+
+  // Rebuild FO_STOCK_LIST with updated data
+  FO_STOCK_LIST = STOCKS.filter(s=>s.fo && s.lot>0);
+  const foCount = FO_STOCK_LIST.length;
+  updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foCount} F&O (enriched)`, "#16a34a");
+  lg(`Enrichment done: ${changed} checked · ${foCount} total F&O stocks`,"o");
+
+  // Write enriched data back to GitHub so next load skips all API calls
+  if(changed>0 && GH.token && GH.user && GH.repo){
+    try{
+      // Rebuild the full parsed object with updated rawList
+      const updatedParsed = { ...parsed, data: rawList,
+        updated_at: parsed.updated_at, // preserve original update date
+        fo_enriched_at: new Date().toISOString() };
+      const content = btoa(unescape(encodeURIComponent(JSON.stringify(updatedParsed, null, 2))));
+      const body = { message:"FRIDAY: enrich F&O data · "+new Date().toISOString().split("T")[0], content, sha: fileSha };
+      const r = await fetch(
+        `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+        { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+          body: JSON.stringify(body) }
+      );
+      if(r.ok) lg("stocks.json written back to GitHub with F&O data ✅","o");
+      else lg("stocks.json write failed: HTTP "+r.status,"w");
+    }catch(e){ lg("stocks.json write: "+e.message,"w"); }
   }
 }
 
@@ -5964,203 +5791,17 @@ function updateTicker(nLtp,nChg,bLtp,bChg,sent,sc,topSec,vix,pcr){
 // ══════════════════════════════════════
 // STOCK MASTER — 500+ NSE stocks with correct ISIN instrument keys
 // ══════════════════════════════════════
-const STOCK_MASTER=[
-{key:"NSE_EQ|INE346A01027",s:"ICICIAMC",n:"ICICI Prudential AMC",sec:"Finance"},
-{key:"NSE_EQ|INE127D01025",s:"HDFCAMC",n:"HDFC AMC",sec:"Finance"},
-{key:"NSE_EQ|INE438H01022",s:"NIPPONLIFE",n:"Nippon Life India AMC",sec:"Finance"},
-{key:"NSE_EQ|INE437G01011",s:"NUVAMA",n:"Nuvama Wealth",sec:"Finance"},
-{key:"NSE_EQ|INE028A01039",s:"BANKBARODA",n:"Bank of Baroda",sec:"Banking"},
-{key:"NSE_EQ|INE476A01022",s:"CANBK",n:"Canara Bank",sec:"Banking"},
-{key:"NSE_EQ|INE084A01016",s:"BANKINDIA",n:"Bank of India",sec:"Banking"},
-{key:"NSE_EQ|INE692A01016",s:"UNIONBANK",n:"Union Bank of India",sec:"Banking"},
-{key:"NSE_EQ|INE528G01035",s:"YESBANK",n:"Yes Bank",sec:"Banking"},
-{key:"NSE_EQ|INE545U01014",s:"BANDHANBNK",n:"Bandhan Bank",sec:"Banking"},
-{key:"NSE_EQ|INE092T01019",s:"IDFCFIRSTB",n:"IDFC First Bank",sec:"Banking"},
-{key:"NSE_EQ|INE160A01022",s:"PNB",n:"Punjab National Bank",sec:"Banking"},
-{key:"NSE_EQ|INE491A01021",s:"RBLBANK",n:"RBL Bank",sec:"Banking"},
-{key:"NSE_EQ|INE562A01011",s:"INDIANB",n:"Indian Bank",sec:"Banking"},
-{key:"NSE_EQ|INE649A01019",s:"FEDERALBNK",n:"Federal Bank",sec:"Banking"},
-{key:"NSE_EQ|INE591G01017",s:"COFORGE",n:"Coforge",sec:"IT"},
-{key:"NSE_EQ|INE262H01021",s:"PERSISTENT",n:"Persistent Systems",sec:"IT"},
-{key:"NSE_EQ|INE670A01023",s:"TATAELXSI",n:"Tata Elxsi",sec:"IT"},
-{key:"NSE_EQ|INE058I01030",s:"KPITTECH",n:"KPIT Technologies",sec:"IT"},
-{key:"NSE_EQ|INE356A01018",s:"MPHASIS",n:"Mphasis",sec:"IT"},
-{key:"NSE_EQ|INE663F01024",s:"NAUKRI",n:"Info Edge Naukri",sec:"IT"},
-{key:"NSE_EQ|INE274J01014",s:"OFSS",n:"Oracle Financial Services",sec:"IT"},
-{key:"NSE_EQ|INE155R01011",s:"TATATECH",n:"Tata Technologies",sec:"IT"},
-{key:"NSE_EQ|INE326A01037",s:"LUPIN",n:"Lupin",sec:"Pharma"},
-{key:"NSE_EQ|INE406A01037",s:"AUROPHARMA",n:"Aurobindo Pharma",sec:"Pharma"},
-{key:"NSE_EQ|INE376G01013",s:"BIOCON",n:"Biocon",sec:"Pharma"},
-{key:"NSE_EQ|INE010B01027",s:"ZYDUSLIFE",n:"Zydus Lifesciences",sec:"Pharma"},
-{key:"NSE_EQ|INE685A01028",s:"TORNTPHARM",n:"Torrent Pharma",sec:"Pharma"},
-{key:"NSE_EQ|INE935N01012",s:"GLENMARK",n:"Glenmark Pharma",sec:"Pharma"},
-{key:"NSE_EQ|INE634S01028",s:"MANKIND",n:"Mankind Pharma",sec:"Pharma"},
-{key:"NSE_EQ|INE010D01018",s:"LAURUSLABS",n:"Laurus Labs",sec:"Pharma"},
-{key:"NSE_EQ|INE519A01011",s:"SYNGENE",n:"Syngene International",sec:"Pharma"},
-{key:"NSE_EQ|INE976D01013",s:"LALPATHLAB",n:"Dr Lal PathLabs",sec:"Healthcare"},
-{key:"NSE_EQ|INE153K01027",s:"METROPOLIS",n:"Metropolis Healthcare",sec:"Healthcare"},
-{key:"NSE_EQ|INE974X01010",s:"MAXHEALTH",n:"Max Healthcare",sec:"Healthcare"},
-{key:"NSE_EQ|INE061F01013",s:"FORTIS",n:"Fortis Healthcare",sec:"Healthcare"},
-{key:"NSE_EQ|INE596I01020",s:"CAMS",n:"CAMS",sec:"Finance"},
-{key:"NSE_EQ|INE736A01011",s:"CDSL",n:"CDSL",sec:"Finance"},
-{key:"NSE_EQ|INE118H01025",s:"BSE",n:"BSE Ltd",sec:"Finance"},
-{key:"NSE_EQ|INE745G01035",s:"MCX",n:"MCX India",sec:"Finance"},
-{key:"NSE_EQ|INE0J1Y01017",s:"LICI",n:"LIC of India",sec:"Insurance"},
-{key:"NSE_EQ|INE765G01017",s:"ICICIGI",n:"ICICI Lombard",sec:"Insurance"},
-{key:"NSE_EQ|INE505B01027",s:"ICICIPRULI",n:"ICICI Prudential Life",sec:"Insurance"},
-{key:"NSE_EQ|INE174A01027",s:"MFSL",n:"Max Financial Services",sec:"Insurance"},
-{key:"NSE_EQ|INE018B01017",s:"SBICARD",n:"SBI Cards",sec:"NBFC"},
-{key:"NSE_EQ|INE296B01018",s:"MUTHOOTFIN",n:"Muthoot Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE121A01024",s:"CHOLAFIN",n:"Cholamandalam Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE522D01027",s:"MANAPPURAM",n:"Manappuram Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE688I01017",s:"M&MFIN",n:"M&M Financial Services",sec:"NBFC"},
-{key:"NSE_EQ|INE148I01020",s:"BAJAJHFL",n:"Bajaj Housing Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE115A01026",s:"LICHSGFIN",n:"LIC Housing Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE115H01027",s:"LTF",n:"L&T Finance",sec:"NBFC"},
-{key:"NSE_EQ|INE417T01026",s:"POLICYBZR",n:"PB Fintech PolicyBazaar",sec:"Finance"},
-{key:"NSE_EQ|INE758T01015",s:"JIOFIN",n:"Jio Financial Services",sec:"Finance"},
-{key:"NSE_EQ|INE285B01017",s:"IRFC",n:"IRFC",sec:"Finance"},
-{key:"NSE_EQ|INE134E01011",s:"PFC",n:"Power Finance Corp",sec:"Finance"},
-{key:"NSE_EQ|INE020B01018",s:"RECLTD",n:"REC Ltd",sec:"Finance"},
-{key:"NSE_EQ|INE982J01020",s:"PAYTM",n:"Paytm One97 Communications",sec:"Fintech"},
-{key:"NSE_EQ|INE732I01013",s:"ANGELONE",n:"Angel One",sec:"Finance"},
-{key:"NSE_EQ|INE248U01004",s:"MOTHERSON",n:"Samvardhana Motherson",sec:"Auto"},
-{key:"NSE_EQ|INE208A01029",s:"ASHOKLEY",n:"Ashok Leyland",sec:"Auto"},
-{key:"NSE_EQ|INE494B01023",s:"TVSMOTOR",n:"TVS Motor Company",sec:"Auto"},
-{key:"NSE_EQ|INE465A01025",s:"BHARATFORG",n:"Bharat Forge",sec:"Auto"},
-{key:"NSE_EQ|INE302A01020",s:"EXIDEIND",n:"Exide Industries",sec:"Auto"},
-{key:"NSE_EQ|INE066P01011",s:"INDIGO",n:"IndiGo InterGlobe Aviation",sec:"Aviation"},
-{key:"NSE_EQ|INE271C01023",s:"DLF",n:"DLF",sec:"Realty"},
-{key:"NSE_EQ|INE075I01017",s:"GODREJPROP",n:"Godrej Properties",sec:"Realty"},
-{key:"NSE_EQ|INE670K01029",s:"LODHA",n:"Macrotech Developers Lodha",sec:"Realty"},
-{key:"NSE_EQ|INE036B01022",s:"PRESTIGE",n:"Prestige Estates",sec:"Realty"},
-{key:"NSE_EQ|INE620A01016",s:"OBEROIRLTY",n:"Oberoi Realty",sec:"Realty"},
-{key:"NSE_EQ|INE484A01027",s:"PHOENIXLTD",n:"Phoenix Mills",sec:"Realty"},
-{key:"NSE_EQ|INE192R01011",s:"DMART",n:"Avenue Supermarts DMart",sec:"Retail"},
-{key:"NSE_EQ|INE849H01027",s:"TRENT",n:"Trent",sec:"Retail"},
-{key:"NSE_EQ|INE079A01024",s:"AMBUJACEM",n:"Ambuja Cements",sec:"Cement"},
-{key:"NSE_EQ|INE012A01025",s:"ACC",n:"ACC",sec:"Cement"},
-{key:"NSE_EQ|INE500A01026",s:"SHREECEM",n:"Shree Cement",sec:"Cement"},
-{key:"NSE_EQ|INE331A01037",s:"RAMCOCEM",n:"Ramco Cements",sec:"Cement"},
-{key:"NSE_EQ|INE232C01012",s:"DALBHARAT",n:"Dalmia Bharat",sec:"Cement"},
-{key:"NSE_EQ|INE517F01014",s:"TATAPOWER",n:"Tata Power",sec:"Power"},
-{key:"NSE_EQ|INE364U01010",s:"ADANIGREEN",n:"Adani Green Energy",sec:"Power"},
-{key:"NSE_EQ|INE931S01010",s:"ADANIENSOL",n:"Adani Energy Solutions",sec:"Power"},
-{key:"NSE_EQ|INE486A01021",s:"CESC",n:"CESC",sec:"Power"},
-{key:"NSE_EQ|INE813H01021",s:"TORNTPOWER",n:"Torrent Power",sec:"Power"},
-{key:"NSE_EQ|INE121E01018",s:"JSWENERGY",n:"JSW Energy",sec:"Power"},
-{key:"NSE_EQ|INE848E01016",s:"NHPC",n:"NHPC",sec:"Power"},
-{key:"NSE_EQ|INE067A01029",s:"CGPOWER",n:"CG Power",sec:"Industrial"},
-{key:"NSE_EQ|INE129A01019",s:"GAIL",n:"GAIL India",sec:"Energy"},
-{key:"NSE_EQ|INE017A01032",s:"HINDPETRO",n:"HPCL",sec:"Energy"},
-{key:"NSE_EQ|INE242A01010",s:"IOC",n:"Indian Oil Corp",sec:"Energy"},
-{key:"NSE_EQ|INE011A01031",s:"PETRONET",n:"Petronet LNG",sec:"Energy"},
-{key:"NSE_EQ|INE00MH01021",s:"IREDA",n:"IREDA",sec:"Power"},
-{key:"NSE_EQ|INE914M01019",s:"WAAREEENER",n:"Waaree Energies",sec:"Power"},
-{key:"NSE_EQ|INE263A01024",s:"BEL",n:"Bharat Electronics",sec:"Defence"},
-{key:"NSE_EQ|INE257A01026",s:"BHEL",n:"BHEL",sec:"Infra"},
-{key:"NSE_EQ|INE066F01012",s:"HAL",n:"Hindustan Aeronautics HAL",sec:"Defence"},
-{key:"NSE_EQ|INE171Z01026",s:"BDL",n:"Bharat Dynamics",sec:"Defence"},
-{key:"NSE_EQ|INE101E01011",s:"MAZDOCK",n:"Mazagon Dock",sec:"Defence"},
-{key:"NSE_EQ|INE205A01025",s:"VEDL",n:"Vedanta",sec:"Metals"},
-{key:"NSE_EQ|INE584A01023",s:"NMDC",n:"NMDC",sec:"Metals"},
-{key:"NSE_EQ|INE267A01025",s:"HINDZINC",n:"Hindustan Zinc",sec:"Metals"},
-{key:"NSE_EQ|INE114A01011",s:"SAIL",n:"SAIL Steel Authority",sec:"Metals"},
-{key:"NSE_EQ|INE749A01030",s:"JINDALSTEL",n:"Jindal Steel and Power",sec:"Metals"},
-{key:"NSE_EQ|INE522A01014",s:"APLAPOLLO",n:"APL Apollo Tubes",sec:"Metals"},
-{key:"NSE_EQ|INE636A01011",s:"MARICO",n:"Marico",sec:"FMCG"},
-{key:"NSE_EQ|INE016A01026",s:"DABUR",n:"Dabur India",sec:"FMCG"},
-{key:"NSE_EQ|INE179A01014",s:"COLPAL",n:"Colgate Palmolive",sec:"FMCG"},
-{key:"NSE_EQ|INE126A01031",s:"EMAMILTD",n:"Emami",sec:"FMCG"},
-{key:"NSE_EQ|INE854D01024",s:"VBL",n:"Varun Beverages",sec:"FMCG"},
-{key:"NSE_EQ|INE233A01035",s:"PAGEIND",n:"Page Industries",sec:"Consumer"},
-{key:"NSE_EQ|INE655A01013",s:"JUBLFOOD",n:"Jubilant FoodWorks",sec:"Consumer"},
-{key:"NSE_EQ|INE234A01023",s:"ETERNAL",n:"Eternal Zomato",sec:"Consumer"},
-{key:"NSE_EQ|INE388Y01029",s:"NYKAA",n:"Nykaa FSN E-Commerce",sec:"Consumer"},
-{key:"NSE_EQ|INE102D01028",s:"GODREJCP",n:"Godrej Consumer Products",sec:"FMCG"},
-{key:"NSE_EQ|INE455K01017",s:"POLYCAB",n:"Polycab India",sec:"Industrial"},
-{key:"NSE_EQ|INE048A01002",s:"CUMMINSIND",n:"Cummins India",sec:"Industrial"},
-{key:"NSE_EQ|INE003A01024",s:"SIEMENS",n:"Siemens India",sec:"Industrial"},
-{key:"NSE_EQ|INE117A01022",s:"ABB",n:"ABB India",sec:"Industrial"},
-{key:"NSE_EQ|INE550H01010",s:"BLUESTARCO",n:"Blue Star",sec:"Industrial"},
-{key:"NSE_EQ|INE819I01022",s:"HAVELLS",n:"Havells India",sec:"Industrial"},
-{key:"NSE_EQ|INE323A01026",s:"BOSCHLTD",n:"Bosch Ltd",sec:"Industrial"},
-{key:"NSE_EQ|INE592I01027",s:"TIINDIA",n:"Tube Investments of India",sec:"Industrial"},
-{key:"NSE_EQ|INE237M01017",s:"KEI",n:"KEI Industries",sec:"Industrial"},
-{key:"NSE_EQ|INE617H01014",s:"KAYNES",n:"Kaynes Technology",sec:"Industrial"},
-{key:"NSE_EQ|INE935N01020",s:"DIXON",n:"Dixon Technologies",sec:"Industrial"},
-{key:"NSE_EQ|INE429C01035",s:"SUPREMEIND",n:"Supreme Industries",sec:"Industrial"},
-{key:"NSE_EQ|INE628A01036",s:"PIDILITIND",n:"Pidilite Industries",sec:"Chemical"},
-{key:"NSE_EQ|INE260B01028",s:"PIIND",n:"PI Industries",sec:"Chemical"},
-{key:"NSE_EQ|INE647A01010",s:"SRF",n:"SRF",sec:"Chemical"},
-{key:"NSE_EQ|INE111A01025",s:"CONCOR",n:"Container Corp",sec:"Logistics"},
-{key:"NSE_EQ|INE148O01028",s:"DELHIVERY",n:"Delhivery",sec:"Logistics"},
-{key:"NSE_EQ|INE415G01027",s:"RVNL",n:"Rail Vikas Nigam",sec:"Infra"},
-{key:"NSE_EQ|INE335Y01020",s:"IRCTC",n:"IRCTC",sec:"Travel"},
-{key:"NSE_EQ|INE083B01026",s:"INDHOTEL",n:"Indian Hotels Taj",sec:"Hotels"},
-{key:"NSE_EQ|INE095N01023",s:"NBCC",n:"NBCC India",sec:"Infra"},
-{key:"NSE_EQ|INE043D01016",s:"GMRAIRPORT",n:"GMR Airports",sec:"Infra"},
-{key:"NSE_EQ|INE646E01012",s:"INDUSTOWER",n:"Indus Towers",sec:"Telecom"},
-{key:"NSE_EQ|INE303R01014",s:"KALYANKJIL",n:"Kalyan Jewellers",sec:"Consumer"},
-{key:"NSE_EQ|INE861I01024",s:"ASTERDM",n:"Aster DM Healthcare",sec:"Healthcare"},
-{key:"NSE_EQ|INE040H01021",s:"SUZLON",n:"Suzlon Energy",sec:"Power"},
-];
+const STOCK_MASTER=[]; // Merged into STOCKS from stocks.json
 
 // ── STOCK_MASTER_EXTRA — additional stocks for Analyse tab search ──
-const STOCK_MASTER_EXTRA=[
-  {key:"NSE_EQ|INE646Q01024",s:"INDIGO",n:"InterGlobe Aviation IndiGo",sec:"Aviation"},
-  {key:"NSE_EQ|INE069I01010",s:"INOXWIND",n:"Inox Wind",sec:"Power"},
-  {key:"NSE_EQ|INE466L01038",s:"360ONE",n:"360 ONE WAM",sec:"Finance"},
-  {key:"NSE_EQ|INE949L01017",s:"AUBANK",n:"AU Small Finance Bank",sec:"Banking"},
-  {key:"NSE_EQ|INE674K01013",s:"ABCAPITAL",n:"Aditya Birla Capital",sec:"Finance"},
-  {key:"NSE_EQ|INE540L01014",s:"ALKEM",n:"Alkem Laboratories",sec:"Pharma"},
-  {key:"NSE_EQ|INE006I01046",s:"ASTRAL",n:"Astral Ltd",sec:"Industrial"},
-  {key:"NSE_EQ|INE192R01011",s:"DMART",n:"Avenue Supermarts DMart",sec:"Retail"},
-  {key:"NSE_EQ|INE232C01012",s:"DALBHARAT",n:"Dalmia Bharat",sec:"Cement"},
-  {key:"NSE_EQ|INE935A01035",s:"GLENMARK",n:"Glenmark Pharma",sec:"Pharma"},
-  {key:"NSE_EQ|INE022Q01020",s:"IEX",n:"Indian Energy Exchange",sec:"Finance"},
-  {key:"NSE_EQ|INE797F01012",s:"JUBLFOOD",n:"Jubilant FoodWorks",sec:"Consumer"},
-  {key:"NSE_EQ|INE303R01014",s:"KALYANKJIL",n:"Kalyan Jewellers",sec:"Consumer"},
-  {key:"NSE_EQ|INE115H01027",s:"LTF",n:"L&T Finance",sec:"NBFC"},
-  {key:"NSE_EQ|INE0J1Y01017",s:"LICI",n:"LIC of India",sec:"Insurance"},
-  {key:"NSE_EQ|INE745G01035",s:"MCX",n:"MCX India",sec:"Finance"},
-  {key:"NSE_EQ|INE356A01018",s:"MPHASIS",n:"Mphasis",sec:"IT"},
-  {key:"NSE_EQ|INE095N01023",s:"NBCC",n:"NBCC India",sec:"Infra"},
-  {key:"NSE_EQ|INE584A01023",s:"NMDC",n:"NMDC",sec:"Metals"},
-  {key:"NSE_EQ|INE421A01028",s:"PAGEIND",n:"Page Industries",sec:"Consumer"},
-  {key:"NSE_EQ|INE417T01026",s:"POLICYBZR",n:"PB Fintech PolicyBazaar",sec:"Finance"},
-  {key:"NSE_EQ|INE647A01010",s:"SRF",n:"SRF",sec:"Chemical"},
-  {key:"NSE_EQ|INE003A01024",s:"SIEMENS",n:"Siemens India",sec:"Industrial"},
-  {key:"NSE_EQ|INE429C01035",s:"SUPREMEIND",n:"Supreme Industries",sec:"Industrial"},
-  {key:"NSE_EQ|INE519A01011",s:"SYNGENE",n:"Syngene International",sec:"Pharma"},
-  {key:"NSE_EQ|INE592I01027",s:"TIINDIA",n:"Tube Investments of India",sec:"Industrial"},
-  {key:"NSE_EQ|INE628A01028",s:"UPL",n:"UPL",sec:"Chemical"},
-  {key:"NSE_EQ|INE516G01027",s:"UNOMINDA",n:"Uno Minda",sec:"Auto"},
-  {key:"NSE_EQ|INE669E01016",s:"VOLTAS",n:"Voltas",sec:"Industrial"},
-  {key:"NSE_EQ|INE914M01019",s:"WAAREEENER",n:"Waaree Energies",sec:"Power"},
-  {key:"NSE_EQ|INE031A01017",s:"HUDCO",n:"HUDCO",sec:"Finance"},
-  {key:"NSE_EQ|INE648A01021",s:"RBLBANK",n:"RBL Bank",sec:"Banking"},
-  {key:"NSE_EQ|INE058I01030",s:"KPITTECH",n:"KPIT Technologies",sec:"IT"},
-  {key:"NSE_EQ|INE010D01018",s:"LAURUSLABS",n:"Laurus Labs",sec:"Pharma"},
-  {key:"NSE_EQ|INE101E01011",s:"MAZDOCK",n:"Mazagon Dock",sec:"Defence"},
-  {key:"NSE_EQ|INE260B01028",s:"PIIND",n:"PI Industries",sec:"Chemical"},
-  {key:"NSE_EQ|INE134E01011",s:"PFC",n:"Power Finance Corp",sec:"Finance"},
-  {key:"NSE_EQ|INE020B01018",s:"RECLTD",n:"REC Ltd",sec:"Finance"},
-  {key:"NSE_EQ|INE415G01027",s:"RVNL",n:"Rail Vikas Nigam",sec:"Infra"},
-  {key:"NSE_EQ|INE237M01017",s:"KEI",n:"KEI Industries",sec:"Industrial"},
-  {key:"NSE_EQ|INE617H01014",s:"KAYNES",n:"Kaynes Technology",sec:"Industrial"},
-  {key:"NSE_EQ|INE935N01020",s:"DIXON",n:"Dixon Technologies",sec:"Industrial"},
-  {key:"NSE_EQ|INE334A01023",s:"STARHEALTH",n:"Star Health Insurance",sec:"Insurance"},
-  {key:"NSE_EQ|INE083B01026",s:"INDHOTEL",n:"Indian Hotels Taj",sec:"Hotels"},
-  {key:"NSE_EQ|INE271C01023",s:"DLF",n:"DLF",sec:"Realty"},
-  {key:"NSE_EQ|INE036B01022",s:"PRESTIGE",n:"Prestige Estates",sec:"Realty"},
-];
+const STOCK_MASTER_EXTRA=[]; // Merged into STOCKS from stocks.json
 
 // Merge all lists into one deduped master map
 const STOCK_MASTER_MAP={};
-[...NIFTY50,...FO_STOCK_LIST,...STOCK_MASTER,...STOCK_MASTER_EXTRA].forEach(s=>{
+// Built from STOCKS (populated from stocks.json at boot)
+STOCKS.forEach(s=>{
   if(s.s&&!STOCK_MASTER_MAP[s.s])
-    STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:!!s.fo};
+    STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:!!s.fo,lot:s.lot||0};
 });
 let ALL_STOCKS=Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
 

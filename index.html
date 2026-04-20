@@ -459,7 +459,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <button onclick="lkpQuick('INFY')" class="lkp-q">INFY</button>
       <button onclick="lkpQuick('TCS')" class="lkp-q">TCS</button>
       <button onclick="lkpQuick('SBIN')" class="lkp-q">SBIN</button>
-      <button onclick="lkpQuick('TATAMOTORS')" class="lkp-q">TATAMOTORS</button>
+      <button onclick="lkpQuick('TMCV')" class="lkp-q">TATAMOTORS</button>
       <button onclick="lkpQuick('BAJFINANCE')" class="lkp-q">BAJFINANCE</button>
       <button onclick="lkpQuick('ICICIBANK')" class="lkp-q">ICICIBANK</button>
       <button onclick="lkpQuick('ICICIAMC')" class="lkp-q">ICICIAMC</button>
@@ -594,7 +594,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="setting-card" style="grid-column:1/-1">
     <h4>🎯 Confidence Filter — Minimum Threshold</h4>
     <div style="font-size:10px;color:#64748b;margin-bottom:12px">
-      Only results with Confidence ≥ threshold are shown.
+      Only results with Confidence ≥ threshold are shown. Calculated using the exact PRO_ConfidenceCalculator formula from FRIDAY MAUI.
     </div>
 
 <!-- Formula display -->
@@ -733,7 +733,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:4px">📋 Dynamic Stock List</div>
   <div style="font-size:9px;color:#64748b;margin-bottom:6px">Place your stock list at <code style="background:#dcfce7;padding:1px 4px;border-radius:3px">ScannerFile/stocks/stocks.json</code> in your repo. App loads it on startup.</div>
   <div id="stocks-file-status" style="font-size:10px;color:#64748b;margin-bottom:6px">Not loaded yet</div>
-  <button class="btn" style="font-size:10px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_stocks_loaded_date');loadStocksFromGitHub(true)">🔄 Reload Stock List</button>
+  <button class="btn" style="font-size:10px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_stocks_loaded_date');localStorage.removeItem('friday_stocks_enriched_date');loadStocksFromGitHub(true)">🔄 Reload Stock List</button>
 </div>
 
   </div>
@@ -1329,19 +1329,24 @@ function rebuildStockUniverse(newStocks){
 async function loadStocksFromGitHub(forceReload=false){
   if(!GH.token||!GH.user||!GH.repo) return;
 
-  // Once-per-day: skip if already loaded today (stocks.json updates weekly, no need to re-fetch daily)
   const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-  if(!forceReload){
-    const lastLoaded = localStorage.getItem("friday_stocks_loaded_date");
-    if(lastLoaded === istToday && STOCKS.length > 0){
-      lg("stocks.json: already loaded today","o");
-      updateStocksStatus("✅ "+STOCKS.length+" stocks · "+FO_STOCK_LIST.length+" F&O (today's list)", "#16a34a");
+
+  // Skip fetch only if:
+  // 1. Already loaded today AND stocks are in memory
+  // 2. AND the loaded JSON was already enriched (has fo_enriched_at)
+  // If fresh Monday JSON was uploaded (no fo_enriched_at), always re-fetch & enrich
+  if(!forceReload && STOCKS.length > 0){
+    const lastLoaded    = localStorage.getItem("friday_stocks_loaded_date");
+    const lastEnriched  = localStorage.getItem("friday_stocks_enriched_date");
+    if(lastLoaded === istToday && lastEnriched === istToday){
+      lg("stocks.json: already loaded & enriched today ("+STOCKS.length+" stocks)","o");
+      updateStocksStatus("✅ "+STOCKS.length+" stocks · "+FO_STOCK_LIST.length+" F&O (today)", "#16a34a");
       return;
     }
   }
 
   try{
-    updateStocksStatus("⏳ Loading stocks.json from GitHub...", "#d97706");
+    updateStocksStatus("⏳ Loading stocks.json...", "#d97706");
     const r = await fetch(
       `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
       { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
@@ -1353,52 +1358,55 @@ async function loadStocksFromGitHub(forceReload=false){
     }
     if(!r.ok) throw new Error("HTTP "+r.status);
 
-    const d = await r.json();
-    const parsed  = JSON.parse(atob(d.content.replace(/\n/g,"")));
-    const fileSha = d.sha; // needed to write back updated data
+    const d      = await r.json();
+    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    const fileSha = d.sha;
 
-    // Support { data:[...] }  or  { stocks:[...] }  or  plain array
+    // Support { data:[...] } or { stocks:[...] } or plain array
     const rawList = parsed.data || parsed.stocks || (Array.isArray(parsed) ? parsed : null);
     if(!rawList||!rawList.length) throw new Error("Empty or invalid stocks.json");
 
-    // Build the normalised list
-    // hasOption (bool|null) + lot (number) per entry:
-    //   Both present  → use directly, skip API call
-    //   Either missing → queue for API check
+    // Normalise each entry:
+    // hasOption (bool)  present → use it, no API call needed
+    // hasOption missing/null   → mark for background API check
     const list = rawList.map(item=>{
       const sym  = item.s || item.symbol || "";
       const name = item.n || item.name   || sym;
       const key  = item.key || "";
       const sec  = item.sec || item.sector || "NSE";
-      // hasOption field (JSON) maps to fo internally
       const hasOpt = item.hasOption !== undefined ? item.hasOption
-                   : item.fo        !== undefined ? item.fo        : null;
-      const lot    = (item.lot && item.lot > 0) ? item.lot : 0;
-      const step   = item.step || 0;
+                   : item.fo        !== undefined ? item.fo : null;
+      const lot  = (item.lot && item.lot > 0) ? item.lot : 0;
+      const step = item.step || 0;
+      // Needs API check if: hasOption not set, OR hasOption=true but lot is unknown
       const needsCheck = (hasOpt === null || hasOpt === undefined || (hasOpt === true && lot === 0));
       return { key, s:sym, n:name, sec, scan:true,
-               fo: hasOpt===true, lot, step, _needsFOCheck: needsCheck, _rawItem: item };
+               fo: hasOpt===true, lot, step, _needsFOCheck: needsCheck };
     }).filter(s=>s.key && s.s);
 
     rebuildStockUniverse(list);
     localStorage.setItem("friday_stocks_loaded_date", istToday);
 
     const needCheck = list.filter(s=>s._needsFOCheck);
-    const knownFO   = list.filter(s=>s.fo && s.lot>0).length;
+    const foCount   = FO_STOCK_LIST.length;
     const updatedAt = parsed.updated_at || parsed.updated || "";
     const dateStr   = updatedAt ? " · "+updatedAt.split("T")[0] : "";
-    updateStocksStatus(`✅ ${list.length} stocks · ${FO_STOCK_LIST.length} F&O known · ${needCheck.length} pending${dateStr}`, "#16a34a");
-    lg(`stocks.json: ${list.length} total · ${knownFO} F&O known · ${needCheck.length} need API check`,"o");
 
-    // Background: for stocks missing hasOption/lot — call option/contract API
-    // Then write the enriched data back to GitHub so next load is instant
     if(needCheck.length){
-      lg(`Checking ${needCheck.length} stocks for F&O eligibility via API...`,"o");
-      setTimeout(()=>enrichAndSaveStocks(list, rawList, parsed, fileSha, needCheck), 2000);
+      updateStocksStatus(
+        `✅ ${list.length} stocks loaded · ${foCount} F&O confirmed · ${needCheck.length} checking via API...${dateStr}`,
+        "#d97706"
+      );
+      lg(`stocks.json: ${list.length} stocks · ${foCount} F&O known · ${needCheck.length} need API check`,"o");
+      // Run enrichment in background — checks API and writes result back to stocks.json
+      setTimeout(()=>enrichAndSaveStocks(rawList, parsed, fileSha, needCheck, list), 3000);
+    } else {
+      updateStocksStatus(`✅ ${list.length} stocks · ${foCount} F&O${dateStr}`, "#16a34a");
+      lg(`stocks.json: ${list.length} stocks · ${foCount} F&O (all known, no API check needed)`,"o");
     }
   }catch(e){
     lg("loadStocksFromGitHub: "+e.message,"w");
-    updateStocksStatus("⚠ Error loading stocks.json: "+e.message, "#dc2626");
+    updateStocksStatus("⚠ Error: "+e.message, "#dc2626");
   }
 }
 
@@ -1410,63 +1418,87 @@ function updateStocksStatus(msg, color){
 // ── Enrich stocks missing hasOption/lot via API, then write back to GitHub ──
 // Runs in background after loadStocksFromGitHub — enriches the JSON once, then
 // subsequent loads are instant (no API calls needed for known stocks)
-async function enrichAndSaveStocks(normList, rawList, parsed, fileSha, toCheck){
-  let changed = 0;
-  // Build a map from symbol → index in rawList for fast update
+// ── Background: check F&O via API for unknown stocks, then write enriched data back to stocks.json ──
+// This runs ONCE after first load. Next load reads hasOption+lot directly — no API calls.
+async function enrichAndSaveStocks(rawList, parsed, fileSha, toCheck, normList){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  lg(`F&O enrichment starting: ${toCheck.length} stocks to check...`,"o");
+  updateStocksStatus(`🔄 Checking F&O for ${toCheck.length} stocks via API (runs once)...`, "#d97706");
+
+  // Build symbol → rawList index map
   const rawMap = {};
   rawList.forEach((item,i)=>{ const sym=item.s||item.symbol||""; if(sym) rawMap[sym]=i; });
 
+  let foFound = 0, checked = 0;
   for(let i=0; i<toCheck.length; i++){
     const s = toCheck[i];
     try{
       const { expiries, lotSize } = await fetchContractInfo(s.key);
       const hasOption = expiries.length > 0;
-      const lot = hasOption ? (lotSize || s.lot || 1) : 0;
+      const lot = hasOption ? (lotSize || 1) : 0;
 
-      // Update in-memory STOCKS
+      // Update in-memory arrays
       s.fo  = hasOption;
       s.lot = lot;
-      const inStocks = STOCKS.find(x=>x.s===s.s);
-      if(inStocks){ inStocks.fo=hasOption; inStocks.lot=lot; }
+      const inS = STOCKS.find(x=>x.s===s.s);
+      if(inS){ inS.fo=hasOption; inS.lot=lot; }
       if(STOCK_MASTER_MAP[s.s]){ STOCK_MASTER_MAP[s.s].fo=hasOption; STOCK_MASTER_MAP[s.s].lot=lot; }
 
-      // Update the raw JSON item so we can write it back
-      const rawIdx = rawMap[s.s];
-      if(rawIdx!==undefined){
-        rawList[rawIdx].hasOption = hasOption;
-        rawList[rawIdx].lot       = lot;
-        if(!rawList[rawIdx].step && lot>0) rawList[rawIdx].step = s.step||0;
+      // Update rawList for write-back
+      const ri = rawMap[s.s];
+      if(ri !== undefined){
+        rawList[ri].hasOption = hasOption;
+        rawList[ri].lot       = lot;
       }
-      if(hasOption) lg(`${s.s}: hasOption=true lot=${lot}`,"o");
-      changed++;
-    }catch(e){ lg("enrichStocks "+s.s+": "+e.message,"w"); }
-    // Throttle: ~3 calls/sec
+      if(hasOption) foFound++;
+      checked++;
+    }catch(e){ lg("enrich "+s.s+": "+e.message,"w"); }
+
+    // Update status every 10 checks
+    if(i%10===9){
+      updateStocksStatus(`🔄 Checking F&O: ${i+1}/${toCheck.length} done · ${foFound} found so far...`, "#d97706");
+    }
+    // Throttle: 3 calls/sec max
     if(i%3===2) await sleep(1000);
   }
 
-  // Rebuild FO_STOCK_LIST with updated data
+  // Rebuild FO_STOCK_LIST with final data
   FO_STOCK_LIST = STOCKS.filter(s=>s.fo && s.lot>0);
-  const foCount = FO_STOCK_LIST.length;
-  updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foCount} F&O (enriched)`, "#16a34a");
-  lg(`Enrichment done: ${changed} checked · ${foCount} total F&O stocks`,"o");
+  const foTotal = FO_STOCK_LIST.length;
+  updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} with options · enrichment done`, "#16a34a");
+  lg(`Enrichment complete: ${checked} checked · ${foFound} new F&O stocks · ${foTotal} total F&O`,"o");
 
-  // Write enriched data back to GitHub so next load skips all API calls
-  if(changed>0 && GH.token && GH.user && GH.repo){
-    try{
-      // Rebuild the full parsed object with updated rawList
-      const updatedParsed = { ...parsed, data: rawList,
-        updated_at: parsed.updated_at, // preserve original update date
-        fo_enriched_at: new Date().toISOString() };
-      const content = btoa(unescape(encodeURIComponent(JSON.stringify(updatedParsed, null, 2))));
-      const body = { message:"FRIDAY: enrich F&O data · "+new Date().toISOString().split("T")[0], content, sha: fileSha };
-      const r = await fetch(
-        `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
-        { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
-          body: JSON.stringify(body) }
-      );
-      if(r.ok) lg("stocks.json written back to GitHub with F&O data ✅","o");
-      else lg("stocks.json write failed: HTTP "+r.status,"w");
-    }catch(e){ lg("stocks.json write: "+e.message,"w"); }
+  // Write enriched data back to GitHub
+  // Next load will read hasOption+lot directly — no API calls needed
+  try{
+    const updatedParsed = {
+      ...parsed,
+      data: rawList,
+      fo_enriched_at: new Date().toISOString()
+    };
+    const ghContent = btoa(unescape(encodeURIComponent(JSON.stringify(updatedParsed, null, 2))));
+    const body = {
+      message: "FRIDAY: F&O enrichment · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}),
+      content: ghContent,
+      sha: fileSha
+    };
+    const wr = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+      { method:"PUT",
+        headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    if(wr.ok){
+      lg("✅ stocks.json updated on GitHub — next load will be instant","o");
+      // Mark enrichment done today — date guard will skip API checks on next load
+      localStorage.setItem("friday_stocks_enriched_date",
+        new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
+      updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} F&O · Saved to GitHub`, "#16a34a");
+    } else {
+      lg("stocks.json write failed: HTTP "+wr.status,"w");
+    }
+  }catch(e){
+    lg("stocks.json write-back: "+e.message,"w");
   }
 }
 
@@ -5087,7 +5119,7 @@ async function loadOptions(force=true){
     // Use top 10 most liquid F&O stocks (reduces API calls from 200+ to 20)
     const TOP_FO = [
       "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","AXISBANK",
-      "BAJFINANCE","WIPRO","KOTAKBANK","ITC","LT","TATAMOTORS","ADANIENT","MARUTI"
+      "BAJFINANCE","WIPRO","KOTAKBANK","ITC","LT","TMCV","ADANIENT","MARUTI"
     ];
     const foStocks = FO_STOCK_LIST.filter(s=>TOP_FO.includes(s.s));
     lg(`Scanning ${foStocks.length} top F&O stocks`);

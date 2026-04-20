@@ -1347,23 +1347,15 @@ async function loadStocksFromGitHub(forceReload=false){
 
   try{
     updateStocksStatus("⏳ Loading stocks.json...", "#d97706");
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
-      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
-    );
-    if(r.status===404){
-      lg("stocks.json not found at "+STOCKS_FILE,"w");
+    const { data: parsed, sha: fileSha } = await ghReadStocks();
+    if(!parsed){
+      lg("stocks.json not found or failed to load","w");
       updateStocksStatus("⚠ stocks.json not found in repo", "#dc2626");
       return;
     }
-    if(!r.ok) throw new Error("HTTP "+r.status);
-
-    const d      = await r.json();
-    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
-    const fileSha = d.sha;
 
     // Support { data:[...] } or { stocks:[...] } or plain array
-    const rawList = parsed.data || parsed.stocks || (Array.isArray(parsed) ? parsed : null);
+    const rawList = (parsed?.data) || (parsed?.stocks) || (Array.isArray(parsed) ? parsed : null);
     if(!rawList||!rawList.length) throw new Error("Empty or invalid stocks.json");
 
     // Normalise each entry:
@@ -1468,37 +1460,22 @@ async function enrichAndSaveStocks(rawList, parsed, fileSha, toCheck, normList){
   updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} with options · enrichment done`, "#16a34a");
   lg(`Enrichment complete: ${checked} checked · ${foFound} new F&O stocks · ${foTotal} total F&O`,"o");
 
-  // Write enriched data back to GitHub
-  // Next load will read hasOption+lot directly — no API calls needed
-  try{
-    const updatedParsed = {
-      ...parsed,
-      data: rawList,
-      fo_enriched_at: new Date().toISOString()
-    };
-    const ghContent = btoa(unescape(encodeURIComponent(JSON.stringify(updatedParsed, null, 2))));
-    const body = {
-      message: "FRIDAY: F&O enrichment · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}),
-      content: ghContent,
-      sha: fileSha
-    };
-    const wr = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
-      { method:"PUT",
-        headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
-        body: JSON.stringify(body) }
-    );
-    if(wr.ok){
-      lg("✅ stocks.json updated on GitHub — next load will be instant","o");
-      // Mark enrichment done today — date guard will skip API checks on next load
-      localStorage.setItem("friday_stocks_enriched_date",
-        new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
-      updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} F&O · Saved to GitHub`, "#16a34a");
-    } else {
-      lg("stocks.json write failed: HTTP "+wr.status,"w");
-    }
-  }catch(e){
-    lg("stocks.json write-back: "+e.message,"w");
+  // Write enriched data back to GitHub using same pattern as signal log
+  // ghWriteStocks handles 409 SHA conflicts with auto-retry
+  const updatedParsed = {
+    ...parsed,
+    data: rawList,
+    fo_enriched_at: new Date().toISOString()
+  };
+  const ok = await ghWriteStocks(updatedParsed, null); // null SHA = ghWriteStocks fetches fresh
+  if(ok){
+    lg("✅ stocks.json saved to GitHub","o");
+    localStorage.setItem("friday_stocks_enriched_date",
+      new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
+    updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} F&O · Saved to GitHub`, "#16a34a");
+  } else {
+    lg("stocks.json write failed","w");
+    updateStocksStatus(`⚠ Enrichment done (${foTotal} F&O) but GitHub save failed`, "#dc2626");
   }
 }
 
@@ -1507,6 +1484,63 @@ async function enrichAndSaveStocks(rawList, parsed, fileSha, toCheck, normList){
 // ══════════════════════════════════════════════════════════════
 
 const FII_FILE = "fii-dii/latest.json";
+
+// ── Read stocks.json from GitHub ──
+async function ghReadStocks(){
+  if(!GH.token||!GH.user||!GH.repo) return { data:null, sha:null };
+  try{
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404) return { data:null, sha:null };
+    const d = await r.json();
+    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    return { data: parsed, sha: d.sha };
+  }catch(e){ lg("ghReadStocks: "+e.message,"w"); return { data:null, sha:null }; }
+}
+
+// ── Write stocks.json to GitHub (mirrors ghWriteLog with 409 retry) ──
+async function ghWriteStocks(parsed, sha, retryCount=0){
+  if(!GH.token||!GH.user||!GH.repo) return false;
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(parsed, null, 2))));
+    const body = { message:"FRIDAY stocks · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}), content };
+    if(sha) body.sha = sha;
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+        body: JSON.stringify(body) }
+    );
+    if(r.ok) return true;
+    // 409 = SHA mismatch — re-read fresh and retry
+    if(r.status===409 && retryCount<2){
+      lg("ghWriteStocks: SHA conflict — retrying ("+(retryCount+1)+")","w");
+      await sleep(1000 + Math.random()*1000);
+      const fresh = await ghReadStocks();
+      // Merge: preserve any hasOption/lot already written by another session
+      if(fresh.data?.data){
+        const freshMap = {};
+        (fresh.data.data||[]).forEach(item=>{ const s=item.s||item.symbol; if(s) freshMap[s]=item; });
+        (parsed.data||[]).forEach(item=>{
+          const s=item.s||item.symbol;
+          if(s && freshMap[s]){
+            // Only overwrite if we have richer data
+            if(item.hasOption!==undefined) freshMap[s].hasOption = item.hasOption;
+            if(item.lot) freshMap[s].lot = item.lot;
+          } else if(s){
+            freshMap[s] = item;
+          }
+        });
+        parsed = { ...parsed, data: Object.values(freshMap) };
+      }
+      return ghWriteStocks(parsed, fresh.sha, retryCount+1);
+    }
+    lg("ghWriteStocks: failed HTTP "+r.status,"w");
+    return false;
+  }catch(e){ lg("ghWriteStocks: "+e.message,"w"); return false; }
+}
+
 
 // ── Read FII/DII data from GitHub ──
 async function ghReadFIIDII(){

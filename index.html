@@ -708,7 +708,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="set-row"><div><div class="set-lbl">GitHub Username</div><div class="set-sub">Your GitHub username</div></div><input class="set-inp" id="s-gh-user" type="text" placeholder="djkai89"></div>
     <div class="set-row"><div><div class="set-lbl">Repository Name</div><div class="set-sub">Repo where index.html is deployed</div></div><input class="set-inp" id="s-gh-repo" type="text" placeholder="djkai89.github.io"></div>
 
-<button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_fiidii_loaded_date');loadFIIDII(true)">📊 Refresh FII/DII from NSE</button>
+<button class="btn" style="width:100%;margin-top:6px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:7px;padding:8px 12px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_fiidii_loaded_date');loadFIIDII(true)">📊 Reload FII/DII from GitHub</button>
 
 <div id="fii-status" style="margin-top:6px;font-size:10px;color:#64748b"></div>
 
@@ -1378,7 +1378,7 @@ function updateStocksStatus(msg, color){
 
 
 // FII / DII DATA// FII / DII DATA — stored in GitHub as fii-dii/latest.json
-// Fetched from NSE via corsproxy, same storage pattern as signal log
+// Loaded from GitHub repo, same pattern as signal log
 // ══════════════════════════════════════════════════════════════
 
 const FII_FILE = "fii-dii/latest.json";
@@ -1396,126 +1396,6 @@ async function ghReadFIIDII(){
     const data = JSON.parse(atob(d.content.replace(/\n/g,"")));
     return { data, sha: d.sha };
   }catch(e){ lg("ghReadFIIDII: "+e.message,"w"); return { data:null, sha:null }; }
-}
-
-// ── Write FII/DII data to GitHub ──
-async function ghWriteFIIDII(data, sha){
-  if(!GH.token||!GH.user||!GH.repo) return false;
-  try{
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
-    const body = { message:"FRIDAY FII/DII update · "+data.date, content };
-    if(sha) body.sha = sha;
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${FII_FILE}`,
-      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
-        body: JSON.stringify(body) }
-    );
-    return r.ok;
-  }catch(e){ lg("ghWriteFIIDII: "+e.message,"w"); return false; }
-}
-
-// ── Fetch live FII/DII from NSE — multi-proxy with fallback ──
-async function fetchFIIDIIFromNSE(){
-  const NSE_CASH = "https://www.nseindia.com/api/fiidiiTradeReact";
-  const NSE_FNO  = "https://www.nseindia.com/api/fiiDerivativeTradeReact";
-  const HEADERS  = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.nseindia.com/"
-  };
-
-  // Try multiple CORS proxies in order — NSE blocks many, so we cycle through
-  const PROXIES = [
-    (url) => "https://corsproxy.io/?" + encodeURIComponent(url),
-    (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url),
-    (url) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(url),
-  ];
-
-  async function fetchWithProxyFallback(targetUrl) {
-    for (let i = 0; i < PROXIES.length; i++) {
-      const proxyUrl = PROXIES[i](targetUrl);
-      try {
-        if (i === 0) {
-          // Seed NSE session cookie via same proxy (best effort)
-          try { await fetch(PROXIES[i]("https://www.nseindia.com"), { headers: HEADERS }); } catch(e) {}
-        }
-        const resp = await fetch(proxyUrl, { headers: HEADERS });
-        if (resp.ok) {
-          const text = await resp.text();
-          if (!text || text.trim().startsWith("<")) {
-            lg("FII/DII proxy " + (i+1) + " returned HTML — trying next", "w");
-            continue;
-          }
-          return JSON.parse(text);
-        }
-        lg("FII/DII proxy " + (i+1) + " failed HTTP " + resp.status + " — trying next", "w");
-      } catch(e) {
-        lg("FII/DII proxy " + (i+1) + " error: " + e.message + " — trying next", "w");
-      }
-      if (i < PROXIES.length - 1) await sleep(800);
-    }
-    throw new Error("All CORS proxies failed for NSE FII/DII");
-  }
-
-  // Fetch cash market data (required)
-  const cashRaw = await fetchWithProxyFallback(NSE_CASH);
-
-  const result = {
-    date: "", fetched_at: new Date().toISOString(),
-    fii_buy:0, fii_sell:0, fii_net:0,
-    dii_buy:0, dii_sell:0, dii_net:0,
-    fii_idx_fut_long:0, fii_idx_fut_short:0,
-    fii_idx_call_long:0, fii_idx_call_short:0,
-    fii_idx_put_long:0,  fii_idx_put_short:0,
-  };
-
-  // Parse cash market
-  const rows = Array.isArray(cashRaw) ? cashRaw : (cashRaw.data || []);
-  for(const row of rows){
-    const cat = (row.category||row.clientType||"").toUpperCase();
-    if(cat.includes("FII")||cat.includes("FPI")){
-      result.fii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
-      result.fii_sell = parseFloat(row.sellValue || row.sell_value || 0);
-      result.fii_net  = parseFloat(row.netValue  || row.net_value  || 0);
-      result.date     = row.date || "";
-    } else if(cat.includes("DII")){
-      result.dii_buy  = parseFloat(row.buyValue  || row.buy_value  || 0);
-      result.dii_sell = parseFloat(row.sellValue || row.sell_value || 0);
-      result.dii_net  = parseFloat(row.netValue  || row.net_value  || 0);
-    }
-  }
-
-  // Fetch F&O derivatives data (best effort, same proxy fallback)
-  try{
-    await sleep(1200);
-    const fnoRaw = await fetchWithProxyFallback(NSE_FNO);
-    if(fnoRaw){
-      const fnoRows = Array.isArray(fnoRaw) ? fnoRaw : (fnoRaw.data || fnoRaw.FIIData || []);
-      const gv = (row, ...keys) => {
-        for(const k of keys){
-          const v = row[k];
-          if(v!=null && v!="" && v!="0" && v!="-"){
-            const n = parseFloat(String(v).replace(/,/g,""));
-            if(!isNaN(n) && n!==0) return n;
-          }
-        }
-        return 0;
-      };
-      for(const row of fnoRows){
-        const cat = (row.clientType||row.category||row.participant||"").toUpperCase();
-        if(cat.includes("FII")||cat.includes("FPI")||cat.includes("FOREIGN")){
-          result.fii_idx_fut_long   = gv(row,"futureIndexLong","indexFutLong","futIdxLong");
-          result.fii_idx_fut_short  = gv(row,"futureIndexShort","indexFutShort","futIdxShort");
-          result.fii_idx_call_long  = gv(row,"optionIndexCallLong","idxCallLong","callLong");
-          result.fii_idx_call_short = gv(row,"optionIndexCallShort","idxCallShort","callShort");
-          result.fii_idx_put_long   = gv(row,"optionIndexPutLong","idxPutLong","putLong");
-          result.fii_idx_put_short  = gv(row,"optionIndexPutShort","idxPutShort","putShort");
-        }
-      }
-    }
-  }catch(e){ lg("FII F&O fetch (optional): "+e.message,"w"); }
-
-  return result;
 }
 
 // ── Interpret FII/DII data → bias score and label ──
@@ -1590,98 +1470,29 @@ function interpretFIIDII(d){
 }
 
 // ── Load FII/DII on boot: read from GitHub, refresh if stale (>4hr old) ──
+// ── Load FII/DII from GitHub — read only ──
 async function loadFIIDII(forceReload=false){
   if(!GH.token||!GH.user||!GH.repo){ lg("FII/DII: GitHub not configured","w"); return; }
   const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   try{
-    const { data, sha } = await ghReadFIIDII();
+    const { data } = await ghReadFIIDII();
+    if(!data){ lg("FII/DII: no data in GitHub yet","w"); return; }
 
-    // Once-per-day: if we already have today's data, use it without hitting NSE
-    const storedDate = data?.date ? new Date(data.date).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}) : null;
-    const alreadyToday = storedDate === istToday;
-    const lastFetched  = localStorage.getItem("friday_fiidii_loaded_date");
-
-    if(!forceReload && alreadyToday && lastFetched === istToday){
-      FII_DATA = data;
-      lg(`FII/DII: using today's cached data (FII ${data.fii_net>=0?"+":""}${data.fii_net?.toFixed(0)} Cr)`,"o");
+    // Skip re-read if already loaded today (unless forced)
+    const lastFetched = localStorage.getItem("friday_fiidii_loaded_date");
+    if(!forceReload && lastFetched === istToday && FII_DATA){
+      lg("FII/DII: already loaded today","o");
       renderFIIWidget();
       return;
     }
 
-    if(!forceReload && alreadyToday && data){
-      // Data is today's but localStorage flag missing (e.g. cleared) — still use it
-      FII_DATA = data;
-      localStorage.setItem("friday_fiidii_loaded_date", istToday);
-      lg(`FII/DII: using today's GitHub data`,"o");
-      renderFIIWidget();
-      return;
-    }
-
-    // Need fresh data — fetch from NSE and save to GitHub
-    lg("FII/DII: fetching fresh from NSE...","o");
-    await refreshFIIDII();
+    FII_DATA = data;
     localStorage.setItem("friday_fiidii_loaded_date", istToday);
-  }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
-}
-
-// ── Fetch fresh from NSE and save to GitHub ──
-async function refreshFIIDII(){
-  try{
-    showToast("📊 Fetching FII/DII from NSE...", "#0ea5e9", 10000);
-
-    let fresh = null;
-    let fromCache = false;
-
-    // Try live NSE fetch first
-    try{
-      fresh = await fetchFIIDIIFromNSE();
-    }catch(liveErr){
-      lg("refreshFIIDII live fetch failed: " + liveErr.message + " — trying GitHub cache", "w");
-
-      // Fall back to last saved GitHub data
-      try{
-        const cached = await ghReadFIIDII();
-        if(cached?.data){
-          fresh = cached.data;
-          fromCache = true;
-          lg("FII/DII: loaded from GitHub cache (date: " + (fresh.date||"?") + ")", "o");
-        }
-      }catch(cacheErr){
-        lg("FII/DII cache read also failed: " + cacheErr.message, "w");
-      }
-
-      if(!fresh) throw new Error(liveErr.message); // nothing worked
-    }
-
-    FII_DATA = fresh;
+    const age = data.fetched_at ? Math.round((Date.now()-new Date(data.fetched_at))/3600000) : "?";
+    lg(`FII/DII: loaded from GitHub (FII ${data.fii_net>=0?"+":""}${data.fii_net?.toFixed(0)} Cr · ${age}h old)`,"o");
     renderFIIWidget();
-
-    if(fromCache){
-      const age = fresh.fetched_at ? Math.round((Date.now()-new Date(fresh.fetched_at))/3600000) : "?";
-      showToast("⚠️ NSE unreachable — showing cached data (" + age + "h old)", "#d97706", 7000);
-    } else {
-      // Save fresh data to GitHub for next time
-      try{
-        const { sha } = await ghReadFIIDII();
-        const ok = await ghWriteFIIDII(fresh, sha);
-        lg("FII/DII: saved to GitHub: " + ok, "o");
-      }catch(saveErr){
-        lg("FII/DII GitHub save failed: " + saveErr.message, "w");
-      }
-      const fiiNet = (fresh.fii_net||0).toFixed(0);
-      const diiNet = (fresh.dii_net||0).toFixed(0);
-      showToast(
-        "📊 FII/DII live: FII " + (fresh.fii_net>=0?"+":"") + fiiNet + " Cr · DII " + (fresh.dii_net>=0?"+":"") + diiNet + " Cr",
-        "#16a34a"
-      );
-    }
-  }catch(e){
-    lg("refreshFIIDII: "+e.message,"e");
-    showToast("❌ FII/DII unavailable — NSE blocked all proxies. Try again later.", "#dc2626", 8000);
-    // Update status text in settings
-    const st = document.getElementById("fii-status");
-    if(st) st.innerHTML = "<span style='color:#dc2626'>❌ NSE unreachable — " + e.message + "</span>";
-  }
+    if(age > 20) showToast(`⚠ FII/DII data is ${age}h old — update the file in GitHub`, "#d97706", 6000);
+  }catch(e){ lg("loadFIIDII: "+e.message,"w"); }
 }
 
 
@@ -1811,7 +1622,7 @@ function renderFIIWidget(){
       const { label, color, fiiLabel, diiLabel, longPct } = interpretFIIDII(FII_DATA);
       const lpTxt = longPct!=null ? ` · Fut Long ${longPct}%` : "";
       el.innerHTML = `
-        <div class="sc" style="border-color:${color}33;cursor:pointer" onclick="refreshFIIDII()" title="Tap to refresh">
+        <div class="sc" style="border-color:${color}33;cursor:pointer" onclick="loadFIIDII(true)" title="Tap to reload from GitHub">
           <div class="sc-lbl">FII/DII FLOW</div>
           <div class="sc-val" style="color:${color};font-size:11px">${label}</div>
           <div class="sc-sub" style="color:#64748b;font-size:8px">FII ${fiiLabel}${lpTxt}</div>

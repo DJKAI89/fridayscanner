@@ -733,7 +733,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:4px">📋 Dynamic Stock List</div>
   <div style="font-size:9px;color:#64748b;margin-bottom:6px">Place your stock list at <code style="background:#dcfce7;padding:1px 4px;border-radius:3px">ScannerFile/stocks/stocks.json</code> in your repo. App loads it on startup.</div>
   <div id="stocks-file-status" style="font-size:10px;color:#64748b;margin-bottom:6px">Not loaded yet</div>
-  <button class="btn" style="font-size:10px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_stocks_loaded_date');localStorage.removeItem('friday_stocks_enriched_date');loadStocksFromGitHub(true)">🔄 Reload Stock List</button>
+  <button class="btn" style="font-size:10px;background:#dcfce7;color:#15803d;border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;font-weight:700;cursor:pointer" onclick="localStorage.removeItem('friday_stocks_loaded_date');loadStocksFromGitHub(true)">🔄 Reload Stock List</button>
 </div>
 
   </div>
@@ -1292,25 +1292,9 @@ const STOCKS_FILE = "/stocks/stocks.json";
 // Rebuild all derived arrays after stocks.json is loaded
 function rebuildStockUniverse(newStocks){
   if(!newStocks||!newStocks.length) return;
-  // Normalise field names from stocks.json format to internal format
-  const normalised = newStocks.map(item=>{
-    const sym  = item.s      || item.symbol  || "";
-    const name = item.n      || item.name    || sym;
-    const key  = item.key    || "";
-    const sec  = item.sec    || item.sector  || "NSE";
-    // hasOption in JSON maps to fo internally
-    const hasOpt = item.hasOption !== undefined ? item.hasOption
-                 : item.fo        !== undefined ? item.fo : null; // null = unknown, check API
-    const lot    = item.lot  || 0;
-    const step   = item.step || 0;
-    return { key, s:sym, n:name, sec, scan:true,
-             fo: hasOpt===true, lot, step,
-             _needsFOCheck: hasOpt===null || hasOpt===undefined }; // flag for API check
-  }).filter(s=>s.key && s.s);
-
-  // Replace STOCKS in-place
+  // Replace STOCKS in-place with normalised data
   STOCKS.length = 0;
-  normalised.forEach(s=>STOCKS.push(s));
+  newStocks.forEach(s=>STOCKS.push(s));
 
   // Rebuild derived arrays
   NIFTY50       = STOCKS.slice(); // all stocks are scan candidates
@@ -1322,24 +1306,19 @@ function rebuildStockUniverse(newStocks){
     if(s.s) STOCK_MASTER_MAP[s.s]={key:s.key,s:s.s,n:s.n||s.s,sec:s.sec||"NSE",fo:s.fo,lot:s.lot};
   });
   ALL_STOCKS = Object.values(STOCK_MASTER_MAP).sort((a,b)=>a.s.localeCompare(b.s));
-  lg(`Universe: ${STOCKS.length} stocks · ${FO_STOCK_LIST.length} with options · ${STOCKS.filter(s=>s._needsFOCheck).length} pending API check`,"o");
+  lg(`Universe: ${STOCKS.length} stocks · ${FO_STOCK_LIST.length} F&O`,"o");
 }
 
-// Fetch stocks.json from GitHub and apply if found
+// Fetch stocks.json from GitHub and load — read only, no write-back
 async function loadStocksFromGitHub(forceReload=false){
   if(!GH.token||!GH.user||!GH.repo) return;
 
+  // Once per day — skip if already loaded and stocks are in memory
   const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-
-  // Skip fetch only if:
-  // 1. Already loaded today AND stocks are in memory
-  // 2. AND the loaded JSON was already enriched (has fo_enriched_at)
-  // If fresh Monday JSON was uploaded (no fo_enriched_at), always re-fetch & enrich
   if(!forceReload && STOCKS.length > 0){
-    const lastLoaded    = localStorage.getItem("friday_stocks_loaded_date");
-    const lastEnriched  = localStorage.getItem("friday_stocks_enriched_date");
-    if(lastLoaded === istToday && lastEnriched === istToday){
-      lg("stocks.json: already loaded & enriched today ("+STOCKS.length+" stocks)","o");
+    const lastLoaded = localStorage.getItem("friday_stocks_loaded_date");
+    if(lastLoaded === istToday){
+      lg("stocks.json: already loaded today ("+STOCKS.length+" stocks)","o");
       updateStocksStatus("✅ "+STOCKS.length+" stocks · "+FO_STOCK_LIST.length+" F&O (today)", "#16a34a");
       return;
     }
@@ -1347,55 +1326,45 @@ async function loadStocksFromGitHub(forceReload=false){
 
   try{
     updateStocksStatus("⏳ Loading stocks.json...", "#d97706");
-    const { data: parsed, sha: fileSha } = await ghReadStocks();
-    if(!parsed){
-      lg("stocks.json not found or failed to load","w");
+    const r = await fetch(
+      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
+      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+    );
+    if(r.status===404){
+      lg("stocks.json not found at "+STOCKS_FILE,"w");
       updateStocksStatus("⚠ stocks.json not found in repo", "#dc2626");
       return;
     }
+    if(!r.ok) throw new Error("HTTP "+r.status);
+
+    const d      = await r.json();
+    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
 
     // Support { data:[...] } or { stocks:[...] } or plain array
-    const rawList = (parsed?.data) || (parsed?.stocks) || (Array.isArray(parsed) ? parsed : null);
+    const rawList = parsed.data || parsed.stocks || (Array.isArray(parsed) ? parsed : null);
     if(!rawList||!rawList.length) throw new Error("Empty or invalid stocks.json");
 
-    // Normalise each entry:
-    // hasOption (bool)  present → use it, no API call needed
-    // hasOption missing/null   → mark for background API check
+    // Normalise fields — use whatever is in the JSON as-is
     const list = rawList.map(item=>{
-      const sym  = item.s || item.symbol || "";
-      const name = item.n || item.name   || sym;
-      const key  = item.key || "";
-      const sec  = item.sec || item.sector || "NSE";
+      const sym    = item.s || item.symbol || "";
+      const name   = item.n || item.name   || sym;
+      const key    = item.key || "";
+      const sec    = item.sec || item.sector || "NSE";
       const hasOpt = item.hasOption !== undefined ? item.hasOption
-                   : item.fo        !== undefined ? item.fo : null;
-      const lot  = (item.lot && item.lot > 0) ? item.lot : 0;
-      const step = item.step || 0;
-      // Needs API check if: hasOption not set, OR hasOption=true but lot is unknown
-      const needsCheck = (hasOpt === null || hasOpt === undefined || (hasOpt === true && lot === 0));
-      return { key, s:sym, n:name, sec, scan:true,
-               fo: hasOpt===true, lot, step, _needsFOCheck: needsCheck };
+                   : item.fo        !== undefined ? item.fo : false;
+      const lot    = item.lot  || 0;
+      const step   = item.step || 0;
+      return { key, s:sym, n:name, sec, scan:true, fo:!!hasOpt, lot, step };
     }).filter(s=>s.key && s.s);
 
     rebuildStockUniverse(list);
     localStorage.setItem("friday_stocks_loaded_date", istToday);
 
-    const needCheck = list.filter(s=>s._needsFOCheck);
     const foCount   = FO_STOCK_LIST.length;
     const updatedAt = parsed.updated_at || parsed.updated || "";
     const dateStr   = updatedAt ? " · "+updatedAt.split("T")[0] : "";
-
-    if(needCheck.length){
-      updateStocksStatus(
-        `✅ ${list.length} stocks loaded · ${foCount} F&O confirmed · ${needCheck.length} checking via API...${dateStr}`,
-        "#d97706"
-      );
-      lg(`stocks.json: ${list.length} stocks · ${foCount} F&O known · ${needCheck.length} need API check`,"o");
-      // Run enrichment in background — checks API and writes result back to stocks.json
-      setTimeout(()=>enrichAndSaveStocks(rawList, parsed, fileSha, needCheck, list), 3000);
-    } else {
-      updateStocksStatus(`✅ ${list.length} stocks · ${foCount} F&O${dateStr}`, "#16a34a");
-      lg(`stocks.json: ${list.length} stocks · ${foCount} F&O (all known, no API check needed)`,"o");
-    }
+    updateStocksStatus(`✅ ${list.length} stocks · ${foCount} F&O${dateStr}`, "#16a34a");
+    lg(`stocks.json loaded: ${list.length} stocks · ${foCount} F&O`,"o");
   }catch(e){
     lg("loadStocksFromGitHub: "+e.message,"w");
     updateStocksStatus("⚠ Error: "+e.message, "#dc2626");
@@ -1407,144 +1376,12 @@ function updateStocksStatus(msg, color){
   if(el){ el.textContent=msg; el.style.color=color||"#64748b"; }
 }
 
-// ── Enrich stocks missing hasOption/lot via API, then write back to GitHub ──
-// Runs in background after loadStocksFromGitHub — enriches the JSON once, then
-// subsequent loads are instant (no API calls needed for known stocks)
-// ── Background: check F&O via API for unknown stocks, then write enriched data back to stocks.json ──
-// This runs ONCE after first load. Next load reads hasOption+lot directly — no API calls.
-async function enrichAndSaveStocks(rawList, parsed, fileSha, toCheck, normList){
-  if(!GH.token||!GH.user||!GH.repo) return;
-  lg(`F&O enrichment starting: ${toCheck.length} stocks to check...`,"o");
-  updateStocksStatus(`🔄 Checking F&O for ${toCheck.length} stocks via API (runs once)...`, "#d97706");
 
-  // Build symbol → rawList index map
-  const rawMap = {};
-  rawList.forEach((item,i)=>{ const sym=item.s||item.symbol||""; if(sym) rawMap[sym]=i; });
-
-  let foFound = 0, checked = 0;
-  for(let i=0; i<toCheck.length; i++){
-    const s = toCheck[i];
-    try{
-      const { expiries, lotSize } = await fetchContractInfo(s.key);
-      const hasOption = expiries.length > 0;
-      const lot = hasOption ? (lotSize || 1) : 0;
-
-      // Update in-memory arrays
-      s.fo  = hasOption;
-      s.lot = lot;
-      const inS = STOCKS.find(x=>x.s===s.s);
-      if(inS){ inS.fo=hasOption; inS.lot=lot; }
-      if(STOCK_MASTER_MAP[s.s]){ STOCK_MASTER_MAP[s.s].fo=hasOption; STOCK_MASTER_MAP[s.s].lot=lot; }
-
-      // Update rawList for write-back
-      const ri = rawMap[s.s];
-      if(ri !== undefined){
-        rawList[ri].hasOption = hasOption;
-        rawList[ri].lot       = lot;
-      }
-      if(hasOption) foFound++;
-      checked++;
-    }catch(e){ lg("enrich "+s.s+": "+e.message,"w"); }
-
-    // Update status every 10 checks
-    if(i%10===9){
-      updateStocksStatus(`🔄 Checking F&O: ${i+1}/${toCheck.length} done · ${foFound} found so far...`, "#d97706");
-    }
-    // Throttle: 3 calls/sec max
-    if(i%3===2) await sleep(1000);
-  }
-
-  // Rebuild FO_STOCK_LIST with final data
-  FO_STOCK_LIST = STOCKS.filter(s=>s.fo && s.lot>0);
-  const foTotal = FO_STOCK_LIST.length;
-  updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} with options · enrichment done`, "#16a34a");
-  lg(`Enrichment complete: ${checked} checked · ${foFound} new F&O stocks · ${foTotal} total F&O`,"o");
-
-  // Write enriched data back to GitHub using same pattern as signal log
-  // ghWriteStocks handles 409 SHA conflicts with auto-retry
-  const updatedParsed = {
-    ...parsed,
-    data: rawList,
-    fo_enriched_at: new Date().toISOString()
-  };
-  const ok = await ghWriteStocks(updatedParsed, null); // null SHA = ghWriteStocks fetches fresh
-  if(ok){
-    lg("✅ stocks.json saved to GitHub","o");
-    localStorage.setItem("friday_stocks_enriched_date",
-      new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}));
-    updateStocksStatus(`✅ ${STOCKS.length} stocks · ${foTotal} F&O · Saved to GitHub`, "#16a34a");
-  } else {
-    lg("stocks.json write failed","w");
-    updateStocksStatus(`⚠ Enrichment done (${foTotal} F&O) but GitHub save failed`, "#dc2626");
-  }
-}
-
-// FII / DII DATA — stored in GitHub as fii-dii/latest.json
+// FII / DII DATA// FII / DII DATA — stored in GitHub as fii-dii/latest.json
 // Fetched from NSE via corsproxy, same storage pattern as signal log
 // ══════════════════════════════════════════════════════════════
 
 const FII_FILE = "fii-dii/latest.json";
-
-// ── Read stocks.json from GitHub ──
-async function ghReadStocks(){
-  if(!GH.token||!GH.user||!GH.repo) return { data:null, sha:null };
-  try{
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
-      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
-    );
-    if(r.status===404) return { data:null, sha:null };
-    const d = await r.json();
-    const parsed = JSON.parse(atob(d.content.replace(/\n/g,"")));
-    return { data: parsed, sha: d.sha };
-  }catch(e){ lg("ghReadStocks: "+e.message,"w"); return { data:null, sha:null }; }
-}
-
-// ── Write stocks.json to GitHub (mirrors ghWriteLog with 409 retry) ──
-async function ghWriteStocks(parsed, sha, retryCount=0){
-  if(!GH.token||!GH.user||!GH.repo) return false;
-  try{
-    // Always need a fresh SHA for an existing file — fetch it if not provided
-    if(!sha){
-      const check = await ghReadStocks();
-      sha = check.sha; // null if file doesn't exist yet (first-time create is fine without SHA)
-    }
-    const ghContent = btoa(unescape(encodeURIComponent(JSON.stringify(parsed, null, 2))));
-    const body = { message:"FRIDAY stocks · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}), content: ghContent };
-    if(sha) body.sha = sha;
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
-      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
-        body: JSON.stringify(body) }
-    );
-    if(r.ok) return true;
-    // 409 or 422 = SHA mismatch — re-read fresh SHA and retry
-    if((r.status===409||r.status===422) && retryCount<2){
-      lg("ghWriteStocks: SHA conflict ("+r.status+") — retrying ("+(retryCount+1)+")","w");
-      await sleep(1000 + Math.random()*1000);
-      const fresh = await ghReadStocks();
-      // Merge: keep richest hasOption/lot data from both versions
-      if(fresh.data?.data){
-        const freshMap = {};
-        (fresh.data.data||[]).forEach(item=>{ const s=item.s||item.symbol; if(s) freshMap[s]=item; });
-        (parsed.data||[]).forEach(item=>{
-          const s=item.s||item.symbol;
-          if(s && freshMap[s]){
-            if(item.hasOption!==undefined) freshMap[s].hasOption = item.hasOption;
-            if(item.lot) freshMap[s].lot = item.lot;
-          } else if(s){
-            freshMap[s] = item;
-          }
-        });
-        parsed = { ...parsed, data: Object.values(freshMap) };
-      }
-      return ghWriteStocks(parsed, fresh.sha, retryCount+1);
-    }
-    lg("ghWriteStocks: failed HTTP "+r.status,"w");
-    return false;
-  }catch(e){ lg("ghWriteStocks: "+e.message,"w"); return false; }
-}
-
 
 // ── Read FII/DII data from GitHub ──
 async function ghReadFIIDII(){
@@ -2841,7 +2678,7 @@ function boot(){
   initNotifications();
   // Load FII/DII data (reads from GitHub, refreshes from NSE if stale)
   setTimeout(()=>loadFIIDII(), 2000);
-  setTimeout(()=>refreshIndexLots(), 2500); // fetch live index lot sizes from API
+  setTimeout(()=>refreshIndexLots(), 2500); // live lot sizes for NIFTY/BANKNIFTY/SENSEX/FINNIFTY
   // Load outcome-based confidence calibration from signal history
   setTimeout(()=>loadConfCalibration(), 3500);
   // Load cached name instantly, then refresh from API

@@ -1504,8 +1504,13 @@ async function ghReadStocks(){
 async function ghWriteStocks(parsed, sha, retryCount=0){
   if(!GH.token||!GH.user||!GH.repo) return false;
   try{
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify(parsed, null, 2))));
-    const body = { message:"FRIDAY stocks · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}), content };
+    // Always need a fresh SHA for an existing file — fetch it if not provided
+    if(!sha){
+      const check = await ghReadStocks();
+      sha = check.sha; // null if file doesn't exist yet (first-time create is fine without SHA)
+    }
+    const ghContent = btoa(unescape(encodeURIComponent(JSON.stringify(parsed, null, 2))));
+    const body = { message:"FRIDAY stocks · "+new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"}), content: ghContent };
     if(sha) body.sha = sha;
     const r = await fetch(
       `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${STOCKS_FILE}`,
@@ -1513,19 +1518,18 @@ async function ghWriteStocks(parsed, sha, retryCount=0){
         body: JSON.stringify(body) }
     );
     if(r.ok) return true;
-    // 409 = SHA mismatch — re-read fresh and retry
-    if(r.status===409 && retryCount<2){
-      lg("ghWriteStocks: SHA conflict — retrying ("+(retryCount+1)+")","w");
+    // 409 or 422 = SHA mismatch — re-read fresh SHA and retry
+    if((r.status===409||r.status===422) && retryCount<2){
+      lg("ghWriteStocks: SHA conflict ("+r.status+") — retrying ("+(retryCount+1)+")","w");
       await sleep(1000 + Math.random()*1000);
       const fresh = await ghReadStocks();
-      // Merge: preserve any hasOption/lot already written by another session
+      // Merge: keep richest hasOption/lot data from both versions
       if(fresh.data?.data){
         const freshMap = {};
         (fresh.data.data||[]).forEach(item=>{ const s=item.s||item.symbol; if(s) freshMap[s]=item; });
         (parsed.data||[]).forEach(item=>{
           const s=item.s||item.symbol;
           if(s && freshMap[s]){
-            // Only overwrite if we have richer data
             if(item.hasOption!==undefined) freshMap[s].hasOption = item.hasOption;
             if(item.lot) freshMap[s].lot = item.lot;
           } else if(s){

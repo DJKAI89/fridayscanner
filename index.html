@@ -1707,6 +1707,14 @@ function computeLogStats(signals){
 }
 
 // ── Log a batch of signals (called after each scan) ──
+// ── Check if two signals differ enough to warrant a new log entry (>1% on any key value) ──
+function signalChangedSignificantly(existing, newSig){
+  const pctDiff = (a, b) => a && b ? Math.abs((a - b) / a * 100) : 0;
+  return pctDiff(existing.entry,  newSig.entry)  > 1 ||
+         pctDiff(existing.sl,     newSig.sl)     > 1 ||
+         pctDiff(existing.target, newSig.target) > 1;
+}
+
 async function logSignals(newSignals){
   if(!GH.token||!GH.user||!GH.repo){
     lg("Signal log: GitHub not configured — skipping","w");
@@ -1716,39 +1724,43 @@ async function logSignals(newSignals){
 
   try{
     const { signals, sha } = await ghReadLog();
-    // Build a map of existing signals by ID for fast lookup
-    const existingMap = new Map(signals.map(s=>[s.id, s]));
-    let addedCount = 0, updatedCount = 0;
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    let addedCount = 0, skippedCount = 0;
 
     for(const ns of newSignals){
-      if(existingMap.has(ns.id)){
-        // Same day, same symbol — update values but preserve status/exit data
-        const ex = existingMap.get(ns.id);
-        const preservedFields = {
-          status:         ex.status,
-          exitPrice:      ex.exitPrice,
-          exitTime:       ex.exitTime,
-          pnlPct:         ex.pnlPct,
-          note:           ex.note,
-          livePrice:      ex.livePrice      ?? null,
-          livePnlPct:     ex.livePnlPct     ?? null,
-          targetProgress: ex.targetProgress ?? null
-        };
-        Object.assign(ex, ns, preservedFields);
-        updatedCount++;
-      } else {
-        // New day or new symbol — create fresh entry
-        existingMap.set(ns.id, ns);
-        addedCount++;
+      // Find the most recent existing OPEN signal for same stock/option today
+      const key = ns.type === "STOCK"
+        ? `${ns.stock}-STOCK`
+        : `${ns.stock}-${ns.strike}-${ns.optType||ns.type}`;
+
+      const todaySignals = signals.filter(s =>
+        s.date === istDate && s.status === "OPEN" &&
+        (s.type === "STOCK"
+          ? s.stock === ns.stock && s.type === "STOCK"
+          : s.stock === ns.stock && s.strike === ns.strike && s.optType === (ns.optType||ns.type))
+      );
+
+      // Sort newest first
+      const latest = todaySignals.sort((a,b) => b.time.localeCompare(a.time))[0];
+
+      if(latest && !signalChangedSignificantly(latest, ns)){
+        // Values within 1% — same recommendation, skip to avoid noise
+        skippedCount++;
+        continue;
       }
+
+      // Either first signal today for this stock, or values changed >1% — log as new entry
+      signals.push(ns);
+      addedCount++;
     }
 
-    const updated = Array.from(existingMap.values());
-    // Keep last 500 signals (prune oldest)
-    if(updated.length > 500) updated.splice(0, updated.length-500);
-    const ok = await ghWriteLog(updated, sha);
-    lg(`Signal log: ${ok?"✅":"❌"} added ${addedCount} new, updated ${updatedCount} same-day signals (total ${updated.length})`,"o");
-    updateLogBadge(updated);
+    if(!addedCount){ lg(`Signal log: ${skippedCount} skipped (no significant change)`,"o"); return; }
+
+    // Keep last 2000 signals (prune oldest)
+    if(signals.length > 2000) signals.splice(0, signals.length - 2000);
+    const ok = await ghWriteLog(signals, sha);
+    lg(`Signal log: ${ok?"✅":"❌"} added ${addedCount} new · ${skippedCount} unchanged (total ${signals.length})`,"o");
+    updateLogBadge(signals);
   }catch(e){ lg("logSignals: "+e.message,"w"); }
 }
 
@@ -1757,7 +1769,7 @@ function buildStockSignal(p){
   const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
   return {
-    id:          `${istDate}-${p.s}-STOCK`,
+    id:          `${istDate}-${istTime.replace(/:/g,'').slice(0,4)}-${p.s}-STOCK`,
     date:        istDate,
     time:        istTime,
     type:        "STOCK",
@@ -1796,7 +1808,7 @@ function buildOptionSignal(p, vix){
   const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
   return {
-    id:          `${istDate}-${p.und}-${p.strike}-${p.type}`,
+    id:          `${istDate}-${istTime.replace(/:/g,'').slice(0,4)}-${p.und}-${p.strike}-${p.type}`,
     date:        istDate,
     time:        istTime,
     type:        "OPTION",
@@ -1901,11 +1913,17 @@ async function refreshLivePnL(){
       }catch(e){}
     }
 
-    // Fetch option premiums for open option signals
-    const optPriceMap = {};
+    // Fetch option premiums — deduplicate by chain key to avoid re-fetching same contract
+    const optPriceMap  = {}; // sig.id → price
+    const chainFetched = {}; // "stock-expiry-strike-type" → price
     const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
     for(const sig of openSignals.filter(s=>s.type==="OPTION")){
-      if(sig.expiry && sig.expiry < istDate) continue; // skip expired
+      if(sig.expiry && sig.expiry < istDate) continue;
+      const chainKey = `${sig.stock}-${sig.expiry}-${sig.strike}-${sig.optType}`;
+      if(chainFetched[chainKey] !== undefined){
+        optPriceMap[sig.id] = chainFetched[chainKey];
+        continue;
+      }
       try{
         const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock)||INDEX_OPTS.find(s=>s.name===sig.stock);
         if(!inst) continue;
@@ -1913,8 +1931,10 @@ async function refreshLivePnL(){
         const row = chain.find(r=>r.strike_price===sig.strike);
         if(!row) continue;
         const opt = sig.optType==="CE" ? row.call_options : row.put_options;
-        if(opt?.market_data?.ltp!=null) optPriceMap[sig.id] = opt.market_data.ltp;
-      }catch(e){}
+        const ltp = opt?.market_data?.ltp ?? null;
+        chainFetched[chainKey] = ltp;
+        if(ltp!=null) optPriceMap[sig.id] = ltp;
+      }catch(e){ chainFetched[chainKey] = null; }
     }
 
     // Update live fields on open signals

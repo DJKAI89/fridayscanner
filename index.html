@@ -1859,8 +1859,20 @@ function showToast(msg, color="#16a34a", duration=5000){
 
 // ── Compute live P&L fields for a signal given current market price ──
 // Used by both refreshLivePnL (auto-tracker) and checkAllOutcomes (Update button)
+
+// ── Determine if a signal is bullish direction ──
+// Options: CE=long(bull), PE=short(bear) — independent of signal keyword
+// Stocks: BUY/MODERATE/WATCH = bull (all are long entries), SELL = bear
+function isBullSignal(sig){
+  if(sig.type === "OPTION"){
+    return (sig.optType || sig.signal) === "CE" ||
+           sig.signal === "BUY" || sig.signal === "CALL";
+  }
+  // Stocks: SELL is the only short direction; BUY/MODERATE/WATCH are all long
+  return sig.signal !== "SELL" && sig.signal !== "PUT";
+}
 function computeLiveFields(sig, currentPrice){
-  const isBull = sig.signal==="BUY" || sig.signal==="CALL";
+  const isBull = isBullSignal(sig);
   // P&L % from entry
   const livePnlPct = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
   // Progress toward target: 0%=at entry, 100%=at target, negative=moving toward SL
@@ -2055,7 +2067,7 @@ async function checkAllOutcomes(silent=false){
         // Use livePrice (captured during market hours) to check if target was hit intraday.
         const livePx    = (sig.livePrice ?? 0);
         const exitPx    = (currentPrice ?? 0);
-        const isBullExp = sig.signal==="BUY" || sig.signal==="CALL";
+        const isBullExp = isBullSignal(sig);
 
         // Check target using last live price recorded during market hours
         const checkPx          = livePx > 0 ? livePx : exitPx;
@@ -2089,7 +2101,7 @@ async function checkAllOutcomes(silent=false){
 
       if(currentPrice == null) continue;
 
-      const isBull = sig.signal==="BUY" || sig.signal==="CALL";
+      const isBull   = isBullSignal(sig);
       const hitTarget = isBull ? currentPrice >= sig.target : currentPrice <= sig.target;
       const hitSL     = isBull ? currentPrice <= sig.sl     : currentPrice >= sig.sl;
       // Old stock signal (yesterday's) with no expiry — expire it

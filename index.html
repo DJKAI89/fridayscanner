@@ -1864,12 +1864,15 @@ function showToast(msg, color="#16a34a", duration=5000){
 // Options: CE=long(bull), PE=short(bear) — independent of signal keyword
 // Stocks: BUY/MODERATE/WATCH = bull (all are long entries), SELL = bear
 function isBullSignal(sig){
+  // For OPTIONS: you always BUY the option (long premium).
+  // Whether CE or PE, the premium goes UP toward target when the trade works.
+  // Target is always ABOVE entry, SL is always BELOW entry.
+  // Only SELL signal means you wrote/sold the option (short premium = bearish on price).
   if(sig.type === "OPTION"){
-    return (sig.optType || sig.signal) === "CE" ||
-           sig.signal === "BUY" || sig.signal === "CALL";
+    return sig.signal !== "SELL";
   }
-  // Stocks: SELL is the only short direction; BUY/MODERATE/WATCH are all long
-  return sig.signal !== "SELL" && sig.signal !== "PUT";
+  // Stocks: SELL is the only short direction; BUY/MODERATE/WATCH are all long entries
+  return sig.signal !== "SELL";
 }
 function computeLiveFields(sig, currentPrice){
   const isBull = isBullSignal(sig);
@@ -2527,6 +2530,12 @@ function boot(){
   setTimeout(()=>refreshIndexLots(), 2500); // live lot sizes for NIFTY/BANKNIFTY/SENSEX/FINNIFTY
   // Load outcome-based confidence calibration from signal history
   setTimeout(()=>loadConfCalibration(), 3500);
+  // Auto-check signal outcomes on boot (silent) — catches overnight expirations
+  setTimeout(()=>{
+    if(GH.token && GH.user && GH.repo){
+      checkAllOutcomes(true).catch(e=>lg("boot-check: "+e.message,"w"));
+    }
+  }, 10000);
   // Load cached name instantly, then refresh from API
   const _cachedName = localStorage.getItem("friday_user_name");
   const _cachedId   = localStorage.getItem("friday_user_id");
@@ -2698,9 +2707,17 @@ function switchTab(t){
   // Load options on first visit
   if(t==="options"&&document.getElementById("dash-options").style.display==="none"&&!optLoading) loadOptions(false);
   if(t==="log"){
-    // Only re-render log if it hasn't been rendered in the last 60 seconds
-    const _lastLogRender = window._lastLogRenderTs || 0;
-    if(Date.now() - _lastLogRender > 60000){ window._lastLogRenderTs = Date.now(); renderLogTab(); }
+    // Auto-check outcomes silently when tab opens (if >5 min since last check)
+    const _lastCheck = window._lastOutcomeCheckTs || 0;
+    const _lastRender = window._lastLogRenderTs || 0;
+    if(Date.now() - _lastCheck > 5*60*1000 && GH.token){
+      window._lastOutcomeCheckTs = Date.now();
+      window._lastLogRenderTs = Date.now();
+      checkAllOutcomes(true).catch(e=>lg("auto-check: "+e.message,"w"));
+    } else if(Date.now() - _lastRender > 60000){
+      window._lastLogRenderTs = Date.now();
+      renderLogTab();
+    }
   }
   if(t==="analysis"){
     const _lastAR = window._lastAnalysisRenderTs || 0;

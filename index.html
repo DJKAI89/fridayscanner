@@ -2062,32 +2062,35 @@ async function checkAllOutcomes(silent=false){
       // ── 1. Expired contract ──
       const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold;
       if(isExpiredContract){
-        // KEY RULE: exitPx=0 means expired worthless — NOT a stop-loss hit.
-        // SL is only valid during live market hours when you can actually exit at that price.
-        // Use livePrice (captured during market hours) to check if target was hit intraday.
-        const livePx    = (sig.livePrice ?? 0);
+        // For expired contracts: use the ACTUAL post-expiry price only.
+        // livePrice is a stale intraday snapshot — do NOT use it for outcome decisions.
+        // If the contract expired worthless (price ~ 0), mark EXPIRED, not SL_HIT.
         const exitPx    = (currentPrice ?? 0);
         const isBullExp = isBullSignal(sig);
 
-        // Check target using last live price recorded during market hours
-        const checkPx          = livePx > 0 ? livePx : exitPx;
-        const expiredHitTarget = checkPx > 0 && (isBullExp ? checkPx >= sig.target : checkPx <= sig.target);
+        // Check if target or SL was hit at the final exit price
+        const hitTgt = isBullExp ? exitPx >= sig.target : exitPx <= sig.target;
+        const hitSL  = isBullExp ? exitPx <= sig.sl     : exitPx >= sig.sl;
 
-        if(expiredHitTarget){
-          // Target was hit intraday before expiry
+        if(hitTgt){
           sig.status    = "TARGET_HIT";
-          sig.exitPrice = +checkPx.toFixed(2);
+          sig.exitPrice = +exitPx.toFixed(2);
           sig.exitTime  = istTime;
-          sig.pnlPct    = +(((checkPx - sig.entry) / sig.entry) * 100).toFixed(2);
+          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         } else if(exitPx === 0 || exitPx < sig.entry * 0.02){
-          // Expired worthless — theta decay to zero, NOT a SL hit.
-          // Real P&L = -100%. Excluded from SL count and win rate denominator.
+          // Expired worthless — theta decay, not a real SL hit
           sig.status    = "EXPIRED";
           sig.exitPrice = 0;
           sig.exitTime  = istTime;
           sig.pnlPct    = -100;
+        } else if(hitSL){
+          // Still traded but breached SL on expiry day
+          sig.status    = "SL_HIT";
+          sig.exitPrice = +exitPx.toFixed(2);
+          sig.exitTime  = istTime;
+          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         } else {
-          // Expired with some residual value but didn't hit target
+          // Expired between SL and target
           sig.status    = "EXPIRED";
           sig.exitPrice = +exitPx.toFixed(2);
           sig.exitTime  = istTime;

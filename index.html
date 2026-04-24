@@ -815,8 +815,10 @@ try{
 
 let scanning=false,optLoading=false,portLoading=false;
 let scanTimer,optTimer,tickTimer,portTimer,cdTimer,moodTimer,scanSecs;
-let liveTrackTimer=null;          // auto-refreshes live P&L for open signals every 60s
+let liveTrackTimer=null;          // auto-refreshes live P&L for open signals every 30s
 let _liveTrackLastGHWrite=0;      // throttle GitHub writes to every 5 min
+let _livePriceCache={};           // in-memory: sigId → {price, ts} — avoids redundant API calls
+let _lastLiveFetch=0;             // timestamp of last full price fetch
 let lastPrices={},rsiCache={};
 let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
@@ -1903,8 +1905,14 @@ async function refreshLivePnL(){
   if(!GH.token||!GH.user||!GH.repo) return;
   try{
     const { signals, sha } = await ghReadLog();
-    const openSignals = signals.filter(s=>s.status==="OPEN");
-    if(!openSignals.length) return;
+    const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    // Only track TODAY's open signals live — past open signals use Update Outcomes button
+    const openSignals = signals.filter(s=>s.status==="OPEN" && s.date===istToday);
+    if(!openSignals.length){
+      // Still re-render UI with cached data if on log tab
+      if(activeTab==="log") renderLogTab(signals);
+      return;
+    }
 
     // Fetch prices for open stocks
     const stockSyms = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
@@ -2827,15 +2835,21 @@ function startTimers(){
     refreshMarketMood();
   }, (CFG.moodRefresh||10) * 60 * 1000);
 
-  // ── Live P&L tracker — refreshes open signal prices every 60s (market hours + 30min after close) ──
+  // ── Live P&L tracker — runs every 30s always ──
+  // Fetches prices during market hours + 30min after close
+  // Updates UI every 30s using cached prices (no extra API calls between fetches)
   liveTrackTimer = setInterval(()=>{
     if(!GH.token||!GH.user||!GH.repo) return;
-    // Run during market hours and up to 30 min after close (for final price capture)
     const _h=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
     const _m=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
     const _inWindow = isOpen() || (_h===15 && _m<=59) || (_h===16 && _m<=0);
-    if(_inWindow) refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
-  }, 60*1000);
+    if(_inWindow){
+      refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
+    } else if(activeTab==="log"){
+      // Market closed but log tab open — re-render with existing data (no API call)
+      ghReadLog().then(({signals})=>renderLogTab(signals)).catch(()=>{});
+    }
+  }, 30*1000);
 
   // ── Countdown + market status check (runs every second always) ──
   cdTimer = setInterval(()=>{

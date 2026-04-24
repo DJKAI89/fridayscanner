@@ -1954,27 +1954,57 @@ async function refreshLivePnL(){
       }catch(e){ chainFetched[chainKey] = null; }
     }
 
-    // Update live fields on open signals
-    let changed = 0;
+    // Update live fields AND immediately close signals that hit target/SL
+    const istNow = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+    let changed = 0, closed = 0;
     for(const sig of signals){
       if(sig.status !== "OPEN") continue;
       let currentPrice = sig.type==="STOCK" ? priceMap[sig.stock] : optPriceMap[sig.id];
       if(currentPrice==null) continue;
-      const live = computeLiveFields(sig, currentPrice);
-      Object.assign(sig, live);
-      changed++;
+
+      const bull      = isBullSignal(sig);
+      const hitTarget = bull ? currentPrice >= sig.target : currentPrice <= sig.target;
+      const hitSL     = bull ? currentPrice <= sig.sl     : currentPrice >= sig.sl;
+
+      if(hitTarget){
+        sig.status    = "TARGET_HIT";
+        sig.exitPrice = +currentPrice.toFixed(2);
+        sig.exitTime  = istNow;
+        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
+        closed++;
+        lg(`🎯 TARGET HIT: ${sig.name} ₹${sig.entry} → ₹${currentPrice.toFixed(2)} (+${sig.pnlPct.toFixed(1)}%)`,"o");
+        showToast(`🎯 Target hit: ${sig.name} +${sig.pnlPct.toFixed(1)}%`, "#16a34a", 8000);
+      } else if(hitSL){
+        sig.status    = "SL_HIT";
+        sig.exitPrice = +sig.sl.toFixed(2);
+        sig.exitTime  = istNow;
+        sig.pnlPct    = +(((sig.sl - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
+        closed++;
+        lg(`❌ SL HIT: ${sig.name} ₹${sig.entry} → SL ₹${sig.sl} (${sig.pnlPct.toFixed(1)}%)`,"o");
+        showToast(`❌ SL hit: ${sig.name} ${sig.pnlPct.toFixed(1)}%`, "#dc2626", 8000);
+      } else {
+        // Still open — update live P&L display only
+        Object.assign(sig, computeLiveFields(sig, currentPrice));
+        changed++;
+      }
     }
 
-    if(!changed) return;
+    if(!changed && !closed) return;
 
     // Always re-render the log tab if it's visible
     if(activeTab==="log") renderLogTab(signals);
 
-    // Write to GitHub at most every 5 minutes
+    // Write to GitHub immediately if any signal closed, else throttle to every 5 min
     const now = Date.now();
-    if(now - _liveTrackLastGHWrite > 5*60*1000){
+    if(closed > 0 || now - _liveTrackLastGHWrite > 5*60*1000){
       const ok = await ghWriteLog(signals, sha);
-      if(ok){ _liveTrackLastGHWrite = now; lg(`Live P&L: updated ${changed} signals, saved to GitHub`,"o"); }
+      if(ok){
+        _liveTrackLastGHWrite = now;
+        if(closed > 0) lg(`Signal outcomes: ${closed} closed, ${changed} live-updated → saved to GitHub`,"o");
+        else lg(`Live P&L: ${changed} signals updated → saved to GitHub`,"o");
+      }
     }
   }catch(e){ lg("refreshLivePnL: "+e.message,"w"); }
 }

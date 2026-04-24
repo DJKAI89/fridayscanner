@@ -1915,8 +1915,10 @@ async function refreshLivePnL(){
         return inst?.key;
       }).filter(Boolean).join(",");
       const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      // Guard: never send empty instrument_key (causes HTTP 400)
+      const allKeys = [keys, idxKeys].filter(Boolean).join(",");
       try{
-        const quotes = await fetchQ(keys+","+idxKeys);
+        const quotes = await fetchQ(allKeys);
         stockSyms.forEach(sym=>{
           const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym);
           if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
@@ -2008,8 +2010,9 @@ async function checkAllOutcomes(silent=false){
         return inst?.key;
       }).filter(Boolean).join(",");
       const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      const allKeys2 = [keys, idxKeys].filter(Boolean).join(",");
       try{
-        const quotes = await fetchQ(keys+","+idxKeys);
+        const quotes = await fetchQ(allKeys2);
         allSyms.forEach(sym=>{
           const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym);
           if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
@@ -2022,15 +2025,24 @@ async function checkAllOutcomes(silent=false){
     }
 
     // For options: fetch current premium prices
-    // Group by expiry so we can also attempt expired contracts
-    const optPriceMap = {};
     const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
     const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+
+    // Define expiryThreshold FIRST — used in both the price fetch and outcome loops
+    // After 3:30 PM, today's expiry contracts are also considered expired
+    const _istHour = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+    const _mktClosed = !isOpen();
+    const expiryThreshold = (_mktClosed && _istHour >= 15) ? istDate : (() => {
+      const d = new Date(); d.setDate(d.getDate()-1);
+      return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    })();
+
+    // Fetch option premiums — expired contracts get price 0, active ones fetch from chain
+    const optPriceMap = {};
     for(const sig of openSignals.filter(s=>s.type==="OPTION")){
       try{
         const isExpiredContract = sig.expiry && sig.expiry <= expiryThreshold;
         if(isExpiredContract){
-          // Expired contract — premium is 0 (expired worthless if not closed earlier)
           optPriceMap[sig.id] = 0;
           continue;
         }
@@ -2043,15 +2055,6 @@ async function checkAllOutcomes(silent=false){
         if(opt?.market_data?.ltp != null) optPriceMap[sig.id] = opt.market_data.ltp;
       }catch(e){ lg("optPrice fetch "+sig.id+": "+e.message,"w"); }
     }
-
-    // After 3:30 PM IST, today's expiry contracts are also expired
-    const _istHour = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
-    const _mktClosed = !isOpen();
-    const expiryThreshold = (_mktClosed && _istHour >= 15) ? istDate : (() => {
-      // Market open — only contracts strictly before today are expired
-      const d = new Date(); d.setDate(d.getDate()-1);
-      return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    })();
 
     // Update each open signal
     let closed = 0, liveupdated = 0;

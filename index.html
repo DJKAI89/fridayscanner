@@ -2029,6 +2029,11 @@ async function checkAllOutcomes(silent=false){
     if(!silent) alert("Configure GitHub token in ⚙ Settings → Signal Log first.");
     return;
   }
+  // Silent auto-checks only run during market hours — manual button always works
+  if(silent && !isOpen()){
+    lg("checkAllOutcomes: skipped — market closed","o");
+    return;
+  }
   if(!silent)
     document.getElementById("log-entries").innerHTML=
       `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking outcomes for open signals...</div>`;
@@ -2198,8 +2203,9 @@ async function checkAllOutcomes(silent=false){
     window._lastLogRenderTs = Date.now(); renderLogTab(signals);
     updateLogBadge(signals);
     if(silent){
-      if(closed>0) showToast(`📊 Auto-updated: ${closed} signal${closed>1?"s":""} closed after market hours`, "#16a34a");
-      else if(liveupdated>0) showToast(`📡 Live P&L refreshed for ${liveupdated} open signal${liveupdated>1?"s":""}`, "#0ea5e9");
+      if(closed>0) showToast(`📊 ${closed} signal${closed>1?"s":""} closed`, "#16a34a");
+      // Only show live P&L toast during market hours — not when market is closed
+      else if(liveupdated>0 && isOpen()) showToast(`📡 Live P&L: ${liveupdated} signals updated`, "#0ea5e9");
     } else {
       if(closed>0 || liveupdated>0)
         alert(`✅ Closed: ${closed} · Live P&L updated: ${liveupdated}\n${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
@@ -2577,9 +2583,9 @@ function boot(){
   setTimeout(()=>refreshIndexLots(), 2500); // live lot sizes for NIFTY/BANKNIFTY/SENSEX/FINNIFTY
   // Load outcome-based confidence calibration from signal history
   setTimeout(()=>loadConfCalibration(), 3500);
-  // Auto-check signal outcomes on boot (silent) — catches overnight expirations
+  // Auto-check signal outcomes on boot (silent) — only during/just after market hours
   setTimeout(()=>{
-    if(GH.token && GH.user && GH.repo){
+    if(GH.token && GH.user && GH.repo && isOpen()){
       checkAllOutcomes(true).catch(e=>lg("boot-check: "+e.message,"w"));
     }
   }, 10000);
@@ -2757,7 +2763,7 @@ function switchTab(t){
     // Auto-check outcomes silently when tab opens (if >5 min since last check)
     const _lastCheck = window._lastOutcomeCheckTs || 0;
     const _lastRender = window._lastLogRenderTs || 0;
-    if(Date.now() - _lastCheck > 5*60*1000 && GH.token){
+    if(Date.now() - _lastCheck > 5*60*1000 && GH.token && isOpen()){
       window._lastOutcomeCheckTs = Date.now();
       window._lastLogRenderTs = Date.now();
       checkAllOutcomes(true).catch(e=>lg("auto-check: "+e.message,"w"));

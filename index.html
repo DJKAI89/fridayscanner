@@ -2001,8 +2001,14 @@ async function refreshLivePnL(){
 
     if(!changed && !closed) return;
 
-    // Always re-render the log tab if it's visible
+    // Re-render UI immediately — always update badge, render cards if tab visible
+    updateLogBadge(signals);
     if(activeTab==="log") renderLogTab(signals);
+    // If signals just closed, refresh analysis tab too (pass signals directly — no re-read)
+    if(closed > 0 && activeTab==="analysis"){
+      window._lastAnalysisRenderTs = Date.now();
+      renderAnalysisTab(signals);
+    }
 
     // Write to GitHub immediately if any signal closed, else throttle to every 5 min
     const now = Date.now();
@@ -2762,7 +2768,8 @@ function switchTab(t){
   }
   if(t==="analysis"){
     const _lastAR = window._lastAnalysisRenderTs || 0;
-    if(Date.now() - _lastAR > 120000){ window._lastAnalysisRenderTs = Date.now(); renderAnalysisTab(); }
+    // 30s cache — analysis reflects recent closes quickly
+    if(Date.now() - _lastAR > 30000){ window._lastAnalysisRenderTs = Date.now(); renderAnalysisTab(); }
   }
 }
 
@@ -2840,15 +2847,19 @@ function startTimers(){
   // Updates UI every 30s using cached prices (no extra API calls between fetches)
   liveTrackTimer = setInterval(()=>{
     if(!GH.token||!GH.user||!GH.repo) return;
-    const _h=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
-    const _m=parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
-    const _inWindow = isOpen() || (_h===15 && _m<=59) || (_h===16 && _m<=0);
-    if(_inWindow){
+    // Only run on weekdays — isOpen() handles holidays via API
+    const _istStr = new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short",hour:"2-digit",minute:"2-digit",hour12:false});
+    const _day = _istStr.split(",")[0];
+    if(_day==="Sat"||_day==="Sun") return; // never run on weekends
+    const _h = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+    const _m = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"2-digit"}));
+    // Market hours: 9:15 AM–3:30 PM + 30 min buffer after close for expiry capture
+    const _inMarketHours = isOpen();
+    const _inPostClose   = !_inMarketHours && _h===15 && _m>=30 && _m<=59;
+    if(_inMarketHours || _inPostClose){
       refreshLivePnL().catch(e=>lg("liveTrack: "+e.message,"w"));
-    } else if(activeTab==="log"){
-      // Market closed but log tab open — re-render with existing data (no API call)
-      ghReadLog().then(({signals})=>renderLogTab(signals)).catch(()=>{});
     }
+    // Note: no re-render when market closed — stale data, not worth an API call
   }, 30*1000);
 
   // ── Countdown + market status check (runs every second always) ──

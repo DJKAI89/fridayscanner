@@ -1983,6 +1983,7 @@ async function refreshLivePnL(){
         closed++;
         lg(`🎯 TARGET HIT: ${sig.name} ₹${sig.entry} → ₹${currentPrice.toFixed(2)} (+${sig.pnlPct.toFixed(1)}%)`,"o");
         showToast(`🎯 Target hit: ${sig.name} +${sig.pnlPct.toFixed(1)}%`, "#16a34a", 8000);
+        sendNotification(`🎯 Target Hit: ${sig.name}`,`Entry ₹${sig.entry} → Exit ₹${currentPrice.toFixed(2)} · P&L +${sig.pnlPct.toFixed(1)}%`,"tgt-"+sig.id);
       } else if(hitSL){
         sig.status    = "SL_HIT";
         sig.exitPrice = +sig.sl.toFixed(2);
@@ -1992,11 +1993,35 @@ async function refreshLivePnL(){
         closed++;
         lg(`❌ SL HIT: ${sig.name} ₹${sig.entry} → SL ₹${sig.sl} (${sig.pnlPct.toFixed(1)}%)`,"o");
         showToast(`❌ SL hit: ${sig.name} ${sig.pnlPct.toFixed(1)}%`, "#dc2626", 8000);
+        sendNotification(`❌ SL Hit: ${sig.name}`,`Entry ₹${sig.entry} → SL ₹${sig.sl} · Loss ${sig.pnlPct.toFixed(1)}%`,"sl-"+sig.id);
       } else {
         // Still open — update live P&L display only
         Object.assign(sig, computeLiveFields(sig, currentPrice));
         changed++;
       }
+    }
+
+    // Auto-expire past OPEN signals (not today's) without API calls
+    // Stocks from previous days → EXPIRED. Options with past expiry → EXPIRED.
+    const istDate2 = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    let autoExpired = 0;
+    for(const sig of signals){
+      if(sig.status !== "OPEN") continue;
+      if(sig.date === istDate2) continue; // today's signals handled above
+      const isPastStock  = sig.type === "STOCK";
+      const isPastOption = sig.type === "OPTION" && sig.expiry && sig.expiry < istDate2;
+      if(isPastStock || isPastOption){
+        sig.status    = "EXPIRED";
+        sig.exitPrice = sig.livePrice || 0;
+        sig.exitTime  = istNow;
+        sig.pnlPct    = sig.livePnlPct ?? -100;
+        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
+        autoExpired++;
+      }
+    }
+    if(autoExpired > 0){
+      closed += autoExpired;
+      lg(`Auto-expired ${autoExpired} past open signals`,"o");
     }
 
     if(!changed && !closed) return;
@@ -2239,156 +2264,198 @@ async function renderAnalysisTab(signalsIn){
 
   let signals = signalsIn;
   if(!signals){
-    if(!GH.token){ el.innerHTML=`<div class="empty-state">Configure GitHub token in ⚙ Settings to enable analysis.</div>`; return; }
+    if(!GH.token){ el.innerHTML=`<div class="empty-state">Configure GitHub token in ⚙ Settings.</div>`; return; }
     el.innerHTML=`<div style="text-align:center;padding:20px;color:#64748b">⏳ Loading signal history...</div>`;
-    try{
-      const result = await ghReadLog();
-      signals = result.signals || [];
-    }catch(e){ el.innerHTML=`<div class="empty-state">Error loading signals: ${e.message}</div>`; return; }
+    try{ const r = await ghReadLog(); signals = r.signals||[]; }
+    catch(e){ el.innerHTML=`<div class="empty-state">Error: ${e.message}</div>`; return; }
   }
 
-  const closed = signals.filter(s=>s.status==="TARGET_HIT"||s.status==="SL_HIT");
-  const totalClosed = closed.length;
+  const closed   = signals.filter(s=>s.status==="TARGET_HIT"||s.status==="SL_HIT");
+  const expired  = signals.filter(s=>s.status==="EXPIRED");
+  const open     = signals.filter(s=>s.status==="OPEN");
+  const total    = closed.length;
 
-  if(totalClosed < 5){
-    el.innerHTML=`<div class="empty-state">Need at least 5 closed signals for analysis.<br><span style="font-size:10px;color:#94a3b8">Currently ${totalClosed} closed · ${signals.filter(s=>s.status==="OPEN").length} open</span></div>`;
+  if(total < 5){
+    el.innerHTML=`<div class="empty-state">Need at least 5 closed signals.<br><span style="font-size:10px;color:#94a3b8">${total} closed · ${open.length} open · ${expired.length} expired</span></div>`;
     return;
   }
 
-  // Helper: win rate for a group
-  const wr = (group) => {
-    if(!group.length) return null;
-    const hits = group.filter(s=>s.status==="TARGET_HIT").length;
-    return { hits, total:group.length, rate:Math.round(hits/group.length*100) };
-  };
-
-  // ── Section 1: Overall stats ──
-  const overall = wr(closed);
-  const avgConf = Math.round(closed.reduce((a,s)=>a+(s.confidence||50),0)/totalClosed);
-  const avgPnl  = closed.filter(s=>s.pnlPct!=null).length > 0
-    ? (closed.filter(s=>s.pnlPct!=null).reduce((a,s)=>a+s.pnlPct,0) / closed.filter(s=>s.pnlPct!=null).length).toFixed(2)
-    : "—";
-
-  // ── Section 2: Confidence band breakdown ──
-  const confBands = [50,60,70,80,90].map(b=>{
-    const group = closed.filter(s=>(s.confidence||50)>=b&&(s.confidence||50)<b+10);
-    return { band:`${b}–${b+9}%`, ...wr(group)||{hits:0,total:0,rate:null} };
-  });
-
-  // ── Section 3: Time of day ──
-  const sessions = {
-    "Opening (9:15–9:45)":  s => { const h=parseInt((s.time||"").split(":")[0]); return h===9&&parseInt((s.time||"").split(":")[1])>=15; },
-    "Early (9:45–10:30)":   s => { const h=parseInt((s.time||"").split(":")[0]),m=parseInt((s.time||"").split(":")[1]); return (h===9&&m>=45)||(h===10&&m<=30); },
-    "Mid (10:30–14:00)":    s => { const h=parseInt((s.time||"").split(":")[0]); return h>=11&&h<14; },
-    "Pre-close (14–15:30)": s => { const h=parseInt((s.time||"").split(":")[0]); return h>=14; },
-  };
-  const timeBreakdown = Object.entries(sessions).map(([label,fn])=>{
-    const group = closed.filter(fn);
-    return { label, ...wr(group)||{hits:0,total:0,rate:null} };
-  });
-
-  // ── Section 4: Signal type breakdown ──
-  const stockSignals  = wr(closed.filter(s=>s.type==="STOCK"));
-  const optionSignals = wr(closed.filter(s=>s.type==="OPTION"));
-
-  // ── Section 5: Indicator effectiveness (lift score) ──
-  // For each indicator field, compare win rate when indicator was ON vs baseline
-  const baseline = overall.rate;
-  const indFields = [
-    { label:"MACD Bullish",   fn: s=>s.macdBull===true },
-    { label:"Above 50MA",     fn: s=>s.a50===true },
-    { label:"Above 200MA",    fn: s=>s.a200===true },
-    { label:"Near Support",   fn: s=>s.nearSupp===true },
-    { label:"RSI 40–70",      fn: s=>s.rsi>=40&&s.rsi<=70 },
-    { label:"Candle Pattern", fn: s=>!!(s.reversal&&s.reversal!=="NONE") },
-    { label:"High Volume",    fn: s=>s.numInds>=5 },
-  ];
-  const liftScores = indFields.map(({label,fn})=>{
-    const withInd    = wr(closed.filter(fn));
-    const withoutInd = wr(closed.filter(s=>!fn(s)));
-    if(!withInd||withInd.total<3) return { label, lift:null, wr:null, n:0 };
-    const lift = withInd.rate - baseline;
-    return { label, lift, wr:withInd.rate, n:withInd.total };
-  }).sort((a,b)=>(b.lift||0)-(a.lift||0));
-
-  // ── Render ──
-  const sc = (v,up=60,dn=40) => v===null?"#94a3b8":v>=up?"#16a34a":v>=dn?"#d97706":"#dc2626";
+  // ── Core helpers ──
+  const wr  = arr => { if(!arr.length) return null; const h=arr.filter(s=>s.status==="TARGET_HIT").length; return {h,t:arr.length,r:Math.round(h/arr.length*100)}; };
+  const sc  = v => v===null?"#94a3b8":v>=65?"#16a34a":v>=50?"#d97706":"#dc2626";
   const pct = v => v===null?"—":v+"%";
+  const avgPnlOf = arr => { const v=arr.filter(s=>s.pnlPct!=null); return v.length?(v.reduce((a,s)=>a+s.pnlPct,0)/v.length).toFixed(1):"—"; };
 
-  const barHtml = (label, rate, total, max=100) => {
-    if(total<1) return `<div style="display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;margin-bottom:5px"><span>${label}</span><span>No data</span></div>`;
-    const color = sc(rate);
-    const w = rate||0;
-    return `<div style="margin-bottom:7px">
+  // ── Overall ──
+  const overall  = wr(closed);
+  const avgConf  = Math.round(closed.reduce((a,s)=>a+(s.confidence||50),0)/total);
+  const avgPnlAll= avgPnlOf(closed);
+  const avgPnlTgt= avgPnlOf(closed.filter(s=>s.status==="TARGET_HIT"));
+  const avgPnlSL = avgPnlOf(closed.filter(s=>s.status==="SL_HIT"));
+
+  // ── Streak ──
+  const recent = closed.slice(-20).reverse();
+  let streak=0, streakType="";
+  for(const s of recent){
+    const isHit = s.status==="TARGET_HIT";
+    if(!streakType) streakType=isHit?"W":"L";
+    if((streakType==="W")===isHit) streak++; else break;
+  }
+
+  // ── By underlying ──
+  const underlyings = [...new Set(closed.map(s=>s.stock||s.name?.split(" ")[0]))].slice(0,8);
+  const byUnderlying = underlyings.map(u=>{
+    const g = closed.filter(s=>(s.stock||s.name?.split(" ")[0])===u);
+    return {u, ...wr(g)||{h:0,t:0,r:null}};
+  }).filter(x=>x.t>=3).sort((a,b)=>(b.r||0)-(a.r||0));
+
+  // ── CE vs PE ──
+  const ceSignals = closed.filter(s=>s.optType==="CE"||s.signal==="CALL");
+  const peSignals = closed.filter(s=>s.optType==="PE"||s.signal==="PUT");
+  const ceWR = wr(ceSignals), peWR = wr(peSignals);
+
+  // ── BUY vs WATCH vs MODERATE ──
+  const sigTypes = ["BUY","WATCH","MODERATE"].map(t=>{
+    const g = closed.filter(s=>s.signal===t);
+    return {t, ...wr(g)||{h:0,t:0,r:null}};
+  }).filter(x=>x.t>=3);
+
+  // ── Confidence bands ──
+  const confBands = [50,60,70,75,80,85,90,95].map(b=>{
+    const g = closed.filter(s=>(s.confidence||50)>=b&&(s.confidence||50)<b+5);
+    return {band:`${b}–${b+4}%`, ...wr(g)||{h:0,t:0,r:null}};
+  }).filter(x=>x.t>=2);
+
+  // ── Time sessions ──
+  const getH = s => parseInt((s.time||"").split(":")[0])||0;
+  const getM = s => parseInt((s.time||"").split(":")[1])||0;
+  const sessions = [
+    {label:"Opening 9:15–9:45",  fn:s=>{ const h=getH(s),m=getM(s); return h===9&&m>=15&&m<=45; }},
+    {label:"Early 9:45–10:30",   fn:s=>{ const h=getH(s),m=getM(s); return (h===9&&m>45)||(h===10&&m<=30); }},
+    {label:"Mid 10:30–12:30",    fn:s=>{ const h=getH(s); return h>=11&&h<=12; }},
+    {label:"Afternoon 12:30–2",  fn:s=>{ const h=getH(s); return h>=12&&h<14; }},
+    {label:"Pre-close 2–3:30",   fn:s=>{ const h=getH(s); return h>=14; }},
+  ];
+  const timeBreak = sessions.map(({label,fn})=>{
+    const g=closed.filter(fn);
+    return {label, ...wr(g)||{h:0,t:0,r:null}};
+  }).filter(x=>x.t>=2);
+  const bestTime = timeBreak.filter(x=>x.r!==null).sort((a,b)=>b.r-a.r)[0];
+
+  // ── Avg P&L by day ── (last 7 trading days)
+  const byDate = {};
+  closed.forEach(s=>{ if(!byDate[s.date]) byDate[s.date]={hits:0,sls:0,pnl:0}; byDate[s.date][s.status==="TARGET_HIT"?"hits":"sls"]++; byDate[s.date].pnl+=(s.pnlPct||0); });
+  const days = Object.entries(byDate).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7);
+
+  // ── Actionable summary ──
+  const summaryPoints = [];
+  if(bestTime) summaryPoints.push(`Best time to trade: <b>${bestTime.label}</b> (${bestTime.r}% win rate)`);
+  const bestConf = confBands.filter(b=>b.r!==null).sort((a,b)=>b.r-a.r)[0];
+  if(bestConf) summaryPoints.push(`Sweet spot confidence: <b>${bestConf.band}</b> (${bestConf.r}% win rate)`);
+  const bestUnd = byUnderlying[0];
+  if(bestUnd) summaryPoints.push(`Best performing: <b>${bestUnd.u}</b> (${bestUnd.r}% from ${bestUnd.t} signals)`);
+  if(ceWR&&peWR&&ceWR.t>=3&&peWR.t>=3)
+    summaryPoints.push(`${ceWR.r>peWR.r?"CE":"PE"} options outperforming: <b>${ceWR.r>peWR.r?"CE":"PE"} ${Math.max(ceWR.r,peWR.r)}%</b> vs ${Math.min(ceWR.r,peWR.r)}%`);
+  if(streak>=3) summaryPoints.push(`Current streak: <b>${streak} ${streakType==="W"?"wins 🔥":"losses ⚠️"}</b> in a row`);
+
+  // ── HTML helpers ──
+  const bar = (label,r,t,extra="") => {
+    if(!t) return `<div style="display:flex;justify-content:space-between;font-size:9px;color:#94a3b8;padding:3px 0"><span>${label}</span><span>No data</span></div>`;
+    const color=sc(r); const w=r||0;
+    return `<div style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:2px">
-        <span style="color:#374151;font-weight:600">${label}</span>
-        <span style="color:${color};font-weight:700">${pct(rate)} (${total} signals)</span>
+        <span style="color:#374151;font-weight:600">${label}${extra}</span>
+        <span style="color:${color};font-weight:700">${pct(r)} · ${t} signals</span>
       </div>
-      <div style="background:#f1f5f9;border-radius:4px;height:6px">
-        <div style="background:${color};width:${Math.min(100,w)}%;height:6px;border-radius:4px;transition:width 0.4s"></div>
+      <div style="background:#f1f5f9;border-radius:4px;height:5px">
+        <div style="background:${color};width:${Math.min(100,w)}%;height:5px;border-radius:4px"></div>
       </div>
     </div>`;
   };
 
+  const card = (title,body) => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">${title}</div>${body}</div>`;
+
   el.innerHTML = `
-    <!-- Overall Stats -->
-    <div class="stats-g" style="margin-bottom:12px">
-      <div class="sc"><div class="sc-lbl">CLOSED SIGNALS</div><div class="sc-val bl">${totalClosed}</div><div class="sc-sub">tracked outcomes</div></div>
-      <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val" style="color:${sc(overall.rate)}">${pct(overall.rate)}</div><div class="sc-sub">${overall.hits} targets hit</div></div>
-      <div class="sc"><div class="sc-lbl">AVG CONFIDENCE</div><div class="sc-val">${avgConf}%</div><div class="sc-sub">at signal time</div></div>
-      <div class="sc"><div class="sc-lbl">AVG P&L</div><div class="sc-val" style="color:${parseFloat(avgPnl)>=0?"#16a34a":"#dc2626"}">${avgPnl==="—"?"—":(avgPnl>=0?"+":"")+avgPnl+"%"}</div><div class="sc-sub">closed signals</div></div>
+    <!-- Actionable summary -->
+    ${summaryPoints.length?`<div style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:800;color:#15803d;margin-bottom:8px">💡 Key Insights</div>
+      ${summaryPoints.map(p=>`<div style="font-size:10px;color:#374151;margin-bottom:4px;padding-left:8px;border-left:3px solid #22c55e">→ ${p}</div>`).join("")}
+    </div>`:""}
+
+    <!-- Overall stats row -->
+    <div class="stats-g" style="margin-bottom:10px">
+      <div class="sc"><div class="sc-lbl">CLOSED</div><div class="sc-val bl">${total}</div><div class="sc-sub">${expired.length} expired</div></div>
+      <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val" style="color:${sc(overall.r)}">${pct(overall.r)}</div><div class="sc-sub">${overall.h} targets</div></div>
+      <div class="sc"><div class="sc-lbl">AVG P&L</div><div class="sc-val" style="color:${parseFloat(avgPnlAll)>=0?"#16a34a":"#dc2626"}">${avgPnlAll==="—"?"—":(parseFloat(avgPnlAll)>=0?"+":"")+avgPnlAll+"%"}</div><div class="sc-sub">on close</div></div>
+      <div class="sc"><div class="sc-lbl">STREAK</div><div class="sc-val" style="color:${streakType==="W"?"#16a34a":"#dc2626"}">${streak}${streakType==="W"?"W":"L"}</div><div class="sc-sub">recent</div></div>
     </div>
 
-    <!-- Confidence band breakdown -->
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">🎯 Win Rate by Confidence Band</div>
-      ${confBands.map(b=>barHtml(b.band, b.rate, b.total)).join("")}
-      <div style="font-size:8px;color:#94a3b8;margin-top:4px">Calibration ${CONF_CALIBRATION?`active (${Object.keys(CONF_CALIBRATION).length} bands)`:"loading — need 10+ closed signals"}</div>
+    <!-- Win/Loss P&L -->
+    <div class="stats-g" style="margin-bottom:10px">
+      <div class="sc"><div class="sc-lbl">AVG WIN</div><div class="sc-val up">${avgPnlTgt==="—"?"—":"+"+avgPnlTgt+"%"}</div><div class="sc-sub">target hits</div></div>
+      <div class="sc"><div class="sc-lbl">AVG LOSS</div><div class="sc-val dn">${avgPnlSL==="—"?"—":avgPnlSL+"%"}</div><div class="sc-sub">SL hits</div></div>
+      <div class="sc"><div class="sc-lbl">AVG CONF</div><div class="sc-val">${avgConf}%</div><div class="sc-sub">at entry</div></div>
+      <div class="sc"><div class="sc-lbl">OPEN</div><div class="sc-val am">${open.length}</div><div class="sc-sub">watching</div></div>
     </div>
+
+    <!-- By underlying -->
+    ${byUnderlying.length>=2?card("📊 Win Rate by Underlying",
+      byUnderlying.map(x=>bar(x.u,x.r,x.t)).join("")
+    ):""}
+
+    <!-- CE vs PE & Signal type -->
+    ${card("📈 Signal Type Breakdown",`
+      ${ceWR&&ceWR.t>=2?bar("CE Options 📈",ceWR.r,ceWR.t,` avg ${avgPnlOf(ceSignals)}%`):""}
+      ${peWR&&peWR.t>=2?bar("PE Options 📉",peWR.r,peWR.t,` avg ${avgPnlOf(peSignals)}%`):""}
+      ${sigTypes.map(x=>bar(x.t+" signal",x.r,x.t)).join("")}
+    `)}
+
+    <!-- Confidence bands -->
+    ${card("🎯 Win Rate by Confidence",`
+      ${confBands.map(b=>bar(b.band,b.r,b.t)).join("")}
+      <div style="font-size:8px;color:#94a3b8;margin-top:2px">Higher confidence should = higher win rate</div>
+    `)}
 
     <!-- Time of day -->
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">🕐 Win Rate by Time of Day</div>
-      ${timeBreakdown.map(t=>barHtml(t.label, t.rate, t.total)).join("")}
-    </div>
+    ${card("🕐 Best Time to Trade",`
+      ${timeBreak.map(t=>bar(t.label,t.r,t.t)).join("")}
+    `)}
 
-    <!-- Signal type -->
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">📈 Stocks vs Options</div>
-      ${barHtml("Stocks",  stockSignals?.rate||null,  stockSignals?.total||0)}
-      ${barHtml("Options", optionSignals?.rate||null, optionSignals?.total||0)}
-    </div>
-
-    <!-- Indicator lift scores -->
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">⚡ Indicator Effectiveness (lift vs baseline ${baseline}%)</div>
-      ${liftScores.map(l=>{
-        if(l.n<3) return `<div style="font-size:9px;color:#94a3b8;margin-bottom:4px">${l.label}: insufficient data</div>`;
-        const sign = l.lift>=0?"+":"";
-        const color = l.lift>=5?"#16a34a":l.lift>=-5?"#d97706":"#dc2626";
-        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;padding:5px 8px;background:#f8fafc;border-radius:7px">
-          <span style="font-size:9px;font-weight:600;color:#374151">${l.label}</span>
-          <span style="font-size:10px;font-weight:800;color:${color}">${sign}${l.lift} pts · ${l.wr}% WR (n=${l.n})</span>
+    <!-- Daily P&L trend -->
+    ${days.length>=3?card("📅 Recent Daily Performance",`
+      ${days.map(([date,d])=>{
+        const dayWR = d.hits+d.sls>0?Math.round(d.hits/(d.hits+d.sls)*100):null;
+        const pnlStr = d.pnl>=0?"+"+d.pnl.toFixed(1):d.pnl.toFixed(1);
+        const color  = sc(dayWR);
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:9px">
+          <span style="font-weight:600;color:#374151">${date}</span>
+          <span style="color:${color};font-weight:700">${pct(dayWR)}</span>
+          <span style="color:#64748b">${d.hits}W ${d.sls}L</span>
+          <span style="color:${d.pnl>=0?"#16a34a":"#dc2626"};font-weight:700">${pnlStr}%</span>
         </div>`;
       }).join("")}
-      <div style="font-size:8px;color:#94a3b8;margin-top:4px">Positive lift = indicator improves win rate when present</div>
-    </div>
+    `):""}
 
-    <!-- Recent performance trend -->
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:8px">📅 Last 10 Closed Signals</div>
+    <!-- Last 10 signals -->
+    ${card("🕒 Recent Closed Signals",`
       ${closed.slice(-10).reverse().map(s=>{
         const col=s.status==="TARGET_HIT"?"#16a34a":"#dc2626";
         const icon=s.status==="TARGET_HIT"?"✅":"❌";
-        const pnl=s.pnlPct!=null?(s.pnlPct>=0?"+":"")+s.pnlPct.toFixed(2)+"%":"—";
+        const pnl=s.pnlPct!=null?(s.pnlPct>=0?"+":"")+s.pnlPct.toFixed(1)+"%":"—";
         return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #f1f5f9;font-size:9px">
-          <div><span style="font-weight:700;color:#0f172a">${s.name||s.stock}</span> <span style="color:#94a3b8">${s.date}</span></div>
-          <div style="text-align:right"><span style="color:${col};font-weight:700">${icon} ${pnl}</span> <span style="color:#94a3b8">${s.confidence||"?"}%</span></div>
+          <div>
+            <span style="font-weight:700;color:#0f172a">${s.name||s.stock}</span>
+            <span style="color:#94a3b8;margin-left:4px">${s.date} ${(s.time||"").slice(0,5)}</span>
+          </div>
+          <div style="text-align:right">
+            <span style="color:${col};font-weight:700">${icon} ${pnl}</span>
+            <span style="color:#94a3b8;margin-left:4px">${s.confidence||"?"}%</span>
+          </div>
         </div>`;
       }).join("")}
-    </div>
+    `)}
   `;
-  document.getElementById("nb-analysis").textContent = totalClosed+" closed";
+  document.getElementById("nb-analysis").textContent = total+" closed";
 }
 
 // ── Render Log tab ──

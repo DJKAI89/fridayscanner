@@ -3072,8 +3072,9 @@ function updateNavBadge(tab, text){
 // API
 // ══════════════════════════════════════
 // ── Throttle: pause ms between calls to stay within Upstox rate limits ──
-const THROTTLE_MS = 300; // 300ms between calls = ~3 calls/sec, well within 10/sec limit
-let _lastCallTs  = 0;
+// ── Throttle: minimum gap between API calls ──
+const THROTTLE_MS = 420; // 420ms between calls ≈ 2.4 calls/sec — safe for Upstox 10/sec limit
+let _lastCallTs = 0;
 async function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 async function throttle(){
   const now=Date.now(), gap=now-_lastCallTs;
@@ -3081,7 +3082,20 @@ async function throttle(){
   _lastCallTs=Date.now();
 }
 
-// ── Retry helper: up to 3 retries with exponential backoff ──
+// ── Per-proxy cooldown registry — prevents hammering a rate-limited proxy ──
+// Key = proxy name → timestamp when it can be used again (0 = always available)
+const _proxyCooldown = { corsproxy:0, allorigins:0 };
+const PROXY_COOLDOWN_MS = 45000; // 45 s cooldown after 429
+
+function _proxyAvailable(name){
+  return !_proxyCooldown[name] || Date.now() > _proxyCooldown[name];
+}
+function _proxySetCooldown(name, ms=PROXY_COOLDOWN_MS){
+  _proxyCooldown[name] = Date.now() + ms;
+  lg(`⚠ ${name} rate-limited → cooling for ${Math.round(ms/1000)}s`,"w");
+}
+
+// ── Retry helper: exponential backoff with jitter ──
 async function withRetry(fn, label="", retries=3){
   for(let attempt=1;attempt<=retries;attempt++){
     try{
@@ -3090,37 +3104,78 @@ async function withRetry(fn, label="", retries=3){
     }catch(e){
       if(e.message==="TOKEN_EXPIRED") throw e;
       if(attempt===retries) throw e;
-      const wait=attempt*1000; // 1s, 2s, 3s
-      lg(`${label} retry ${attempt}/${retries} in ${wait}ms: ${e.message}`,"w");
+      // Exponential backoff: 1.5s → 3s → 4.5s + up to 500ms jitter
+      const wait = attempt * 1500 + Math.random() * 500;
+      lg(`${label} retry ${attempt}/${retries} in ${Math.round(wait)}ms: ${e.message}`,"w");
       await sleep(wait);
     }
   }
 }
 
+// ── Parse Upstox JSON response — handles corsproxy wrapper ──
+function _parseUpstoxResponse(txt){
+  let d = JSON.parse(txt);
+  // corsproxy wraps response in { contents: "...", status: {...} }
+  if(d && typeof d.contents === "string"){
+    try{ d = JSON.parse(d.contents); }catch(e){}
+  }
+  return d;
+}
+
+// ── API call with smart proxy rotation ──
+// Priority: direct → corsproxy (if not cooling) → allorigins (if not cooling) → wait & retry cooling proxy
 async function apiGet(url){
-  const full="https://api.upstox.com"+url;
-  const hdrs={"Authorization":"Bearer "+TOKEN,"Accept":"application/json"};
-  // Try direct first (works on GitHub Pages / localhost with CORS)
-  // Fall back to corsproxy only if direct fails
-  const proxies=[
-    {n:"direct",   f:()=>fetch(full,{headers:hdrs})},
-    {n:"corsproxy",f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full),{headers:hdrs})},
-  ];
-  for(const p of proxies){
+  const full = "https://api.upstox.com" + url;
+  const hdrs = { "Authorization":"Bearer "+TOKEN, "Accept":"application/json" };
+
+  // Build ordered proxy list, skipping proxies in cooldown
+  const buildProxies = () => {
+    const list = [];
+    list.push({ n:"direct",     f:()=>fetch(full, {headers:hdrs}) });
+    if(_proxyAvailable("corsproxy"))
+      list.push({ n:"corsproxy",  f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full), {headers:hdrs}) });
+    if(_proxyAvailable("allorigins"))
+      list.push({ n:"allorigins", f:()=>fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(full), {headers:hdrs}) });
+    // If all proxies cooling, add them back anyway as last resort
+    if(list.length === 1){
+      list.push({ n:"corsproxy",  f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full), {headers:hdrs}), forced:true });
+      list.push({ n:"allorigins", f:()=>fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(full), {headers:hdrs}), forced:true });
+    }
+    return list;
+  };
+
+  for(const p of buildProxies()){
     try{
-      const res=await p.f();
-      if(res.status===401) throw new Error("TOKEN_EXPIRED");
-      if(res.status===429){ lg("Rate limited — pausing 5s","w"); await sleep(5000); throw new Error("Rate limited"); }
+      const res = await p.f();
+
+      if(res.status === 401) throw new Error("TOKEN_EXPIRED");
+
+      if(res.status === 429){
+        // Rate limited — put this proxy in cooldown and try the next one
+        if(!p.forced) _proxySetCooldown(p.n);
+        // Small pause before trying next proxy
+        await sleep(800 + Math.random()*400);
+        continue; // do NOT throw — try next proxy
+      }
+
+      if(res.status === 503 || res.status === 502){
+        lg(`${p.n} ✗ HTTP ${res.status} — trying next proxy`,"w");
+        continue;
+      }
+
       if(!res.ok) throw new Error("HTTP "+res.status);
-      const txt=await res.text();
-      let d=JSON.parse(txt);
-      if(d.contents){try{d=JSON.parse(d.contents);}catch(e){}}
+
+      const txt = await res.text();
+      const d   = _parseUpstoxResponse(txt);
       return d;
+
     }catch(e){
-      if(e.message==="TOKEN_EXPIRED"){ handleTokenExpired(); throw e; }
-      lg(p.n+" ✗ "+e.message,"w");
+      if(e.message === "TOKEN_EXPIRED"){ handleTokenExpired(); throw e; }
+      // Network/parse error from this proxy — log and try next
+      lg(`${p.n} ✗ ${e.message}`,"w");
     }
   }
+
   throw new Error("API failed for: "+url.slice(0,60));
 }
 
@@ -4655,8 +4710,8 @@ async function triggerScan(){
     // Convenience: build allQ keyed by inst.key for downstream use
     // (already done above via multi-format indexing)
 
-    // ── STEP 4: Candles for top 20 by volume — fetched in parallel batches ──
-    updateScanProgress("Step 4/5: Fetching candle history (parallel)...");
+    // ── STEP 4: Candles for top 20 by volume — fetched in staggered parallel batches ──
+    updateScanProgress("Step 4/5: Fetching candle history (staggered)...");
     const today   = new Date().toISOString().split("T")[0];
     const from60  = new Date(Date.now() - 65*864e5).toISOString().split("T")[0];
     const byVol   = quoted;
@@ -4664,14 +4719,19 @@ async function triggerScan(){
     let candleOK  = 0;
     const top20   = byVol.slice(0, Math.min(20, byVol.length));
 
-    // Process in batches of 5 to avoid rate-limiting while still being parallel
-    const CANDLE_BATCH = 5;
+    // Process in batches of 3 (reduced from 5) with 200ms stagger within batch
+    // Prevents all 5 simultaneous calls from hammering the proxy at the same time
+    const CANDLE_BATCH = 3;
     for(let b = 0; b < top20.length; b += CANDLE_BATCH){
       const batch = top20.slice(b, b + CANDLE_BATCH);
       updateScanProgress(`Step 4/5: Candles ${b+1}–${Math.min(b+CANDLE_BATCH, top20.length)}/20...`);
-      const results = await Promise.allSettled(
-        batch.map(inst => fetchCandles(inst.key, from60, today).then(candles => ({ inst, candles })))
+
+      // Stagger within batch: fire each 200ms apart so proxy doesn't see burst
+      const staggeredFetch = batch.map((inst, idx) =>
+        sleep(idx * 220).then(() => fetchCandles(inst.key, from60, today).then(candles => ({ inst, candles })))
       );
+
+      const results = await Promise.allSettled(staggeredFetch);
       for(const res of results){
         if(res.status !== "fulfilled") { lg(`Candle batch error: ${res.reason}`, "w"); continue; }
         const { inst, candles } = res.value;
@@ -4701,8 +4761,10 @@ async function triggerScan(){
           candleOK++;
         }
       }
+      // Small gap between batches
+      if(b + CANDLE_BATCH < top20.length) await sleep(300);
     }
-    lg(`✅ Candle data: ${candleOK}/${top20.length} stocks (parallel batches)`, "o");
+    lg(`✅ Candle data: ${candleOK}/${top20.length} stocks (staggered batches)`, "o");
 
     // ── STEP 5: Analysis ──
     updateScanProgress("Step 5/5: Calculating scores...");
@@ -4854,7 +4916,9 @@ async function triggerScan(){
     const topPicks = picks.filter(p=>p.passes).sort((a,b)=>b.conf-a.conf).slice(0,5);
     if(topPicks.length && isOpen()){
       const from7d = new Date(Date.now()-10*864e5).toISOString().split("T")[0];
-      await Promise.allSettled(topPicks.map(async p=>{
+      // Stagger 300ms apart — prevents simultaneous proxy calls for MTF candles
+      await Promise.allSettled(topPicks.map(async (p, idx)=>{
+        await sleep(idx * 300);
         try{
           const c30=await fetchCandles(p.key,from7d,today,"30minute");
           if(c30.length<8) return;
@@ -5003,7 +5067,11 @@ async function loadOptions(force=true){
     );
 
     // ─ INDEX OPTIONS: Nifty, BankNifty, Sensex, FinNifty ─
-    for(const und of INDEX_OPTS){
+    // Staggered sequentially with 600ms gap to avoid proxy rate limits
+    for(let ui=0; ui<INDEX_OPTS.length; ui++){
+      const und=INDEX_OPTS[ui];
+      if(ui>0) await sleep(600); // stagger: prevents simultaneous corsproxy hits
+      updateOptProgress(`Index options ${ui+1}/${INDEX_OPTS.length}: ${und.name}...`);
       try{
         // Spot price
         let spotD={};
@@ -5039,8 +5107,8 @@ async function loadOptions(force=true){
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
         const counterCount=filteredPicks.filter(p=>!p.trendAligned).length;
         groups.push({name:und.name,spot,spotChg,spotPts,pcr,expiry,picks,filteredPicks,alignedCount,counterCount,type:"index",maxPain,oiWalls});
-      }catch(e){lg(und.name+" err: "+e.message,"w");}
-    }
+      }catch(e){ lg(und.name+" err: "+e.message,"w"); }
+    } // end INDEX_OPTS loop
 
     // ─ STOCK OPTIONS: Top F&O stocks ─
     // Use top 10 most liquid F&O stocks (reduces API calls from 200+ to 20)
@@ -6602,13 +6670,15 @@ async function loadBreakout(force=false){
     const from260=new Date(Date.now()-270*864e5).toISOString().split("T")[0];
     const techB={};
     let candleDone=0;
-    const CBATCH=5;
+    const CBATCH=3; // smaller batch + staggered to avoid proxy rate limits
     for(let b=0;b<byVol.length;b+=CBATCH){
       const batch=byVol.slice(b,b+CBATCH);
       progress(`Step 2/3: Candles ${b+1}–${Math.min(b+CBATCH,byVol.length)}/${byVol.length}`);
-      const res=await Promise.allSettled(
-        batch.map(inst=>fetchCandles(inst.key,from260,today).then(candles=>({inst,candles})))
+      // Stagger requests 220ms apart within each batch
+      const staggered=batch.map((inst,idx)=>
+        sleep(idx*220).then(()=>fetchCandles(inst.key,from260,today).then(candles=>({inst,candles})))
       );
+      const res=await Promise.allSettled(staggered);
       for(const r of res){
         if(r.status!=="fulfilled"){ lg("BO candle err: "+r.reason,"w"); continue; }
         const {inst,candles}=r.value;
@@ -6623,6 +6693,8 @@ async function loadBreakout(force=false){
           candleDone++;
         }
       }
+      // Gap between batches
+      if(b+CBATCH<byVol.length) await sleep(350);
     }
     lg(`Breakout candles: ${candleDone}/${byVol.length}`,"o");
 

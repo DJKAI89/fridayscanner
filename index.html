@@ -1180,7 +1180,7 @@ async function testGitHubConnection(){
     if(r.ok){
       const fp = getLogFilePath();
       el.innerHTML = `✅ Connected! <b>${GH.user}/${GH.repo}</b><br>
-        Signal log → <code>${fp}</code><br>
+        Log folder → <code>${getLogFolder()}/</code> (daily files: YYYY-MM-DD.json)<br>
         Settings   → <code>user-settings/${(localStorage.getItem("friday_user_id")||"default").replace(/[^a-zA-Z0-9_-]/g,"_")}.json</code>`;
       el.style.color = "#16a34a";
       // Try to push settings to GitHub now that we confirmed connection
@@ -1281,60 +1281,222 @@ async function pullSettingsFromGH(){
   }catch(e){ lg("pullSettingsFromGH: "+e.message,"w"); return false; }
 }
 
-function getLogFilePath(){
-  const userId = localStorage.getItem("friday_user_id") || "default";
-  const safe = userId.replace(/[^a-zA-Z0-9_-]/g,"_");
-  return "signal-logs/"+safe+".json";
+// ══════════════════════════════════════════════════════════════════════
+// SIGNAL LOG — Daily-partitioned GitHub storage
+//
+// File layout in repo:
+//   signal-logs/{userId}/index.json          ← manifest: dates + per-day stats
+//   signal-logs/{userId}/YYYY-MM-DD.json     ← one file per day (tiny)
+//   signal-logs/{userId}.json                ← legacy single-file (auto-migrated once)
+//
+// Advantages over single file:
+//   • No 1MB GitHub file limit issues — each day is ~5–50 KB
+//   • No SHA conflicts across days — writes only touch today's file
+//   • Analysis/calibration reads only as many days as needed
+//   • Infinite history without pruning
+// ══════════════════════════════════════════════════════════════════════
+
+function _ghLogUserId(){
+  return (localStorage.getItem("friday_user_id")||"default").replace(/[^a-zA-Z0-9_-]/g,"_");
+}
+function getLogFolder()            { return "signal-logs/"+_ghLogUserId(); }
+function getLogDayPath(date)       { return getLogFolder()+"/"+date+".json"; }
+function getLogIndexPath()         { return getLogFolder()+"/index.json"; }
+function getLegacyLogPath()        { return "signal-logs/"+_ghLogUserId()+".json"; }
+
+// Keep getLogFilePath for settings display + test-connection (shows today's file path)
+function getLogFilePath()          { return getLogDayPath(new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"})); }
+
+// ── In-memory day cache: date → { signals, sha, loadedAt } ──
+const _ghDayCache = {};
+function _cachePut(date, signals, sha){ _ghDayCache[date]={ signals, sha, loadedAt:Date.now() }; }
+function _cacheGet(date, maxAgeMs=90000){
+  const c = _ghDayCache[date];
+  if(!c) return null;
+  if(Date.now() - c.loadedAt > maxAgeMs) return null; // stale
+  return c;
 }
 
-async function ghReadLog(){
+// ── GitHub raw read helper ──
+async function _ghFetch(path){
+  const r = await fetch(
+    `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${path}`,
+    { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
+  );
+  if(r.status===404) return null;
+  if(!r.ok) throw new Error("GitHub HTTP "+r.status+" for "+path);
+  return await r.json();
+}
+
+// ── GitHub raw write helper (PUT) ──
+async function _ghPut(path, jsonPayload, sha, commitMsg){
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(jsonPayload, null, 2))));
+  const body = { message: commitMsg||"FRIDAY log update", content };
+  if(sha) body.sha = sha;
+  const r = await fetch(
+    `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${path}`,
+    { method:"PUT",
+      headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
+      body: JSON.stringify(body) }
+  );
+  return r;
+}
+
+// ── Read one day's signals ──
+async function ghReadDay(date){
   if(!GH.token||!GH.user||!GH.repo) return { signals:[], sha:null };
+
+  // Return from cache if fresh
+  const cached = _cacheGet(date);
+  if(cached) return { signals: cached.signals, sha: cached.sha };
+
   try{
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getLogFilePath()}`,
-      { headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json" }}
-    );
-    if(r.status===404) return { signals:[], sha:null }; // first time
-    const d = await r.json();
+    const d = await _ghFetch(getLogDayPath(date));
+    if(!d) return { signals:[], sha:null };
     const content = JSON.parse(atob(d.content.replace(/\n/g,"")));
-    return { signals: content.signals||[], sha: d.sha };
-  }catch(e){ lg("ghReadLog: "+e.message,"w"); return { signals:[], sha:null }; }
+    const signals = content.signals||[];
+    _cachePut(date, signals, d.sha);
+    return { signals, sha: d.sha };
+  }catch(e){ lg("ghReadDay("+date+"): "+e.message,"w"); return { signals:[], sha:null }; }
 }
 
-// ── Write signals-log.json to GitHub ──
-async function ghWriteLog(signals, sha, retryCount=0){
+// ── Write one day's signals (with SHA conflict retry) ──
+async function ghWriteDay(signals, sha, date, retryCount=0){
   if(!GH.token||!GH.user||!GH.repo) return false;
   try{
-    const content = btoa(unescape(encodeURIComponent(JSON.stringify({
-      signals,
-      lastUpdated: new Date().toISOString(),
-      upstoxId: localStorage.getItem("friday_user_id")||"unknown",
-      stats: computeLogStats(signals)
-    }, null, 2))));
-    const body = { message:"FRIDAY signal log · "+(localStorage.getItem("friday_user_id")||"user"), content };
-    if(sha) body.sha = sha;
-    const r = await fetch(
-      `https://api.github.com/repos/${GH.user}/${GH.repo}/contents/${getLogFilePath()}`,
-      { method:"PUT", headers:{ Authorization:"token "+GH.token, Accept:"application/vnd.github.v3+json", "Content-Type":"application/json" },
-        body: JSON.stringify(body) }
-    );
-    if(r.ok) return true;
-
-    // 409 Conflict = SHA mismatch (two browsers wrote simultaneously)
-    // Retry: re-read fresh SHA and merge signals
-    if(r.status===409 && retryCount<2){
-      lg("ghWriteLog: SHA conflict — retrying with fresh read (attempt "+(retryCount+1)+")","w");
-      await sleep(1000 + Math.random()*1000); // stagger retries
-      const fresh = await ghReadLog();
-      // Merge: add any new signals not already in fresh
-      const existingIds = new Set(fresh.signals.map(s=>s.id));
-      const toMerge = signals.filter(s=>!existingIds.has(s.id));
-      const merged = [...fresh.signals, ...toMerge];
-      return ghWriteLog(merged, fresh.sha, retryCount+1);
+    const uid = localStorage.getItem("friday_user_id")||"unknown";
+    const payload = { signals, lastUpdated: new Date().toISOString(), upstoxId: uid, stats: computeLogStats(signals) };
+    const r = await _ghPut(getLogDayPath(date), payload, sha, "FRIDAY log · "+uid+" · "+date);
+    if(r.ok){
+      const rd = await r.json();
+      _cachePut(date, signals, rd?.content?.sha || sha);
+      return true;
     }
-    lg("ghWriteLog: failed status "+r.status,"w");
+    if(r.status===409 && retryCount<2){
+      lg("ghWriteDay("+date+"): SHA conflict — retrying","w");
+      await sleep(1200 + Math.random()*800);
+      const fresh = await ghReadDay(date);
+      // Merge: keep fresh as base, add any signals from our write that aren't in fresh
+      const existingIds = new Set(fresh.signals.map(s=>s.id));
+      const toAdd = signals.filter(s=>!existingIds.has(s.id));
+      // Preserve outcome updates: for signals in both, use our version if status changed
+      const merged = fresh.signals.map(fs=>{
+        const ours = signals.find(s=>s.id===fs.id);
+        return (ours && ours.status !== "OPEN" && fs.status === "OPEN") ? ours : fs;
+      });
+      merged.push(...toAdd);
+      return ghWriteDay(merged, fresh.sha, date, retryCount+1);
+    }
+    lg("ghWriteDay: status "+r.status,"w");
     return false;
-  }catch(e){ lg("ghWriteLog: "+e.message,"w"); return false; }
+  }catch(e){ lg("ghWriteDay: "+e.message,"w"); return false; }
+}
+
+// ── Read index (manifest of all dates) ──
+async function ghReadIndex(){
+  if(!GH.token||!GH.user||!GH.repo) return { dates:[], dailyStats:{}, sha:null };
+  try{
+    const d = await _ghFetch(getLogIndexPath());
+    if(!d) return { dates:[], dailyStats:{}, sha:null };
+    const content = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    return { dates: content.dates||[], dailyStats: content.dailyStats||{}, sha: d.sha };
+  }catch(e){ lg("ghReadIndex: "+e.message,"w"); return { dates:[], dailyStats:{}, sha:null }; }
+}
+
+// ── Update index: add/refresh one date's stats ──
+async function ghUpdateIndex(date, stats, knownSha){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  try{
+    // Always re-read index to get latest SHA (avoids conflicts)
+    const { dates, dailyStats, sha } = await ghReadIndex();
+    const newDates = dates.includes(date) ? dates : [...dates, date].sort();
+    // Prune to max 90 days
+    const pruned = newDates.slice(-90);
+    const newStats = { ...dailyStats, [date]: stats };
+    // Clean up pruned dates from stats
+    for(const d of Object.keys(newStats)){
+      if(!pruned.includes(d)) delete newStats[d];
+    }
+    const uid = localStorage.getItem("friday_user_id")||"unknown";
+    await _ghPut(getLogIndexPath(), { dates: pruned, dailyStats: newStats, lastUpdated: new Date().toISOString(), upstoxId: uid },
+      sha, "FRIDAY index · "+uid);
+  }catch(e){ lg("ghUpdateIndex: "+e.message,"w"); }
+}
+
+// ── Read multiple days and merge into one signals array ──
+// Reads up to maxDays most-recent dates from index
+async function ghReadMultipleDays(maxDays=30){
+  if(!GH.token||!GH.user||!GH.repo) return [];
+  const { dates } = await ghReadIndex();
+  if(!dates.length) return [];
+
+  // Take the most recent N dates
+  const toFetch = dates.slice(-maxDays);
+  const all = [];
+  // Fetch in parallel batches of 5
+  for(let i=0; i<toFetch.length; i+=5){
+    const batch = toFetch.slice(i, i+5);
+    const res = await Promise.allSettled(batch.map(d=>ghReadDay(d)));
+    for(const r of res){
+      if(r.status==="fulfilled") all.push(...r.value.signals);
+    }
+  }
+  return all;
+}
+
+// ── One-time migration from legacy single file → daily files ──
+// Runs once; sets localStorage flag to skip on subsequent loads
+async function ghMigrateIfNeeded(){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  const migKey = "friday_log_migrated_v2_"+_ghLogUserId();
+  if(localStorage.getItem(migKey)) return; // already done
+  try{
+    const legacyPath = getLegacyLogPath();
+    const d = await _ghFetch(legacyPath);
+    if(!d){ localStorage.setItem(migKey,"1"); return; } // no legacy file
+
+    lg("📦 Migrating legacy signal log to daily files...","o");
+    const content = JSON.parse(atob(d.content.replace(/\n/g,"")));
+    const signals = content.signals||[];
+    if(!signals.length){ localStorage.setItem(migKey,"1"); return; }
+
+    // Group by date
+    const byDate = {};
+    for(const sig of signals){
+      if(!sig.date) continue;
+      if(!byDate[sig.date]) byDate[sig.date]=[];
+      byDate[sig.date].push(sig);
+    }
+
+    // Write each day file sequentially (avoid rate limits)
+    let written=0;
+    for(const [date, daySigs] of Object.entries(byDate)){
+      const { sha } = await ghReadDay(date); // 404 → sha=null (new file)
+      const ok = await ghWriteDay(daySigs, sha, date);
+      if(ok){
+        await ghUpdateIndex(date, computeLogStats(daySigs));
+        written++;
+      }
+      await sleep(500); // be kind to GitHub API
+    }
+    localStorage.setItem(migKey,"1");
+    lg(`✅ Migration complete: ${written} day files created from ${signals.length} signals`,"o");
+    showToast(`✅ Signal log migrated to daily files (${written} days)`, "#16a34a", 6000);
+  }catch(e){ lg("ghMigrateIfNeeded: "+e.message,"w"); }
+}
+
+// ── Backwards-compat wrappers so existing call sites still work ──
+// ghReadLog() → reads today's signals (the main use case: live P&L, log tab default)
+async function ghReadLog(){
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  return await ghReadDay(today);
+}
+// ghWriteLog(signals, sha) → writes today's signals
+async function ghWriteLog(signals, sha, retryCount=0){
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const ok = await ghWriteDay(signals, sha, today);
+  if(ok) ghUpdateIndex(today, computeLogStats(signals)).catch(()=>{}); // fire-and-forget
+  return ok;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1703,7 +1865,8 @@ let CONF_CALIBRATION = null;
 async function loadConfCalibration(){
   if(!GH.token||!GH.user||!GH.repo) return;
   try{
-    const { signals } = await ghReadLog();
+    // Read last 30 days of history for calibration (enough for statistical significance)
+    const signals = await ghReadMultipleDays(30);
     if(!signals||!signals.length) return;
     const closed = signals.filter(s=>s.status==="TARGET_HIT"||s.status==="SL_HIT");
     if(closed.length < 10){ lg("Calibration: need 10+ closed signals, have "+closed.length,"w"); return; }
@@ -1778,16 +1941,12 @@ async function logSignals(newSignals){
   if(!newSignals||!newSignals.length) return;
 
   try{
-    const { signals, sha } = await ghReadLog();
     const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    // Only read/write today's file — daily partition keeps each file tiny
+    const { signals, sha } = await ghReadDay(istDate);
     let addedCount = 0, skippedCount = 0;
 
     for(const ns of newSignals){
-      // Find the most recent existing OPEN signal for same stock/option today
-      const key = ns.type === "STOCK"
-        ? `${ns.stock}-STOCK`
-        : `${ns.stock}-${ns.strike}-${ns.optType||ns.type}`;
-
       const todaySignals = signals.filter(s =>
         s.date === istDate && s.status === "OPEN" &&
         (s.type === "STOCK"
@@ -1795,26 +1954,25 @@ async function logSignals(newSignals){
           : s.stock === ns.stock && s.strike === ns.strike && s.optType === (ns.optType||ns.type))
       );
 
-      // Sort newest first
       const latest = todaySignals.sort((a,b) => b.time.localeCompare(a.time))[0];
 
       if(latest && !signalChangedSignificantly(latest, ns)){
-        // Values within 1% — same recommendation, skip to avoid noise
         skippedCount++;
         continue;
       }
 
-      // Either first signal today for this stock, or values changed >1% — log as new entry
       signals.push(ns);
       addedCount++;
     }
 
     if(!addedCount){ lg(`Signal log: ${skippedCount} skipped (no significant change)`,"o"); return; }
 
-    // Keep last 2000 signals (prune oldest)
-    if(signals.length > 2000) signals.splice(0, signals.length - 2000);
-    const ok = await ghWriteLog(signals, sha);
-    lg(`Signal log: ${ok?"✅":"❌"} added ${addedCount} new · ${skippedCount} unchanged (total ${signals.length})`,"o");
+    const ok = await ghWriteDay(signals, sha, istDate);
+    if(ok){
+      // Update index async — don't block the scan
+      ghUpdateIndex(istDate, computeLogStats(signals)).catch(()=>{});
+    }
+    lg(`Signal log: ${ok?"✅":"❌"} added ${addedCount} · ${skippedCount} unchanged (today: ${signals.length})`,"o");
     updateLogBadge(signals);
   }catch(e){ lg("logSignals: "+e.message,"w"); }
 }
@@ -1954,341 +2112,344 @@ function computeLiveFields(sig, currentPrice){
 // ── Refresh live P&L for all OPEN signals (lightweight, runs every minute) ──
 // Does NOT change status — only updates livePrice/livePnlPct and progress toward target.
 // Writes to GitHub at most once every 5 minutes to avoid rate limits.
+// ══════════════════════════════════════════════════════════════════════
+// OPEN SIGNAL RESOLUTION — shared helpers used by both
+// refreshLivePnL (auto, every minute) and checkAllOutcomes (manual)
+// ══════════════════════════════════════════════════════════════════════
+
+// ── Fetch all live prices for a set of open signals ──
+// Returns { priceMap: sym→price, optPriceMap: sig.id→price }
+async function _fetchPricesForOpenSignals(openSignals, istDate){
+  const priceMap   = {};
+  const optPriceMap= {};
+
+  // ── Stock / index underlying prices ──
+  const stockSyms     = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
+  const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
+  const allSyms       = [...new Set([...stockSyms, ...optUnderlying])];
+
+  if(allSyms.length){
+    try{
+      const keys    = allSyms.map(sym=>(STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym))?.key).filter(Boolean).join(",");
+      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      const quotes  = await fetchQ([keys,idxKeys].filter(Boolean).join(","));
+      allSyms.forEach(sym=>{
+        const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym);
+        if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
+      });
+      priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
+      priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
+      priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
+      priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
+    }catch(e){ lg("_fetchPrices stock: "+e.message,"w"); }
+  }
+
+  // ── Option chain prices — only for options with future/today expiry ──
+  const chainFetched = {};
+  for(const sig of openSignals.filter(s=>s.type==="OPTION")){
+    if(sig.expiry && sig.expiry < istDate) continue; // expired contract — skip, resolved below
+    const chainKey = `${sig.stock}-${sig.expiry}-${sig.strike}-${sig.optType}`;
+    if(chainFetched[chainKey] !== undefined){ optPriceMap[sig.id]=chainFetched[chainKey]; continue; }
+    try{
+      const inst  = FO_STOCK_LIST.find(s=>s.s===sig.stock)||INDEX_OPTS.find(s=>s.name===sig.stock);
+      if(!inst){ chainFetched[chainKey]=null; continue; }
+      const chain = await fetchOptions(inst.key, sig.expiry);
+      const row   = chain.find(r=>r.strike_price===sig.strike);
+      const opt   = row ? (sig.optType==="CE"?row.call_options:row.put_options) : null;
+      const ltp   = opt?.market_data?.ltp ?? null;
+      chainFetched[chainKey] = ltp;
+      if(ltp!=null) optPriceMap[sig.id] = ltp;
+    }catch(e){ chainFetched[chainKey]=null; }
+  }
+
+  return { priceMap, optPriceMap };
+}
+
+// ── Resolve outcomes for a flat array of signals given price maps ──
+// Mutates signals in-place. Returns { changed, closed, autoExpired }
+function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
+  const _istHour    = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
+  const _mktClosed  = !isOpen();
+  // After 3:30 PM, even today's options are considered expired for outcome purposes
+  const expiryThreshold = (_mktClosed && _istHour>=15) ? istDate : (() => {
+    const d=new Date(); d.setDate(d.getDate()-1);
+    return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  })();
+
+  let changed=0, closed=0, autoExpired=0;
+
+  for(const sig of signals){
+    if(sig.status !== "OPEN") continue;
+    const isBull = isBullSignal(sig);
+
+    // ── Rule 1: Past-day STOCK signal → always auto-expire ──
+    // Stocks are intraday/short-term signals. Overnight carry = expired.
+    if(sig.type==="STOCK" && sig.date < istDate){
+      const exitPx = priceMap[sig.stock] || sig.livePrice || sig.entry;
+      sig.status    = "EXPIRED";
+      sig.exitPrice = +exitPx.toFixed(2);
+      sig.exitTime  = istTime;
+      sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+      sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
+      autoExpired++;
+      continue;
+    }
+
+    // ── Rule 2: Option with PAST expiry → expire (worthless or at final price) ──
+    if(sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold){
+      const exitPx = optPriceMap[sig.id] ?? 0;
+      const hitTgt = isBull ? exitPx>=sig.target : exitPx<=sig.target;
+      const hitSL  = isBull ? exitPx<=sig.sl     : exitPx>=sig.sl;
+      if(hitTgt){
+        sig.status="TARGET_HIT"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+      } else if(exitPx===0 || exitPx < sig.entry*0.02){
+        sig.status="EXPIRED"; sig.pnlPct=-100;
+      } else if(hitSL){
+        sig.status="SL_HIT"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+      } else {
+        sig.status="EXPIRED"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+      }
+      sig.exitPrice=+exitPx.toFixed(2); sig.exitTime=istTime;
+      sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
+      closed++;
+      continue;
+    }
+
+    // ── Rule 3: Active signal — check live price ──
+    const currentPrice = sig.type==="STOCK" ? priceMap[sig.stock] : optPriceMap[sig.id];
+    if(currentPrice==null) continue;
+
+    const hitTarget = isBull ? currentPrice>=sig.target : currentPrice<=sig.target;
+    const hitSL     = isBull ? currentPrice<=sig.sl     : currentPrice>=sig.sl;
+
+    if(hitTarget){
+      sig.status="TARGET_HIT"; sig.exitPrice=+currentPrice.toFixed(2); sig.exitTime=istTime;
+      sig.pnlPct=+(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+      sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
+      closed++;
+      lg(`🎯 TARGET HIT: ${sig.name||sig.stock} ₹${sig.entry}→₹${currentPrice.toFixed(2)} (+${sig.pnlPct.toFixed(1)}%)`,"o");
+      showToast(`🎯 Target hit: ${sig.name||sig.stock} +${sig.pnlPct.toFixed(1)}%`,"#16a34a",8000);
+      sendNotification(`🎯 Target Hit: ${sig.name||sig.stock}`,`Entry ₹${sig.entry}→Exit ₹${currentPrice.toFixed(2)} +${sig.pnlPct.toFixed(1)}%`,"tgt-"+sig.id);
+    } else if(hitSL){
+      sig.status="SL_HIT"; sig.exitPrice=+sig.sl.toFixed(2); sig.exitTime=istTime;
+      sig.pnlPct=+(((sig.sl-sig.entry)/sig.entry)*100).toFixed(2);
+      sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
+      closed++;
+      lg(`❌ SL HIT: ${sig.name||sig.stock} ₹${sig.entry}→SL ₹${sig.sl} (${sig.pnlPct.toFixed(1)}%)`,"o");
+      showToast(`❌ SL hit: ${sig.name||sig.stock} ${sig.pnlPct.toFixed(1)}%`,"#dc2626",8000);
+      sendNotification(`❌ SL Hit: ${sig.name||sig.stock}`,`Entry ₹${sig.entry}→SL ₹${sig.sl} ${sig.pnlPct.toFixed(1)}%`,"sl-"+sig.id);
+    } else {
+      // Still open — update live P&L fields
+      Object.assign(sig, computeLiveFields(sig, currentPrice));
+      changed++;
+    }
+  }
+  return { changed, closed, autoExpired };
+}
+
+// ── Write back changed day files and update index ──
+// dayMap: { date → { signals, sha } }
+async function _writeDayMap(dayMap){
+  let allOk = true;
+  for(const [date, { signals, sha }] of Object.entries(dayMap)){
+    const ok = await ghWriteDay(signals, sha, date);
+    if(ok) ghUpdateIndex(date, computeLogStats(signals)).catch(()=>{});
+    else allOk = false;
+  }
+  return allOk;
+}
+
+// ── Cache for index (used by refreshLivePnL to avoid re-reading index every minute) ──
+let _indexCacheTs  = 0;
+let _indexCacheVal = null;
+async function _getIndexCached(){
+  if(Date.now() - _indexCacheTs < 10*60*1000 && _indexCacheVal) return _indexCacheVal;
+  _indexCacheVal = await ghReadIndex();
+  _indexCacheTs  = Date.now();
+  return _indexCacheVal;
+}
+// Call this whenever we know the index changed (e.g., after writing new signals)
+function _invalidateIndexCache(){ _indexCacheTs = 0; _indexCacheVal = null; }
+
+// ══════════════════════════════════════════════════════════════════════
+// refreshLivePnL — runs every minute during market hours
+//
+// Scope:
+//   • Today's OPEN signals (stocks + options) — always
+//   • Past-day OPEN OPTION signals with future expiry — weekly/monthly options
+//     entered on previous days still need live tracking
+//   • Past-day OPEN STOCK signals — auto-expire immediately (intraday signals)
+// ══════════════════════════════════════════════════════════════════════
 async function refreshLivePnL(){
   if(!GH.token||!GH.user||!GH.repo) return;
   try{
-    const { signals, sha } = await ghReadLog();
-    const istToday = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    // Only track TODAY's open signals live — past open signals use Update Outcomes button
-    const openSignals = signals.filter(s=>s.status==="OPEN" && s.date===istToday);
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    const istNow  = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+
+    // ── Step 1: Read today's file (always) ──
+    const todayData  = await ghReadDay(istDate);
+    const dayMap     = { [istDate]: { signals: todayData.signals, sha: todayData.sha } };
+
+    // ── Step 2: Check index for past days with open signals ──
+    // Cached for 10 min to avoid hammering GitHub every minute
+    const { dates, dailyStats } = await _getIndexCached();
+    const pastOpenDates = dates.filter(d =>
+      d < istDate &&
+      dailyStats[d]?.open > 0 // index says there were open signals on this day
+    );
+
+    if(pastOpenDates.length > 0){
+      lg(`refreshLivePnL: found ${pastOpenDates.length} past day(s) with open signals: ${pastOpenDates.join(", ")}`, "o");
+      // Read those past day files (parallel, they'll be cached after first read)
+      const pastReads = await Promise.allSettled(pastOpenDates.map(d=>ghReadDay(d)));
+      pastReads.forEach((res, i)=>{
+        if(res.status==="fulfilled")
+          dayMap[pastOpenDates[i]] = { signals: res.value.signals, sha: res.value.sha };
+      });
+    }
+
+    // ── Step 3: Collect all OPEN signals across all loaded days ──
+    const allSignals = Object.values(dayMap).flatMap(d=>d.signals);
+    const openSignals= allSignals.filter(s=>s.status==="OPEN");
+
     if(!openSignals.length){
-      // Still re-render UI with cached data if on log tab
-      if(activeTab==="log") renderLogTab(signals);
+      if(activeTab==="log") renderLogTab(todayData.signals);
       return;
     }
 
-    // Fetch prices for open stocks
-    const stockSyms = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
-    const priceMap  = {};
-    if(stockSyms.length){
-      const keys = stockSyms.map(sym=>{
-        const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym);
-        return inst?.key;
-      }).filter(Boolean).join(",");
-      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
-      // Guard: never send empty instrument_key (causes HTTP 400)
-      const allKeys = [keys, idxKeys].filter(Boolean).join(",");
-      try{
-        const quotes = await fetchQ(allKeys);
-        stockSyms.forEach(sym=>{
-          const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym);
-          if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
-        });
-        priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
-        priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
-        priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
-        priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
-      }catch(e){}
+    // ── Step 4: Fetch prices for all open signals ──
+    const { priceMap, optPriceMap } = await _fetchPricesForOpenSignals(openSignals, istDate);
+
+    // ── Step 5: Resolve outcomes ──
+    let totalChanged=0, totalClosed=0;
+    for(const [date, dayData] of Object.entries(dayMap)){
+      const { changed, closed, autoExpired } = _resolveOutcomes(dayData.signals, priceMap, optPriceMap, istDate, istNow);
+      totalChanged+=changed; totalClosed+=closed+autoExpired;
     }
 
-    // Fetch option premiums — deduplicate by chain key to avoid re-fetching same contract
-    const optPriceMap  = {}; // sig.id → price
-    const chainFetched = {}; // "stock-expiry-strike-type" → price
-    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    for(const sig of openSignals.filter(s=>s.type==="OPTION")){
-      if(sig.expiry && sig.expiry < istDate) continue;
-      const chainKey = `${sig.stock}-${sig.expiry}-${sig.strike}-${sig.optType}`;
-      if(chainFetched[chainKey] !== undefined){
-        optPriceMap[sig.id] = chainFetched[chainKey];
-        continue;
-      }
-      try{
-        const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock)||INDEX_OPTS.find(s=>s.name===sig.stock);
-        if(!inst) continue;
-        const chain = await fetchOptions(inst.key, sig.expiry);
-        const row = chain.find(r=>r.strike_price===sig.strike);
-        if(!row) continue;
-        const opt = sig.optType==="CE" ? row.call_options : row.put_options;
-        const ltp = opt?.market_data?.ltp ?? null;
-        chainFetched[chainKey] = ltp;
-        if(ltp!=null) optPriceMap[sig.id] = ltp;
-      }catch(e){ chainFetched[chainKey] = null; }
+    // ── Step 6: Re-render UI ──
+    updateLogBadge(todayData.signals);
+    if(activeTab==="log") renderLogTab(todayData.signals);
+    if(totalClosed>0 && activeTab==="analysis"){
+      window._lastAnalysisRenderTs=Date.now();
+      renderAnalysisTab(null); // re-load from multi-day
     }
 
-    // Update live fields AND immediately close signals that hit target/SL
-    const istNow = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
-    let changed = 0, closed = 0;
-    for(const sig of signals){
-      if(sig.status !== "OPEN") continue;
-      let currentPrice = sig.type==="STOCK" ? priceMap[sig.stock] : optPriceMap[sig.id];
-      if(currentPrice==null) continue;
+    if(!totalChanged && !totalClosed) return;
 
-      const bull      = isBullSignal(sig);
-      const hitTarget = bull ? currentPrice >= sig.target : currentPrice <= sig.target;
-      const hitSL     = bull ? currentPrice <= sig.sl     : currentPrice >= sig.sl;
-
-      if(hitTarget){
-        sig.status    = "TARGET_HIT";
-        sig.exitPrice = +currentPrice.toFixed(2);
-        sig.exitTime  = istNow;
-        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
-        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
-        closed++;
-        lg(`🎯 TARGET HIT: ${sig.name} ₹${sig.entry} → ₹${currentPrice.toFixed(2)} (+${sig.pnlPct.toFixed(1)}%)`,"o");
-        showToast(`🎯 Target hit: ${sig.name} +${sig.pnlPct.toFixed(1)}%`, "#16a34a", 8000);
-        sendNotification(`🎯 Target Hit: ${sig.name}`,`Entry ₹${sig.entry} → Exit ₹${currentPrice.toFixed(2)} · P&L +${sig.pnlPct.toFixed(1)}%`,"tgt-"+sig.id);
-      } else if(hitSL){
-        sig.status    = "SL_HIT";
-        sig.exitPrice = +sig.sl.toFixed(2);
-        sig.exitTime  = istNow;
-        sig.pnlPct    = +(((sig.sl - sig.entry) / sig.entry) * 100).toFixed(2);
-        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
-        closed++;
-        lg(`❌ SL HIT: ${sig.name} ₹${sig.entry} → SL ₹${sig.sl} (${sig.pnlPct.toFixed(1)}%)`,"o");
-        showToast(`❌ SL hit: ${sig.name} ${sig.pnlPct.toFixed(1)}%`, "#dc2626", 8000);
-        sendNotification(`❌ SL Hit: ${sig.name}`,`Entry ₹${sig.entry} → SL ₹${sig.sl} · Loss ${sig.pnlPct.toFixed(1)}%`,"sl-"+sig.id);
-      } else {
-        // Still open — update live P&L display only
-        Object.assign(sig, computeLiveFields(sig, currentPrice));
-        changed++;
-      }
-    }
-
-    // Auto-expire past OPEN signals (not today's) without API calls
-    // Stocks from previous days → EXPIRED. Options with past expiry → EXPIRED.
-    const istDate2 = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    let autoExpired = 0;
-    for(const sig of signals){
-      if(sig.status !== "OPEN") continue;
-      if(sig.date === istDate2) continue; // today's signals handled above
-      const isPastStock  = sig.type === "STOCK";
-      const isPastOption = sig.type === "OPTION" && sig.expiry && sig.expiry < istDate2;
-      if(isPastStock || isPastOption){
-        sig.status    = "EXPIRED";
-        sig.exitPrice = sig.livePrice || 0;
-        sig.exitTime  = istNow;
-        sig.pnlPct    = sig.livePnlPct ?? -100;
-        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
-        autoExpired++;
-      }
-    }
-    if(autoExpired > 0){
-      closed += autoExpired;
-      lg(`Auto-expired ${autoExpired} past open signals`,"o");
-    }
-
-    if(!changed && !closed) return;
-
-    // Re-render UI immediately — always update badge, render cards if tab visible
-    updateLogBadge(signals);
-    if(activeTab==="log") renderLogTab(signals);
-    // If signals just closed, refresh analysis tab too (pass signals directly — no re-read)
-    if(closed > 0 && activeTab==="analysis"){
-      window._lastAnalysisRenderTs = Date.now();
-      renderAnalysisTab(signals);
-    }
-
-    // Write to GitHub immediately if any signal closed, else throttle to every 5 min
+    // ── Step 7: Write changed day files (throttled unless signals closed) ──
     const now = Date.now();
-    if(closed > 0 || now - _liveTrackLastGHWrite > 5*60*1000){
-      const ok = await ghWriteLog(signals, sha);
-      if(ok){
-        _liveTrackLastGHWrite = now;
-        if(closed > 0) lg(`Signal outcomes: ${closed} closed, ${changed} live-updated → saved to GitHub`,"o");
-        else lg(`Live P&L: ${changed} signals updated → saved to GitHub`,"o");
-      }
+    if(totalClosed>0 || now-_liveTrackLastGHWrite > 5*60*1000){
+      await _writeDayMap(dayMap);
+      _liveTrackLastGHWrite = now;
+      // Invalidate index cache so next run picks up updated open counts
+      if(totalClosed>0) _invalidateIndexCache();
+      lg(`Live P&L: ${totalChanged} updated, ${totalClosed} closed across ${Object.keys(dayMap).length} day(s)`,"o");
     }
   }catch(e){ lg("refreshLivePnL: "+e.message,"w"); }
 }
 
-// ── Check outcomes for all open signals ──
+// ══════════════════════════════════════════════════════════════════════
+// checkAllOutcomes — manual "Update Outcomes" button
+//
+// Scope: ALL days from index where open > 0 (unlimited lookback)
+// This is the authoritative reconciliation — checks every open signal
+// ever logged, across all historical day files.
+// ══════════════════════════════════════════════════════════════════════
 async function checkAllOutcomes(silent=false){
   if(!GH.token){
     if(!silent) alert("Configure GitHub token in ⚙ Settings → Signal Log first.");
     return;
   }
-  // Silent auto-checks only run during market hours — manual button always works
-  if(silent && !isOpen()){
-    lg("checkAllOutcomes: skipped — market closed","o");
-    return;
-  }
+  if(silent && !isOpen()){ lg("checkAllOutcomes: skipped — market closed","o"); return; }
+
   if(!silent)
     document.getElementById("log-entries").innerHTML=
-      `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking outcomes for open signals...</div>`;
+      `<div style="text-align:center;padding:20px;color:#64748b">🔄 Checking all open signals across all days...</div>`;
+
   try{
-    const { signals, sha } = await ghReadLog();
-    const openSignals = signals.filter(s=>s.status==="OPEN");
-    if(!openSignals.length){
-      window._lastLogRenderTs = Date.now(); renderLogTab(signals);
-      if(!silent) alert("No open signals to check.");
+    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    const istNow  = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+
+    // ── Step 1: Read index to find ALL days with open signals ──
+    const { dates, dailyStats } = await ghReadIndex();
+    _invalidateIndexCache(); // force fresh index on next refreshLivePnL
+
+    const datesWithOpen = dates.filter(d => dailyStats[d]?.open > 0);
+
+    // Also always include today even if index doesn't show open yet
+    if(!datesWithOpen.includes(istDate)) datesWithOpen.push(istDate);
+
+    if(!datesWithOpen.length){
+      if(!silent) alert("No open signals found in any day file.");
       return;
     }
 
-    // Fetch current prices for all open stock signals
-    const stockSyms = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
-    const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
-    const allSyms = [...new Set([...stockSyms, ...optUnderlying])];
+    lg(`checkAllOutcomes: reading ${datesWithOpen.length} day file(s) with open signals: ${datesWithOpen.join(", ")}`, "o");
+    if(!silent) document.getElementById("log-entries").innerHTML=
+      `<div style="text-align:center;padding:20px;color:#64748b">🔄 Loading ${datesWithOpen.length} day file(s)...</div>`;
 
-    // Batch fetch underlying quotes
-    const priceMap = {};
-    if(allSyms.length){
-      const keys = allSyms.map(sym=>{
-        const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym) || FO_STOCK_LIST.find(s=>s.s===sym);
-        return inst?.key;
-      }).filter(Boolean).join(",");
-      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
-      const allKeys2 = [keys, idxKeys].filter(Boolean).join(",");
-      try{
-        const quotes = await fetchQ(allKeys2);
-        allSyms.forEach(sym=>{
-          const inst = STOCK_MASTER_MAP[sym] || NIFTY50.find(s=>s.s===sym);
-          if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
-        });
-        priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
-        priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
-        priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
-        priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
-      }catch(e){ lg("checkOutcomes quotes: "+e.message,"w"); }
+    // ── Step 2: Load all those day files ──
+    const dayMap = {};
+    const reads  = await Promise.allSettled(datesWithOpen.map(d=>ghReadDay(d)));
+    reads.forEach((res,i)=>{
+      if(res.status==="fulfilled")
+        dayMap[datesWithOpen[i]] = { signals: res.value.signals, sha: res.value.sha };
+    });
+
+    const allSignals  = Object.values(dayMap).flatMap(d=>d.signals);
+    const openSignals = allSignals.filter(s=>s.status==="OPEN");
+
+    if(!openSignals.length){
+      window._lastLogRenderTs=Date.now();
+      const todaySigs=(dayMap[istDate]?.signals)||[];
+      renderLogTab(todaySigs);
+      if(!silent) alert("No open signals found after loading all days.");
+      return;
     }
 
-    // For options: fetch current premium prices
-    const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+    lg(`checkAllOutcomes: ${openSignals.length} open signals across ${Object.keys(dayMap).length} days`,"o");
 
-    // Define expiryThreshold FIRST — used in both the price fetch and outcome loops
-    // After 3:30 PM, today's expiry contracts are also considered expired
-    const _istHour = parseInt(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",hour12:false}))%24;
-    const _mktClosed = !isOpen();
-    const expiryThreshold = (_mktClosed && _istHour >= 15) ? istDate : (() => {
-      const d = new Date(); d.setDate(d.getDate()-1);
-      return d.toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
-    })();
+    // ── Step 3: Fetch all needed prices ──
+    const { priceMap, optPriceMap } = await _fetchPricesForOpenSignals(openSignals, istDate);
 
-    // Fetch option premiums — expired contracts get price 0, active ones fetch from chain
-    const optPriceMap = {};
-    for(const sig of openSignals.filter(s=>s.type==="OPTION")){
-      try{
-        const isExpiredContract = sig.expiry && sig.expiry <= expiryThreshold;
-        if(isExpiredContract){
-          optPriceMap[sig.id] = 0;
-          continue;
-        }
-        const inst = FO_STOCK_LIST.find(s=>s.s===sig.stock) || INDEX_OPTS.find(s=>s.name===sig.stock);
-        if(!inst) continue;
-        const chain = await fetchOptions(inst.key, sig.expiry);
-        const row = chain.find(r=>r.strike_price===sig.strike);
-        if(!row) continue;
-        const opt = sig.optType==="CE" ? row.call_options : row.put_options;
-        if(opt?.market_data?.ltp != null) optPriceMap[sig.id] = opt.market_data.ltp;
-      }catch(e){ lg("optPrice fetch "+sig.id+": "+e.message,"w"); }
+    // ── Step 4: Resolve outcomes across all loaded day files ──
+    let totalClosed=0, totalLive=0, totalAutoExp=0;
+    for(const [date, dayData] of Object.entries(dayMap)){
+      const { changed, closed, autoExpired } = _resolveOutcomes(dayData.signals, priceMap, optPriceMap, istDate, istNow);
+      totalClosed   += closed;
+      totalLive     += changed;
+      totalAutoExp  += autoExpired;
     }
 
-    // Update each open signal
-    let closed = 0, liveupdated = 0;
-    for(const sig of signals){
-      if(sig.status !== "OPEN") continue;
+    // ── Step 5: Write all affected day files back ──
+    const allOk = await _writeDayMap(dayMap);
 
-      let currentPrice = null;
-      if(sig.type==="STOCK")  currentPrice = priceMap[sig.stock];
-      if(sig.type==="OPTION") currentPrice = optPriceMap[sig.id];
+    // ── Step 6: Update UI ──
+    const todaySigs = (dayMap[istDate]?.signals) || [];
+    checkOutcomeAlerts(allSignals);
+    window._lastLogRenderTs=Date.now(); renderLogTab(todaySigs);
+    updateLogBadge(todaySigs);
 
-      // ── 1. Expired contract ──
-      const isExpiredContract = sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold;
-      if(isExpiredContract){
-        // For expired contracts: use the ACTUAL post-expiry price only.
-        // livePrice is a stale intraday snapshot — do NOT use it for outcome decisions.
-        // If the contract expired worthless (price ~ 0), mark EXPIRED, not SL_HIT.
-        const exitPx    = (currentPrice ?? 0);
-        const isBullExp = isBullSignal(sig);
+    const totalResolved = totalClosed + totalAutoExp;
+    lg(`checkAllOutcomes: ${totalClosed} closed, ${totalAutoExp} auto-expired, ${totalLive} live-updated across ${Object.keys(dayMap).length} day(s). GitHub: ${allOk?"✅":"⚠ partial"}`,"o");
 
-        // Check if target or SL was hit at the final exit price
-        const hitTgt = isBullExp ? exitPx >= sig.target : exitPx <= sig.target;
-        const hitSL  = isBullExp ? exitPx <= sig.sl     : exitPx >= sig.sl;
-
-        if(hitTgt){
-          sig.status    = "TARGET_HIT";
-          sig.exitPrice = +exitPx.toFixed(2);
-          sig.exitTime  = istTime;
-          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
-        } else if(exitPx === 0 || exitPx < sig.entry * 0.02){
-          // Expired worthless — theta decay, not a real SL hit
-          sig.status    = "EXPIRED";
-          sig.exitPrice = 0;
-          sig.exitTime  = istTime;
-          sig.pnlPct    = -100;
-        } else if(hitSL){
-          // Still traded but breached SL on expiry day
-          sig.status    = "SL_HIT";
-          sig.exitPrice = +exitPx.toFixed(2);
-          sig.exitTime  = istTime;
-          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
-        } else {
-          // Expired between SL and target
-          sig.status    = "EXPIRED";
-          sig.exitPrice = +exitPx.toFixed(2);
-          sig.exitTime  = istTime;
-          sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
-        }
-        sig.livePrice  = null;
-        sig.livePnlPct = null;
-        closed++;
-        continue;
-      }
-
-      if(currentPrice == null) continue;
-
-      const isBull   = isBullSignal(sig);
-      const hitTarget = isBull ? currentPrice >= sig.target : currentPrice <= sig.target;
-      const hitSL     = isBull ? currentPrice <= sig.sl     : currentPrice >= sig.sl;
-      // Old stock signal (yesterday's) with no expiry — expire it
-      const isOldStock = sig.type==="STOCK" && sig.date < istDate;
-
-      if(hitTarget){
-        // ── 3. Target hit — use ACTUAL current price, not just target ──
-        sig.status    = "TARGET_HIT";
-        sig.exitPrice = +currentPrice.toFixed(2);   // real exit, may be above target
-        sig.exitTime  = istTime;
-        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
-        sig.livePrice = null;
-        sig.livePnlPct= null;
-        closed++;
-      } else if(hitSL){
-        sig.status    = "SL_HIT";
-        sig.exitPrice = +sig.sl.toFixed(2);
-        sig.exitTime  = istTime;
-        sig.pnlPct    = +(((sig.sl - sig.entry) / sig.entry) * 100).toFixed(2);
-        sig.livePrice = null;
-        sig.livePnlPct= null;
-        closed++;
-      } else if(isOldStock){
-        sig.status    = "EXPIRED";
-        sig.exitPrice = +currentPrice.toFixed(2);
-        sig.exitTime  = istTime;
-        sig.pnlPct    = +(((currentPrice - sig.entry) / sig.entry) * 100).toFixed(2);
-        sig.livePrice = null;
-        sig.livePnlPct= null;
-        closed++;
-      } else {
-        // ── 2. Still OPEN — store live price, P&L, progress toward target/SL ──
-        Object.assign(sig, computeLiveFields(sig, currentPrice));
-        liveupdated++;
-      }
-    }
-
-    const ok = await ghWriteLog(signals, sha);
-    lg(`Outcomes: closed ${closed}, live-updated ${liveupdated} signals. GitHub: ${ok}`,"o");
-    checkOutcomeAlerts(signals);
-    window._lastLogRenderTs = Date.now(); renderLogTab(signals);
-    updateLogBadge(signals);
     if(silent){
-      if(closed>0) showToast(`📊 ${closed} signal${closed>1?"s":""} closed`, "#16a34a");
-      // Only show live P&L toast during market hours — not when market is closed
-      else if(liveupdated>0 && isOpen()) showToast(`📡 Live P&L: ${liveupdated} signals updated`, "#0ea5e9");
+      if(totalResolved>0) showToast(`📊 ${totalResolved} signal${totalResolved>1?"s":""} resolved`, "#16a34a");
+      else if(totalLive>0 && isOpen()) showToast(`📡 Live P&L: ${totalLive} updated`, "#0ea5e9");
     } else {
-      if(closed>0 || liveupdated>0)
-        alert(`✅ Closed: ${closed} · Live P&L updated: ${liveupdated}\n${ok?"Saved to GitHub.":"GitHub save failed — check token."}`);
-      else
+      if(totalResolved>0 || totalLive>0){
+        const dayCount = Object.keys(dayMap).length;
+        alert(
+          `✅ Results across ${dayCount} day file${dayCount>1?"s":""}:\n` +
+          `  • Closed (target/SL): ${totalClosed}\n` +
+          `  • Auto-expired: ${totalAutoExp}\n` +
+          `  • Live P&L updated: ${totalLive}\n\n` +
+          (allOk?"Saved to GitHub.":"⚠ Some GitHub saves failed — check log.")
+        );
+      } else {
         alert("No open signals have hit their target or SL yet.");
+      }
     }
   }catch(e){
     lg("checkAllOutcomes: "+e.message,"e");
@@ -2318,8 +2479,8 @@ async function renderAnalysisTab(signalsIn){
   let signals = signalsIn;
   if(!signals){
     if(!GH.token){ el.innerHTML=`<div class="empty-state">Configure GitHub token in ⚙ Settings.</div>`; return; }
-    el.innerHTML=`<div style="text-align:center;padding:20px;color:#64748b">⏳ Loading signal history...</div>`;
-    try{ const r = await ghReadLog(); signals = r.signals||[]; }
+    el.innerHTML=`<div style="text-align:center;padding:20px;color:#64748b">⏳ Loading signal history (last 30 days)...</div>`;
+    try{ signals = await ghReadMultipleDays(30); }
     catch(e){ el.innerHTML=`<div class="empty-state">Error: ${e.message}</div>`; return; }
   }
 
@@ -2514,6 +2675,8 @@ async function renderAnalysisTab(signalsIn){
 // ── Render Log tab ──
 async function renderLogTab(signalsIn){
   let signals = signalsIn;
+  const dateF   = document.getElementById("log-filter-date")?.value||"today";
+
   if(!signals){
     if(!GH.token){
       document.getElementById("log-entries").innerHTML=
@@ -2522,13 +2685,29 @@ async function renderLogTab(signalsIn){
       return;
     }
     document.getElementById("log-entries").innerHTML=
-      `<div style="text-align:center;padding:20px;color:#64748b">Loading from GitHub...</div>`;
-    const result = await ghReadLog();
-    signals = result.signals;
+      `<div style="text-align:center;padding:20px;color:#64748b">⏳ Loading from GitHub...</div>`;
+
+    try{
+      if(dateF==="today"){
+        // Fast path: today only
+        const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+        const result = await ghReadDay(today);
+        signals = result.signals;
+      } else if(dateF==="week"){
+        signals = await ghReadMultipleDays(7);
+      } else if(dateF==="month"){
+        signals = await ghReadMultipleDays(22);
+      } else {
+        // "all" — load last 90 days
+        signals = await ghReadMultipleDays(90);
+      }
+    }catch(e){
+      document.getElementById("log-entries").innerHTML=`<div class="empty-state">Error: ${e.message}</div>`;
+      return;
+    }
   }
 
   // Apply filters
-  const dateF   = document.getElementById("log-filter-date")?.value||"today";
   const typeF   = document.getElementById("log-filter-type")?.value||"all";
   const statusF = document.getElementById("log-filter-status")?.value||"all";
 
@@ -2703,6 +2882,8 @@ function boot(){
   setTimeout(()=>refreshIndexLots(), 2500); // live lot sizes for NIFTY/BANKNIFTY/SENSEX/FINNIFTY
   // Load outcome-based confidence calibration from signal history
   setTimeout(()=>loadConfCalibration(), 3500);
+  // One-time migration: split legacy single-file log → daily partition (runs once per user)
+  setTimeout(()=>ghMigrateIfNeeded().catch(e=>lg("Migration: "+e.message,"w")), 5000);
   // Auto-check signal outcomes on boot (silent) — only during/just after market hours
   setTimeout(()=>{
     if(GH.token && GH.user && GH.repo && isOpen()){

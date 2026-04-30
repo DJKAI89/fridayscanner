@@ -6843,99 +6843,87 @@ function getMarketStatus(){
 </script>
 
 
-
-<!-- ===== SIGNAL SPLIT (NDJSON) INTEGRATION ===== -->
 <script>
+// ===== FORCE NEW SIGNAL STORAGE (OVERRIDE OLD) =====
 
-// Load signals from multiple date files
-async function loadSignals(range) {
-  const today = new Date();
-  const dates = [];
+// New save
+async function saveSignal(signal){
+  const date=new Date().toISOString().slice(0,10);
+  const path=`signal-logs/${USER_ID}/${date}.ndjson`;
+  const newLine=JSON.stringify(signal)+"\n";
 
-  const days =
-    range === "today" ? 1 :
-    range === "week" ? 7 :
-    range === "month" ? 30 :
-    60;
+  let existing="";
+  try{
+    const res=await fetchFromGitHub(path);
+    if(res) existing=res;
+  }catch{}
 
-  for (let i = 0; i < days; i++) {
-    const d = new Date();
-    d.setDate(today.getDate() - i);
+  await saveToGitHub(path, existing+newLine);
+}
+
+// Override possible old functions
+window.saveSignalToGitHub = saveSignal;
+window.logSignal = saveSignal;
+window.saveLog = saveSignal;
+
+// Load signals
+async function loadSignals(range){
+  const today=new Date();
+  const dates=[];
+  const days=range==="today"?1:range==="week"?7:range==="month"?30:60;
+
+  for(let i=0;i<days;i++){
+    const d=new Date();
+    d.setDate(today.getDate()-i);
     dates.push(d.toISOString().slice(0,10));
   }
 
-  let all = [];
-
-  for (const date of dates) {
-    const path = `signal-logs/${USER_ID}/${date}.ndjson`;
-    try {
-      const text = await fetchFromGitHub(path);
-      if (!text) continue;
-
-      const rows = text.trim().split("\n").map(JSON.parse);
-      all.push(...rows);
-    } catch {}
+  let all=[];
+  for(const date of dates){
+    const path=`signal-logs/${USER_ID}/${date}.ndjson`;
+    try{
+      const text=await fetchFromGitHub(path);
+      if(!text) continue;
+      all.push(...text.trim().split("\n").map(JSON.parse));
+    }catch{}
   }
-
   return all;
 }
 
-// Save signal (append-only)
-async function saveSignal(signal) {
-  const date = new Date().toISOString().slice(0,10);
-  const path = `signal-logs/${USER_ID}/${date}.ndjson`;
+// Override render log
+async function renderLogTab(){
+  const range=document.getElementById("log-filter-date").value;
+  let signals=await loadSignals(range);
 
-  const newLine = JSON.stringify(signal) + "\n";
+  const type=document.getElementById("log-filter-type").value;
+  const status=document.getElementById("log-filter-status").value;
 
-  let existing = "";
-  try {
-    const res = await fetchFromGitHub(path);
-    if (res) existing = res;
-  } catch {}
-
-  const updated = existing + newLine;
-  await saveToGitHub(path, updated);
-}
-
-// Hook into existing log rendering
-async function renderLogTab() {
-  const range = document.getElementById("log-filter-date").value;
-  let signals = await loadSignals(range);
-
-  const type = document.getElementById("log-filter-type").value;
-  const status = document.getElementById("log-filter-status").value;
-
-  if (type !== "all") signals = signals.filter(s => s.type === type);
-  if (status !== "all") signals = signals.filter(s => s.status === status);
+  if(type!=="all") signals=signals.filter(s=>s.type===type);
+  if(status!=="all") signals=signals.filter(s=>s.status===status);
 
   renderLogEntries(signals);
 }
 
-// Hook into analysis
-async function renderAnalysis() {
-  const signals = await loadSignals("month");
+// Override analysis
+async function renderAnalysis(){
+  const signals=await loadSignals("month");
 
-  if (!signals || signals.length < 10) {
-    document.getElementById("analysis-body").innerHTML =
-      '<div class="empty-state">Need 10+ signals</div>';
+  if(!signals.length){
+    document.getElementById("analysis-body").innerHTML='<div class="empty-state">No data</div>';
     return;
   }
 
-  const total = signals.length;
-  const targetHit = signals.filter(s => s.status === "TARGET_HIT").length;
-  const slHit = signals.filter(s => s.status === "SL_HIT").length;
-  const winRate = ((targetHit / total) * 100).toFixed(1);
+  const total=signals.length;
+  const target=signals.filter(s=>s.status==="TARGET_HIT").length;
+  const sl=signals.filter(s=>s.status==="SL_HIT").length;
 
-  document.getElementById("analysis-body").innerHTML = `
+  document.getElementById("analysis-body").innerHTML=`
     <div class="stats-g">
       <div class="sc"><div class="sc-lbl">TOTAL</div><div class="sc-val">${total}</div></div>
-      <div class="sc"><div class="sc-lbl">TARGET HIT</div><div class="sc-val up">${targetHit}</div></div>
-      <div class="sc"><div class="sc-lbl">SL HIT</div><div class="sc-val dn">${slHit}</div></div>
-      <div class="sc"><div class="sc-lbl">WIN RATE</div><div class="sc-val bl">${winRate}%</div></div>
-    </div>
-  `;
+      <div class="sc"><div class="sc-lbl">TARGET</div><div class="sc-val up">${target}</div></div>
+      <div class="sc"><div class="sc-lbl">SL</div><div class="sc-val dn">${sl}</div></div>
+    </div>`;
 }
-
 </script>
 
 </body>

@@ -278,6 +278,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <button class="nav-item" id="nav-analysis" onclick="switchTab('analysis');closeMenu()">
   <span class="nav-icon">📊</span><span class="nav-label">Analysis</span><span class="nav-badge" id="nb-analysis">—</span>
 </button>
+<button class="nav-item" id="nav-breakout" onclick="switchTab('breakout');closeMenu()">
+  <span class="nav-icon">🚀</span><span class="nav-label">Breakout Scanner</span><span class="nav-badge" id="nb-breakout">—</span>
+</button>
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -557,6 +560,56 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div style="padding:0 12px 80px" id="analysis-body">
       <div class="empty-state">Loading signal analysis...<br><span style="font-size:10px;color:#94a3b8">Requires 10+ closed signals in your log.</span></div>
     </div>
+  </div>
+
+  <!-- BREAKOUT SCANNER -->
+
+  <div class="pane" id="pane-breakout">
+    <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
+
+<!-- Loading -->
+<div id="loading-breakout" style="display:none" class="spin-wrap">
+  <div class="spin"></div>
+  <p style="font-size:13px;font-weight:600;color:#374151">Running Breakout Scanner...</p>
+  <p id="bo-progress" style="font-size:11px;color:#7c3aed;margin-top:6px;font-weight:600">Starting...</p>
+  <p style="font-size:10px;color:#94a3b8;margin-top:4px">EMA 50/200 Cross · Previous Day H/L · Supertrend (7,3)</p>
+</div>
+
+<!-- Dashboard -->
+<div id="dash-breakout" style="display:none">
+  <div class="last-upd"><div class="upd-dot" style="background:#7c3aed"></div><span id="breakout-upd-time">Not scanned yet</span>
+    <button onclick="loadBreakout(true)" class="btn btn-s" style="margin-left:auto;font-size:10px;padding:4px 10px">🔄 Re-scan</button>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-g" id="bo-stats" style="margin-bottom:12px"></div>
+
+  <!-- Signal legend -->
+  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px">
+    <span style="font-size:9px;font-weight:700;color:#374151;align-self:center;margin-right:2px">SIGNALS:</span>
+    <span style="font-size:8px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⭐ GOLDEN CROSS</span>
+    <span style="font-size:8px;font-weight:700;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">💀 DEATH CROSS</span>
+    <span style="font-size:8px;font-weight:700;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">🚀 PDH BREAK</span>
+    <span style="font-size:8px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📉 PDL BREAK</span>
+    <span style="font-size:8px;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:10px;padding:2px 7px">📈 ST UP</span>
+    <span style="font-size:8px;font-weight:700;background:#faf5ff;color:#6b21a8;border:1px solid #ddd6fe;border-radius:10px;padding:2px 7px">📉 ST DOWN</span>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
+    <button id="bo-tab-all" onclick="filterBreakout('all')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#7c3aed;color:#fff">All Signals</button>
+    <button id="bo-tab-bull" onclick="filterBreakout('bull')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📈 Bullish</button>
+    <button id="bo-tab-bear" onclick="filterBreakout('bear')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📉 Bearish</button>
+    <button id="bo-tab-ema" onclick="filterBreakout('ema')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">EMA Cross</button>
+    <button id="bo-tab-pdhl" onclick="filterBreakout('pdhl')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">PDH/PDL</button>
+    <button id="bo-tab-st" onclick="filterBreakout('st')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Supertrend</button>
+  </div>
+
+  <!-- Cards -->
+  <div class="cards-g" id="bo-cards"></div>
+  <div class="disc">⚠ Breakout signals: EMA 50/200 cross, PDH/PDL breakout, Supertrend(7,3). Not SEBI-registered advice. Always DYODD.</div>
+</div>
+
   </div>
 
   <div class="pane" id="pane-settings">
@@ -2793,7 +2846,7 @@ function resetSettings(){
 // ══════════════════════════════════════
 // SLIDE MENU + NAVIGATION
 // ══════════════════════════════════════
-const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',log:'📋 Signal Log',analysis:'📊 Analysis',settings:'⚙ Settings'};
+const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',log:'📋 Signal Log',analysis:'📊 Analysis',breakout:'🚀 Breakout',settings:'⚙ Settings'};
 
 function openMenu(){
   document.getElementById("nav-drawer").classList.add("open");
@@ -2843,6 +2896,11 @@ function switchTab(t){
     const _lastAR = window._lastAnalysisRenderTs || 0;
     // 30s cache — analysis reflects recent closes quickly
     if(Date.now() - _lastAR > 30000){ window._lastAnalysisRenderTs = Date.now(); renderAnalysisTab(); }
+  }
+  if(t==="breakout"){
+    const _lastBR = window._lastBreakoutTs || 0;
+    // Auto-load when first visiting; re-load if >5 min stale
+    if(Date.now() - _lastBR > 5*60*1000){ window._lastBreakoutTs = Date.now(); loadBreakout(false); }
   }
 }
 
@@ -6191,9 +6249,476 @@ function updateConfPreview(){
   if(optLbl)  {optLbl.textContent=desc(ov);optLbl.style.color=col(ov);}
 }
 
-// ══════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════
+// BREAKOUT SCANNER
+// Three signals: EMA 50/200 Cross · Previous Day H/L · Supertrend(7,3)
+// ══════════════════════════════════════════════════════════════════════
+
+// ── Supertrend(period, multiplier) — candles: newest-first ──
+function calcSupertrend(candles, period=7, mult=3){
+  if(!candles || candles.length < period+3) return null;
+  const c = [...candles].reverse(); // oldest→newest
+  // True Range
+  const tr=[];
+  for(let i=1;i<c.length;i++){
+    const h=+c[i][2],l=+c[i][3],pc=+c[i-1][4];
+    tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+  }
+  // Wilder ATR
+  const wilder=(arr,p)=>{
+    if(arr.length<p) return [];
+    let s=arr.slice(0,p).reduce((a,b)=>a+b,0)/p;
+    const r=[s];
+    for(let i=p;i<arr.length;i++){s=(s*(p-1)+arr[i])/p;r.push(s);}
+    return r;
+  };
+  const atrArr=wilder(tr,period);
+  if(!atrArr.length) return null;
+
+  // Supertrend loop — aligned to c[period..]
+  const fUBs=[],fLBs=[],trends=[],sts=[];
+  for(let i=0;i<atrArr.length;i++){
+    const ci=i+period;
+    if(ci>=c.length) break;
+    const hl2=(+c[ci][2]+ +c[ci][3])/2;
+    const atr=atrArr[i];
+    const ub=hl2+mult*atr, lb=hl2-mult*atr;
+    const close=+c[ci][4];
+    let fUB,fLB;
+    if(i===0){ fUB=ub; fLB=lb; }
+    else{
+      const pFUB=fUBs[i-1],pFLB=fLBs[i-1];
+      const prevClose=+c[ci-1][4];
+      fUB=(ub<pFUB||prevClose>pFUB)?ub:pFUB;
+      fLB=(lb>pFLB||prevClose<pFLB)?lb:pFLB;
+    }
+    fUBs.push(+fUB.toFixed(2)); fLBs.push(+fLB.toFixed(2));
+    let trend,st;
+    if(i===0){
+      trend=close>=fLB?"UP":"DOWN";
+      st=trend==="UP"?fLB:fUB;
+    } else {
+      const pTrend=trends[i-1];
+      if(pTrend==="UP"){ trend=close>=fLBs[i]?"UP":"DOWN"; }
+      else              { trend=close<=fUBs[i]?"DOWN":"UP"; }
+      st=trend==="UP"?fLBs[i]:fUBs[i];
+    }
+    trends.push(trend); sts.push(+st.toFixed(2));
+  }
+
+  const n=trends.length;
+  if(!n) return null;
+  const trend=trends[n-1];
+  const prevTrend=n>=2?trends[n-2]:trend;
+  const crossed=trend!==prevTrend;
+  const st=sts[n-1];
+  const ltp=+c[c.length-1][4];
+  const dist=ltp>0?+((ltp-st)/ltp*100).toFixed(2):0;
+  return { trend, supertrend:st, crossed, dist,
+           crossType:crossed?(trend==="UP"?"BULLISH":"BEARISH"):null };
+}
+
+// ── EMA 50/200 crossover — closes: oldest→newest ──
+function calcEMACrossover(closes){
+  if(!closes||closes.length<205) return null;
+  const ema50  = calcEMA(closes,50);
+  const ema200 = calcEMA(closes,200);
+  if(!ema50||!ema200) return null;
+  const prev50  = closes.length>51  ? calcEMA(closes.slice(0,-1),50)  : ema50;
+  const prev200 = closes.length>201 ? calcEMA(closes.slice(0,-1),200) : ema200;
+  const gap=+((ema50-ema200)/ema200*100).toFixed(2);
+  const prevGap=+((prev50-prev200)/prev200*100).toFixed(2);
+  const goldenCross=prevGap<0&&gap>=0;
+  const deathCross =prevGap>0&&gap<=0;
+  const uptrend=ema50>ema200;
+  const nearCross=Math.abs(gap)<0.5;
+  return { ema50:+ema50.toFixed(2), ema200:+ema200.toFixed(2), gap, prevGap,
+           goldenCross, deathCross, uptrend, nearCross };
+}
+
+// ── Previous Day High/Low breakout — candles: newest-first ──
+function detectPDHLBreakout(ltp,candles){
+  if(!candles||candles.length<2) return null;
+  const pdh=+candles[1][2], pdl=+candles[1][3], pdc=+candles[1][4];
+  if(!pdh||!pdl||pdh<=0||pdl<=0) return null;
+  const buf=0.003; // 0.3% buffer
+  const bullBreakout=ltp>pdh*(1+buf);
+  const bearBreakout=ltp<pdl*(1-buf);
+  const nearPDH=!bullBreakout&&ltp>pdh*(1-0.007);
+  const nearPDL=!bearBreakout&&ltp<pdl*(1+0.007);
+  const pdHDist=+((ltp-pdh)/pdh*100).toFixed(2);
+  const pdLDist=+((ltp-pdl)/pdl*100).toFixed(2);
+  return { pdh,pdl,pdc,bullBreakout,bearBreakout,nearPDH,nearPDL,pdHDist,pdLDist };
+}
+
+// ── Breakout SL/Target helper ──
+function boSLTarget(ltp,atr,signal,pdh,pdl,ema200){
+  const a=atr||ltp*0.018;
+  let entry=ltp,sl,target,method="";
+  if(signal==="GOLDEN_CROSS"||signal==="PDH_BREAK"||signal==="ST_UP"){
+    sl=+(ltp-a*1.5).toFixed(2);
+    if(pdl>0&&pdl<ltp&&pdl>sl) sl=+((pdl)*0.995).toFixed(2);
+    if(ema200>0&&ema200<ltp&&ema200>sl) sl=+(ema200*0.995).toFixed(2);
+    const risk=ltp-sl;
+    target=+(ltp+risk*2).toFixed(2);
+    method="ATR SL · 2:1 R:R";
+  } else {
+    // Bearish
+    sl=+(ltp+a*1.5).toFixed(2);
+    if(pdh>0&&pdh>ltp&&pdh<sl) sl=+(pdh*1.005).toFixed(2);
+    const risk=sl-ltp;
+    target=+(ltp-risk*2).toFixed(2);
+    method="ATR SL · 2:1 R:R";
+  }
+  const rr=sl>0&&Math.abs(ltp-sl)>0?+(Math.abs(target-ltp)/Math.abs(ltp-sl)).toFixed(2):2;
+  return { entry,sl,target,rr,method };
+}
+
+// ── Score a stock's breakout strength (0-10) ──
+function boScore(ema,pdhl,st){
+  let s=0;
+  if(ema){
+    if(ema.goldenCross) s+=4;
+    else if(ema.deathCross) s+=4;
+    else if(ema.nearCross) s+=2;
+    else if(ema.uptrend) s+=1;
+  }
+  if(pdhl){
+    if(pdhl.bullBreakout||pdhl.bearBreakout) s+=3;
+    else if(pdhl.nearPDH||pdhl.nearPDL) s+=1;
+  }
+  if(st){
+    if(st.crossed) s+=3;
+    else s+=1;
+  }
+  return s;
+}
+
+// ── Determine primary signal direction ──
+function boDirection(ema,pdhl,st){
+  let bull=0,bear=0;
+  if(ema){ if(ema.goldenCross||ema.uptrend) bull++; if(ema.deathCross||!ema.uptrend) bear++; }
+  if(pdhl){ if(pdhl.bullBreakout||pdhl.nearPDH) bull++; if(pdhl.bearBreakout||pdhl.nearPDL) bear++; }
+  if(st){ if(st.trend==="UP") bull++; if(st.trend==="DOWN") bear++; }
+  return bull>=bear?"BULL":"BEAR";
+}
+
+// ── Store all breakout results globally for filter ──
+let _boResults=[];
+let _boFilter="all";
+
+function filterBreakout(f){
+  _boFilter=f;
+  // Update tab styles
+  ["all","bull","bear","ema","pdhl","st"].forEach(tab=>{
+    const el=document.getElementById("bo-tab-"+tab);
+    if(!el) return;
+    if(tab===f){ el.style.background="#7c3aed"; el.style.color="#fff"; el.style.border="none"; }
+    else{ el.style.background="#fff"; el.style.color="#374151"; el.style.border="1px solid #e2e8f0"; }
+  });
+  renderBoCards(_boResults,f);
+}
+
+function renderBoCards(results,filter){
+  const el=document.getElementById("bo-cards");
+  if(!el||!results.length){ if(el) el.innerHTML=`<div class="empty-state">No breakout signals found.<br><span style="font-size:10px;color:#94a3b8">Try scanning during market hours for live breakouts.</span></div>`; return; }
+
+  const filtered=results.filter(r=>{
+    if(filter==="bull") return r.dir==="BULL";
+    if(filter==="bear") return r.dir==="BEAR";
+    if(filter==="ema")  return r.ema&&(r.ema.goldenCross||r.ema.deathCross||r.ema.nearCross);
+    if(filter==="pdhl") return r.pdhl&&(r.pdhl.bullBreakout||r.pdhl.bearBreakout||r.pdhl.nearPDH||r.pdhl.nearPDL);
+    if(filter==="st")   return r.st&&(r.st.crossed||true);
+    return true;
+  });
+
+  if(!filtered.length){ el.innerHTML=`<div class="empty-state">No signals in this category.</div>`; return; }
+
+  el.innerHTML=filtered.map(r=>{
+    const isBull=r.dir==="BULL";
+    const cardBg=isBull?"#f0fdf4":"#fef2f2";
+    const cardBorder=isBull?"#16a34a":"#dc2626";
+    const dirColor=isBull?"#16a34a":"#dc2626";
+    const dirLabel=isBull?"▲ BULLISH":"▼ BEARISH";
+
+    // Build signal pills
+    const pills=[];
+    if(r.ema){
+      if(r.ema.goldenCross)  pills.push(`<span style="font-size:8px;font-weight:800;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⭐ GOLDEN CROSS</span>`);
+      else if(r.ema.deathCross) pills.push(`<span style="font-size:8px;font-weight:800;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">💀 DEATH CROSS</span>`);
+      else if(r.ema.nearCross)  pills.push(`<span style="font-size:8px;font-weight:800;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⚡ EMA NEAR CROSS</span>`);
+      else if(r.ema.uptrend)    pills.push(`<span style="font-size:8px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;padding:2px 7px">📈 EMA UPTREND</span>`);
+      else                       pills.push(`<span style="font-size:8px;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📉 EMA DOWNTREND</span>`);
+    }
+    if(r.pdhl){
+      if(r.pdhl.bullBreakout)  pills.push(`<span style="font-size:8px;font-weight:800;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">🚀 PDH BREAK +${r.pdhl.pdHDist}%</span>`);
+      else if(r.pdhl.bearBreakout) pills.push(`<span style="font-size:8px;font-weight:800;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📉 PDL BREAK ${r.pdhl.pdLDist}%</span>`);
+      else if(r.pdhl.nearPDH)      pills.push(`<span style="font-size:8px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;padding:2px 7px">⚡ NEAR PDH ₹${fmt(r.pdhl.pdh)}</span>`);
+      else if(r.pdhl.nearPDL)      pills.push(`<span style="font-size:8px;font-weight:700;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⚡ NEAR PDL ₹${fmt(r.pdhl.pdl)}</span>`);
+    }
+    if(r.st){
+      const stColor=r.st.trend==="UP"?"#1e40af":"#6b21a8";
+      const stBg=r.st.trend==="UP"?"#eff6ff":"#faf5ff";
+      const stBorder=r.st.trend==="UP"?"#bfdbfe":"#ddd6fe";
+      const stLabel=r.st.crossed?(r.st.trend==="UP"?"📈 ST CROSSED UP":"📉 ST CROSSED DOWN"):(r.st.trend==="UP"?"📈 ST UP":"📉 ST DOWN");
+      pills.push(`<span style="font-size:8px;font-weight:${r.st.crossed?"800":"700"};background:${stBg};color:${stColor};border:1px solid ${stBorder};border-radius:10px;padding:2px 7px">${stLabel}</span>`);
+    }
+
+    // Trade setup
+    const t=r.trade;
+    const chgColor=r.chgPct>=0?"#16a34a":"#dc2626";
+    const chgSign=r.chgPct>=0?"+":"";
+
+    // Why text
+    const whyParts=[];
+    if(r.ema){
+      if(r.ema.goldenCross) whyParts.push(`EMA50(${fmt(r.ema.ema50,0)}) crossed above EMA200(${fmt(r.ema.ema200,0)}) — institutional uptrend confirmation`);
+      else if(r.ema.deathCross) whyParts.push(`EMA50(${fmt(r.ema.ema50,0)}) crossed below EMA200(${fmt(r.ema.ema200,0)}) — major downtrend signal`);
+      else if(r.ema.nearCross) whyParts.push(`EMA50(${fmt(r.ema.ema50,0)}) vs EMA200(${fmt(r.ema.ema200,0)}) gap only ${Math.abs(r.ema.gap)}% — cross imminent`);
+      else whyParts.push(`EMA50(${fmt(r.ema.ema50,0)}) ${r.ema.uptrend?"above":"below"} EMA200(${fmt(r.ema.ema200,0)}) — ${r.ema.gap>0?"uptrend":"downtrend"} intact (gap ${Math.abs(r.ema.gap)}%)`);
+    }
+    if(r.pdhl){
+      if(r.pdhl.bullBreakout) whyParts.push(`Price broke above PDH ₹${fmt(r.pdhl.pdh)} (+${r.pdhl.pdHDist}%)`);
+      else if(r.pdhl.bearBreakout) whyParts.push(`Price broke below PDL ₹${fmt(r.pdhl.pdl)} (${r.pdhl.pdLDist}%)`);
+      else if(r.pdhl.nearPDH) whyParts.push(`Approaching PDH ₹${fmt(r.pdhl.pdh)} — watching for breakout`);
+      else if(r.pdhl.nearPDL) whyParts.push(`Near PDL ₹${fmt(r.pdhl.pdl)} — watch for breakdown`);
+    }
+    if(r.st){
+      if(r.st.crossed) whyParts.push(`Supertrend(7,3) just flipped ${r.st.trend==="UP"?"bullish":"bearish"} at ₹${fmt(r.st.supertrend)} — momentum shift`);
+      else whyParts.push(`Supertrend(7,3) ${r.st.trend==="UP"?"bullish":"bearish"} at ₹${fmt(r.st.supertrend)} (${r.st.dist>0?"+":""}${r.st.dist}% from ST)`);
+    }
+
+    const scoreBar=`<div style="display:flex;align-items:center;gap:5px;margin-top:3px">
+      <span style="font-size:8px;color:#94a3b8;width:40px">STRENGTH</span>
+      <div style="flex:1;height:4px;background:#e2e8f0;border-radius:3px"><div style="width:${Math.min(100,r.score*10)}%;height:100%;background:${r.score>=7?"#16a34a":r.score>=4?"#d97706":"#0ea5e9"};border-radius:3px"></div></div>
+      <span style="font-size:8px;font-weight:800;color:${r.score>=7?"#16a34a":r.score>=4?"#d97706":"#0ea5e9"}">${r.score}/10</span>
+    </div>`;
+
+    return `<div style="background:${cardBg};border:2px solid ${cardBorder};border-radius:11px;padding:13px;box-shadow:0 2px 8px rgba(0,0,0,.05);animation:fadeIn .3s ease both;min-width:0;overflow:hidden">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div>
+          <div style="font-size:16px;font-weight:800;color:#0f172a">${r.s}</div>
+          <div style="font-size:10px;color:#64748b">${r.n||r.s} · ${r.sec||"NSE"}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:14px;font-weight:800;color:#0f172a">₹${fmt(r.ltp)}</div>
+          <div style="font-size:11px;font-weight:700;color:${chgColor}">${chgSign}${r.chgPct.toFixed(2)}%</div>
+          <div style="font-size:9px;font-weight:800;color:${dirColor};margin-top:2px">${dirLabel}</div>
+        </div>
+      </div>
+
+      <!-- Signal pills -->
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px">${pills.join("")}</div>
+
+      <!-- Trade setup -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:8px">
+        <div style="background:#f8fafc;padding:8px;text-align:center">
+          <div style="font-size:8px;color:#64748b;margin-bottom:2px">ENTRY</div>
+          <div style="font-size:13px;font-weight:800;color:#1d4ed8">₹${fmt(t.entry)}</div>
+        </div>
+        <div style="background:#fef2f2;padding:8px;text-align:center">
+          <div style="font-size:8px;color:#64748b;margin-bottom:2px">STOP LOSS</div>
+          <div style="font-size:13px;font-weight:800;color:#dc2626">₹${fmt(t.sl)}</div>
+          <div style="font-size:8px;color:#dc2626">${isBull?"-":"+"}${t.sl>0?Math.abs((t.sl-t.entry)/t.entry*100).toFixed(1):"—"}%</div>
+        </div>
+        <div style="background:#f0fdf4;padding:8px;text-align:center">
+          <div style="font-size:8px;color:#64748b;margin-bottom:2px">TARGET</div>
+          <div style="font-size:13px;font-weight:800;color:#16a34a">₹${fmt(t.target)}</div>
+          <div style="font-size:8px;color:#16a34a">R:R ${t.rr}:1</div>
+        </div>
+      </div>
+
+      <!-- Strength bar -->
+      ${scoreBar}
+
+      <!-- Why -->
+      <div style="margin-top:8px;padding-top:7px;border-top:1px solid ${isBull?"#bbf7d0":"#fecaca"};font-size:10px;color:#475569;line-height:1.6">
+        ${whyParts.map(p=>`→ ${p}`).join("<br>")}
+      </div>
+      <div style="margin-top:4px;font-size:8px;color:#94a3b8">${t.method}</div>
+    </div>`;
+  }).join("");
+}
+
+// ── Main Breakout load function ──
+async function loadBreakout(force=false){
+  if(window._breakoutLoading&&!force) return;
+  window._breakoutLoading=true;
+
+  const errEl=document.getElementById("err-breakout");
+  const loadEl=document.getElementById("loading-breakout");
+  const dashEl=document.getElementById("dash-breakout");
+  if(errEl) errEl.style.display="none";
+  if(loadEl) loadEl.style.display="block";
+  if(dashEl) dashEl.style.display="none";
+
+  const progress=(msg)=>{
+    const el=document.getElementById("bo-progress");
+    if(el) el.textContent=msg;
+  };
+
+  try{
+    // ── Step 1: Fetch quotes ──
+    progress("Step 1/3: Fetching live quotes...");
+    const scanList=STOCKS.length>0?STOCKS:NIFTY50;
+    if(!scanList.length) throw new Error("Stock list empty — configure GitHub stocks.json or wait for main scan.");
+
+    const rawQ={};
+    const BATCH=50;
+    for(let bi=0;bi<Math.ceil(scanList.length/BATCH);bi++){
+      const slice=scanList.slice(bi*BATCH,(bi+1)*BATCH);
+      progress(`Step 1/3: Quotes ${Math.min((bi+1)*BATCH,scanList.length)}/${scanList.length}`);
+      try{
+        const bd=await fetchQ(slice.map(i=>i.key).join(","));
+        Object.assign(rawQ,bd);
+      }catch(e){ lg("BO quote batch "+bi+": "+e.message,"w"); }
+    }
+
+    // Normalize keys
+    const allQ={};
+    for(const[k,v] of Object.entries(rawQ)){
+      allQ[k]=v;allQ[k.replace(/:/g,"|")]=v;allQ[k.replace(/\|/g,":")]=v;
+      if(v?.tradingsymbol) allQ["SYM:"+v.tradingsymbol]=v;
+    }
+
+    // Match
+    const matched=scanList.map(inst=>{
+      const q=allQ[inst.key]||allQ[inst.key.replace(/\|/g,":")]||allQ["NSE_EQ|"+inst.s]||allQ["NSE_EQ:"+inst.s]||allQ["SYM:"+inst.s];
+      if(q?.last_price>0) return {...inst,_q:q};
+      return null;
+    }).filter(Boolean);
+
+    if(!matched.length) throw new Error("0 stocks matched quotes. Check token.");
+
+    // Top 60 by volume for candle analysis
+    const byVol=matched.sort((a,b)=>(b._q.volume||0)-(a._q.volume||0)).slice(0,60);
+    lg(`Breakout: ${byVol.length} stocks for candle analysis`,"o");
+
+    // ── Step 2: Fetch candles ──
+    progress("Step 2/3: Fetching daily candles for EMA200...");
+    const today=new Date().toISOString().split("T")[0];
+    const from260=new Date(Date.now()-270*864e5).toISOString().split("T")[0];
+    const techB={};
+    let candleDone=0;
+    const CBATCH=5;
+    for(let b=0;b<byVol.length;b+=CBATCH){
+      const batch=byVol.slice(b,b+CBATCH);
+      progress(`Step 2/3: Candles ${b+1}–${Math.min(b+CBATCH,byVol.length)}/${byVol.length}`);
+      const res=await Promise.allSettled(
+        batch.map(inst=>fetchCandles(inst.key,from260,today).then(candles=>({inst,candles})))
+      );
+      for(const r of res){
+        if(r.status!=="fulfilled"){ lg("BO candle err: "+r.reason,"w"); continue; }
+        const {inst,candles}=r.value;
+        if(candles.length>=10){
+          const closes=candles.map(c=>+c[4]).reverse(); // oldest→newest
+          const atr=calcATR(candles);
+          techB[inst.s]={
+            closes, candles, atr,
+            ema:  calcEMACrossover(closes),
+            st:   calcSupertrend(candles),
+          };
+          candleDone++;
+        }
+      }
+    }
+    lg(`Breakout candles: ${candleDone}/${byVol.length}`,"o");
+
+    // ── Step 3: Compute signals ──
+    progress("Step 3/3: Computing signals...");
+    const results=[];
+
+    for(const item of byVol){
+      const q=item._q;
+      const ltp=q.last_price;
+      const chgPct=getChgPct(q);
+      const t=techB[item.s];
+      if(!t) continue;
+
+      const ema=t.ema;
+      const st=t.st;
+      const pdhl=detectPDHLBreakout(ltp,t.candles);
+
+      // Must have at least one meaningful signal
+      const hasEMA=ema&&(ema.goldenCross||ema.deathCross||ema.nearCross);
+      const hasPDHL=pdhl&&(pdhl.bullBreakout||pdhl.bearBreakout||pdhl.nearPDH||pdhl.nearPDL);
+      const hasST=st&&(st.crossed||true); // always show ST trend
+      const score=boScore(ema,pdhl,st);
+      if(score<2) continue; // skip very weak signals
+
+      const dir=boDirection(ema,pdhl,st);
+      const isBull=dir==="BULL";
+      const ema200=ema?.ema200||0;
+
+      // Primary signal for SL/Target
+      let primarySig="ST_UP";
+      if(!isBull) primarySig="ST_DOWN";
+      if(ema?.goldenCross) primarySig="GOLDEN_CROSS";
+      if(ema?.deathCross)  primarySig="DEATH_CROSS";
+      if(pdhl?.bullBreakout) primarySig="PDH_BREAK";
+      if(pdhl?.bearBreakout) primarySig="PDL_BREAK";
+
+      const trade=boSLTarget(ltp,t.atr,primarySig,pdhl?.pdh||0,pdhl?.pdl||0,ema200);
+
+      results.push({
+        ...item, ltp, chgPct, ema, pdhl, st, score, dir,
+        trade, atr:t.atr,
+        isBull
+      });
+    }
+
+    // Sort: crossed signals first (highest urgency), then by score desc
+    results.sort((a,b)=>{
+      const aCrossed=(a.ema?.goldenCross||a.ema?.deathCross||a.st?.crossed)?1:0;
+      const bCrossed=(b.ema?.goldenCross||b.ema?.deathCross||b.st?.crossed)?1:0;
+      return bCrossed-aCrossed||b.score-a.score;
+    });
+
+    _boResults=results;
+
+    // ── Render ──
+    const goldCross=results.filter(r=>r.ema?.goldenCross).length;
+    const deathCross=results.filter(r=>r.ema?.deathCross).length;
+    const pdhBreak=results.filter(r=>r.pdhl?.bullBreakout).length;
+    const pdlBreak=results.filter(r=>r.pdhl?.bearBreakout).length;
+    const stCrossed=results.filter(r=>r.st?.crossed).length;
+    const bullCount=results.filter(r=>r.dir==="BULL").length;
+    const bearCount=results.filter(r=>r.dir==="BEAR").length;
+
+    const statsEl=document.getElementById("bo-stats");
+    if(statsEl) statsEl.innerHTML=`
+      <div class="sc"><div class="sc-lbl">TOTAL SIGNALS</div><div class="sc-val bl">${results.length}</div><div class="sc-sub">from ${byVol.length} stocks</div></div>
+      <div class="sc"><div class="sc-lbl">BULLISH 📈</div><div class="sc-val up">${bullCount}</div><div class="sc-sub">${goldCross} golden · ${pdhBreak} PDH</div></div>
+      <div class="sc"><div class="sc-lbl">BEARISH 📉</div><div class="sc-val dn">${bearCount}</div><div class="sc-sub">${deathCross} death · ${pdlBreak} PDL</div></div>
+      <div class="sc"><div class="sc-lbl">ST CROSSOVERS ⚡</div><div class="sc-val am">${stCrossed}</div><div class="sc-sub">fresh trend flips</div></div>
+    `;
+
+    const now=getIST();
+    const updEl=document.getElementById("breakout-upd-time");
+    if(updEl) updEl.textContent="Last scan: "+now;
+    updateNavBadge("breakout", results.length+" signals");
+    lastStockScan=now;
+
+    if(loadEl) loadEl.style.display="none";
+    if(dashEl) dashEl.style.display="block";
+
+    filterBreakout(_boFilter);
+    lg(`✅ Breakout scan: ${results.length} signals (${goldCross}GC·${deathCross}DC·${pdhBreak}PDH·${pdlBreak}PDL·${stCrossed}ST)`,"o");
+
+  }catch(e){
+    lg("Breakout scan error: "+e.message,"e");
+    if(loadEl) loadEl.style.display="none";
+    if(dashEl) dashEl.style.display="block";
+    const errMsg=document.getElementById("err-breakout-msg");
+    if(errMsg) errMsg.textContent=e.message;
+    if(errEl) errEl.style.display="block";
+  }finally{
+    window._breakoutLoading=false;
+  }
+}
+
 function toggleLog(){const el=document.getElementById("log-drawer");el.style.display=el.style.display==="none"?"block":"none";}
 function setStatus(t,txt){document.getElementById("sdot").className="dot "+t;document.getElementById("stxt").textContent=txt;}
 function lg(msg,t=""){

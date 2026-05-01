@@ -566,7 +566,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <div class="pane" id="pane-breakout">
     <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-
+    
 <!-- Loading -->
 <div id="loading-breakout" style="display:none" class="spin-wrap">
   <div class="spin"></div>
@@ -6699,19 +6699,31 @@ function calcNR7(candles){
 function calcBBSqueeze(closes){
   if(!closes||closes.length<25) return null;
   const bb=calcBollinger(closes);
-  if(!bb) return null;
-  const width=+((bb.upper-bb.lower)/bb.mid).toFixed(4);
-  const widths=[];
-  for(let i=0;i<20&&i<closes.length-20;i++){
-    const b=calcBollinger(closes.slice(0,closes.length-i));
-    if(b) widths.push((b.upper-b.lower)/b.mid);
+  // calcBollinger returns { upper, middle, lower, bandwidth, squeeze, percentB }
+  // Note: field is 'middle' not 'mid'
+  if(!bb||bb.middle==null||bb.middle===0) return null;
+  const width=+((bb.upper-bb.lower)/bb.middle).toFixed(4);
+  // calcBollinger already computes squeeze (bottom 20% of recent bandwidth history)
+  // We add extremeSqueeze check: bottom 8% — needs enough history
+  let normalised=0.5, extremeSqueeze=false;
+  if(closes.length>=50){
+    const widths=[];
+    for(let i=0;i<20&&closes.length-i>=20;i++){
+      const b=calcBollinger(closes.slice(0,closes.length-i));
+      if(b&&b.middle>0) widths.push((b.upper-b.lower)/b.middle);
+    }
+    if(widths.length>=3){
+      const minW=Math.min(...widths), maxW=Math.max(...widths);
+      normalised=maxW>minW?+((width-minW)/(maxW-minW)).toFixed(2):0.5;
+      extremeSqueeze=normalised<0.08;
+    }
   }
-  if(!widths.length) return { width, squeeze:false, extremeSqueeze:false };
-  const minW=Math.min(...widths), maxW=Math.max(...widths);
-  const normalised=maxW>minW?+(width-minW)/(maxW-minW):0.5;
-  return { width, squeeze:normalised<0.2, extremeSqueeze:normalised<0.08,
+  return {
+    width, squeeze: bb.squeeze||normalised<0.2,
+    extremeSqueeze,
     normalised:+normalised.toFixed(2),
-    upper:+bb.upper.toFixed(2), lower:+bb.lower.toFixed(2), mid:+bb.mid.toFixed(2) };
+    upper:bb.upper, lower:bb.lower, mid:+bb.middle.toFixed(2)
+  };
 }
 
 // ── Signal 5: Weekly MTF — weekly candles: newest-first ──

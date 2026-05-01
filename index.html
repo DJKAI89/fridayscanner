@@ -3364,7 +3364,15 @@ async function apiGet(url){
 // Upstox returns keys with ":" separator (e.g. "NSE_EQ:ISIN")
 // We always normalize to "|" to match our instrument_key format
 async function fetchQ(keys){
-  const d=await withRetry(()=>apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(keys)),"fetchQ");
+  // Sanitise: remove blank tokens, deduplicate, bail if nothing remains
+  const cleaned = [...new Set(
+    String(keys||"").split(",").map(k=>k.trim()).filter(Boolean)
+  )].join(",");
+  if(!cleaned){
+    lg("fetchQ: no instrument keys — call skipped","w");
+    return {};
+  }
+  const d=await withRetry(()=>apiGet("/v2/market-quote/quotes?instrument_key="+encodeURIComponent(cleaned)),"fetchQ");
   const raw=d?.data||{};
   const out={};
   for(const[k,v] of Object.entries(raw)) out[k.replace(/:/g,"|")]=v;

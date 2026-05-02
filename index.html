@@ -408,9 +408,23 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div id="tod-options"></div>
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-options"></div>
-      <div id="options-body"></div>
-      <div class="disc">⚠ Options carry significant risk. Entry/SL/Target are calculated from Greeks. Always verify before trading.</div>
-    </div>
+
+  <!-- Filter tabs -->
+  <div id="opt-filter-bar" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
+    <button id="oft-all"      onclick="filterOptions('all')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#16a34a;color:#fff">All</button>
+    <button id="oft-nifty"    onclick="filterOptions('nifty')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Nifty</button>
+    <button id="oft-banknifty" onclick="filterOptions('banknifty')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Bank Nifty</button>
+    <button id="oft-sensex"   onclick="filterOptions('sensex')"   style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Sensex</button>
+    <button id="oft-finnifty" onclick="filterOptions('finnifty')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">FinNifty</button>
+    <button id="oft-stocks"   onclick="filterOptions('stocks')"   style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📦 Stocks</button>
+    <button id="oft-buy"      onclick="filterOptions('buy')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📈 BUY</button>
+    <button id="oft-sell"     onclick="filterOptions('sell')"     style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📉 SELL</button>
+  </div>
+
+  <div id="options-body"></div>
+  <div class="disc">⚠ Options carry significant risk. Entry/SL/Target are calculated from Greeks. Always verify before trading.</div>
+</div>
+
   </div>
 
   <!-- PORTFOLIO -->
@@ -566,7 +580,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 
   <div class="pane" id="pane-breakout">
     <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-    
+
 <!-- Loading -->
 <div id="loading-breakout" style="display:none" class="spin-wrap">
   <div class="spin"></div>
@@ -5214,35 +5228,124 @@ async function loadOptions(force=true){
   try{
     const groups=[];
 
-    // ── Step 1: Fetch market direction — REQUIRED before scan ──
-    // If this fails we cannot produce reliable signals, so we throw
-    updateOptProgress("Fetching Nifty direction + VIX...");
-    let optNiftyBullish, optNiftyChgPct, optVix;
+    // ── Step 1: Fetch comprehensive real-time market direction ──
+    // Problem with old approach: using day % change vs prev close means a gap-down
+    // market that is RECOVERING still looks bearish → wrong signal direction.
+    //
+    // New approach — 4-factor composite:
+    //   (A) Intraday momentum  — last 30-min candles direction  [40% weight] ← most important
+    //   (B) VWAP position      — price above/below intraday VWAP [25% weight]
+    //   (C) PCR trend          — market-wide Put/Call ratio       [20% weight]
+    //   (D) Day change         — vs prev close (context only)     [15% weight]
+    //
+    // A gap-down open at -1% that has recovered +0.8% in last 30min →
+    //   momentum=BULL, VWAP=above → composite=BULLISH → CE suggested ✅
+    updateOptProgress("Step 1: Fetching Nifty direction + VIX + intraday momentum...");
+    let optNiftyBullish, optNiftyChgPct, optVix, marketCtx;
 
-    // Retry up to 3 times — this MUST succeed for deterministic results
     let mktFetched = false;
     for(let attempt=1; attempt<=3; attempt++){
       try{
-        const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
+        // Fetch spot quote + VIX + intraday 5-min candles in parallel
+        const [mktD, intradayCandles] = await Promise.all([
+          fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX"),
+          fetchIntraday("NSE_INDEX|Nifty 50","5minute").catch(()=>[])
+        ]);
+
         const nQ2  = mktD["NSE_INDEX|Nifty 50"];
         const vQ2  = mktD["NSE_INDEX|India VIX"];
         if(!nQ2?.last_price) throw new Error("Nifty quote missing");
+
+        const spot   = nQ2.last_price;
         optVix = vQ2?.last_price || 15;
 
-        // Use net_change for direction — most reliable field in Upstox
-        const netChg = nQ2.net_change != null ? nQ2.net_change
-                     : (nQ2.ohlc?.close ? nQ2.last_price - nQ2.ohlc.close
-                     : nQ2.ohlc?.open  ? nQ2.last_price - nQ2.ohlc.open : 0);
-        optNiftyChgPct = nQ2.last_price > 0 ? (netChg / nQ2.last_price) * 100 : 0;
-        // Neutral zone ±0.3% = treat as neutral (no strong directional bias)
-        optNiftyBullish = optNiftyChgPct >= -0.3;
+        // ── Factor A: Intraday momentum (last 30 min = last 6 × 5-min candles) ──
+        // Direction = is price higher now than 30 min ago?
+        // Also compute slope: rising, falling, or flat
+        let momentumScore = 0; // -3 to +3
+        let momentumLabel = "NEUTRAL";
+        let intradayVWAP  = 0;
+        if(intradayCandles.length >= 3){
+          const recent = intradayCandles.slice(-6); // last 30 min
+          const oldest = recent[0], latest = recent[recent.length-1];
+          const openRecent = +oldest[1], closeRecent = +latest[4];
+          const movePct = (closeRecent - openRecent) / openRecent * 100;
 
-        const dirStr = optNiftyChgPct > 1   ? "STRONGLY BULLISH ↑↑"
-                     : optNiftyChgPct > 0.3 ? "BULLISH ↑"
-                     : optNiftyChgPct > -0.3? "NEUTRAL ↔"
-                     : optNiftyChgPct > -1  ? "BEARISH ↓"
-                     :                        "STRONGLY BEARISH ↓↓";
-        lg(`✅ Market: ${dirStr} (${optNiftyChgPct.toFixed(2)}%) VIX=${optVix.toFixed(1)} → ${optNiftyBullish?"CALLS":"PUTS"} aligned`,"o");
+          // Count up vs down candles in recent window
+          const upCandles   = recent.filter(c=>+c[4]>+c[1]).length;
+          const downCandles = recent.filter(c=>+c[4]<+c[1]).length;
+
+          // Momentum score: range -3 to +3
+          if(movePct > 0.4)       momentumScore += 2;
+          else if(movePct > 0.15) momentumScore += 1;
+          else if(movePct < -0.4) momentumScore -= 2;
+          else if(movePct < -0.15)momentumScore -= 1;
+          // Candle composition bonus
+          if(upCandles >= 4)       momentumScore += 1;
+          else if(downCandles >= 4)momentumScore -= 1;
+
+          momentumScore = Math.max(-3, Math.min(3, momentumScore));
+          momentumLabel = momentumScore >= 2 ? "RISING STRONGLY"
+                        : momentumScore >= 1 ? "RISING"
+                        : momentumScore <= -2? "FALLING STRONGLY"
+                        : momentumScore <= -1? "FALLING"
+                        : "FLAT";
+
+          // ── Factor B: VWAP position ──
+          // VWAP = Σ(typical_price × volume) / Σ(volume)
+          let tpvSum=0, volSum=0;
+          for(const c of intradayCandles){
+            const tp=(+c[2]+ +c[3]+ +c[4])/3, vol=+c[5];
+            tpvSum+=tp*vol; volSum+=vol;
+          }
+          intradayVWAP = volSum>0 ? tpvSum/volSum : 0;
+        }
+
+        // ── Factor C: Day change vs prev close (context weight = 15%) ──
+        const netChg = nQ2.net_change != null ? nQ2.net_change
+                     : (nQ2.ohlc?.close ? spot - nQ2.ohlc.close
+                     : nQ2.ohlc?.open  ? spot - nQ2.ohlc.open : 0);
+        optNiftyChgPct = spot > 0 ? (netChg / spot) * 100 : 0;
+        // Day change score: -2 to +2
+        const dayScore = optNiftyChgPct > 1    ?  2
+                       : optNiftyChgPct > 0.3  ?  1
+                       : optNiftyChgPct < -1   ? -2
+                       : optNiftyChgPct < -0.3 ? -1
+                       : 0;
+
+        // ── Factor B score: VWAP position ──
+        const vwapScore = intradayVWAP > 0 ? (spot >= intradayVWAP ? 1 : -1) : 0;
+
+        // ── Composite direction ──
+        // Weights: momentum(40%) day(15%) vwap(25%) → scored out of 7
+        // momentumScore: -3..+3 × 40% weight → multiply by 1.33
+        // dayScore:      -2..+2 × 15% weight → multiply by 0.5
+        // vwapScore:     -1..+1 × 25% weight → multiply by 1.75
+        const compositeScore = (momentumScore * 1.33) + (dayScore * 0.5) + (vwapScore * 1.75);
+
+        // Threshold: positive = bullish, negative = bearish
+        // Small dead-band ±0.5 = treat as neutral (suggest BOTH CE & PE near-ATM)
+        optNiftyBullish = compositeScore > 0;
+        const isNeutral = Math.abs(compositeScore) < 0.5;
+
+        // Store full context for use in scanChain confidence scoring
+        marketCtx = {
+          spot, vwap: intradayVWAP, momentumScore, momentumLabel,
+          dayChange: optNiftyChgPct, dayScore, vwapScore,
+          compositeScore: +compositeScore.toFixed(2),
+          bullish: optNiftyBullish, neutral: isNeutral,
+          vix: optVix,
+          // Human-readable summary for log
+          summary: `momentum=${momentumLabel}(${momentumScore}) vwap=${intradayVWAP>0?(spot>=intradayVWAP?"ABOVE":"BELOW"):"N/A"} day=${optNiftyChgPct.toFixed(2)}% → composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":optNiftyBullish?"BULLISH":"BEARISH"}`
+        };
+
+        const dirStr = compositeScore > 2    ? "STRONGLY BULLISH ↑↑"
+                     : compositeScore > 0.5  ? "BULLISH ↑"
+                     : compositeScore > -0.5 ? "NEUTRAL ↔ (show both CE & PE)"
+                     : compositeScore > -2   ? "BEARISH ↓"
+                     :                         "STRONGLY BEARISH ↓↓";
+
+        lg(`✅ Market direction: ${dirStr} | ${marketCtx.summary}`,"o");
         mktFetched = true;
         break;
       }catch(e){
@@ -5251,8 +5354,7 @@ async function loadOptions(force=true){
       }
     }
     if(!mktFetched) throw new Error(
-      "Cannot fetch Nifty market direction after 3 attempts. "+
-      "This prevents unreliable signals. Check your internet and retry."
+      "Cannot fetch Nifty market direction after 3 attempts. Check internet and retry."
     );
 
     // ─ INDEX OPTIONS: Nifty, BankNifty, Sensex, FinNifty ─
@@ -5290,7 +5392,7 @@ async function loadOptions(force=true){
         const maxPain = calcMaxPain(chain);
         const oiWalls = calcOIWalls(chain);
 
-        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null);
+        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null,marketCtx);
         const _cap=CFG.maxOptCapital>0?CFG.maxOptCapital:Infinity;
         const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf&&p.amtRequired<=_cap);
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
@@ -5342,7 +5444,7 @@ async function loadOptions(force=true){
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
         const stkMaxPain = calcMaxPain(chain);
-        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain,pcr);
+        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain,pcr,marketCtx);
         lg(`${inst.s}: ${chain.length} strikes → ${picks.length} signals`,picks.length?"o":"");
         if(picks.length) groups.push({name:inst.s,spot,spotChg,spotPts:spotPts2,pcr,expiry,picks,type:"stock",fullName:inst.n});
       }catch(e){lg(inst.s+" opts: "+e.message,"w");}
@@ -5351,7 +5453,7 @@ async function loadOptions(force=true){
     // Summary stats: all index spots
     const allSpots=groups.filter(g=>g.type==="index");
     renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
-    renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix);
+    renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix, marketCtx);
     renderOptionsGroups(groups);
 
     // ── Badge: count exactly what renderOptionsGroups shows (with-trend + conf + cap filters) ──
@@ -5397,17 +5499,43 @@ async function loadOptions(force=true){
 // optType: "CE"=call, "PE"=put
 // niftyBullish: true=market up, false=market down
 // vix: India VIX level
-function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix, maxPain, stockPCR) {
+function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optType, niftyBullish, vix, maxPain, stockPCR, marketCtx=null) {
   const absD = Math.abs(delta);
   const isCE = optType === "CE";
-  // Aligned = option direction matches market trend
-  const aligned = (isCE && niftyBullish) || (!isCE && !niftyBullish);
 
-  // ── Direction multiplier ──
-  // Counter-trend options get a strong penalty but are NOT completely hidden.
-  // This keeps results deterministic — same data always = same score.
-  // The UI will clearly label them as "Against Trend".
-  const dirMult = aligned ? 1.0 : 0.45;  // counter-trend = 45% of normal score
+  // ── Direction multiplier — now uses composite momentum score ──
+  // Old: binary niftyBullish → 1.0 or 0.45
+  // New: uses compositeScore from intraday momentum + VWAP + day change
+  //   Strong alignment (score ±2+) → 1.0
+  //   Moderate alignment (score ±1) → 0.85
+  //   Neutral (score near 0)        → 0.70 (both CE and PE get similar scores)
+  //   Moderate counter-trend        → 0.50
+  //   Strong counter-trend          → 0.35
+  let dirMult;
+  const cs = marketCtx?.compositeScore ?? (niftyBullish ? 1 : -1);
+  const isNeutral = marketCtx?.neutral === true;
+  if(isNeutral){
+    dirMult = 0.70; // neutral: moderate confidence for both sides
+  } else {
+    const ceAligned = cs > 0, peAligned = cs < 0;
+    const aligned = (isCE && ceAligned) || (!isCE && peAligned);
+    const absCs = Math.abs(cs);
+    if(aligned){
+      dirMult = absCs >= 2 ? 1.0 : absCs >= 1 ? 0.85 : 0.75;
+    } else {
+      dirMult = absCs >= 2 ? 0.35 : absCs >= 1 ? 0.50 : 0.65;
+    }
+  }
+
+  // ── Momentum bonus: reward options aligned with strong intraday momentum ──
+  let momentumBonus = 0;
+  if(marketCtx?.momentumScore != null){
+    const ms = marketCtx.momentumScore;
+    const mAligned = (isCE && ms > 0) || (!isCE && ms < 0);
+    if(mAligned && Math.abs(ms) >= 2) momentumBonus = 8;
+    else if(mAligned && Math.abs(ms) >= 1) momentumBonus = 4;
+    else if(!mAligned && Math.abs(ms) >= 2) momentumBonus = -6; // momentum against = penalty
+  }
 
   // ── All scores below apply to all options; dirMult applied at end ──
 
@@ -5433,7 +5561,7 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // ── Signal bonus (up to 12 pts) ──
   const sigBonus = Math.min(12, signals.filter(s=>s.s>=2).length * 6);
 
-  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus;
+  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus + momentumBonus;
 
   // ── Trend strength boost ──
   // Strongly aligned (market clearly trending in option direction)
@@ -5472,11 +5600,15 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
 
-function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain, stockPCR) {
+function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain, stockPCR, marketCtx=null) {
   const picks = [];
+  // Neutral market: when composite score is in dead-band, show both CE and PE
+  const isNeutral = marketCtx?.neutral === true;
+  const compositeScore = marketCtx?.compositeScore ?? (niftyBullish ? 1 : -1);
+
   for (const row of chain) {
     const sp = row.strike_price;
-    if (!spot || Math.abs(sp - atm) > spot * 0.15) continue; // ±15% of spot (wider for low-priced stocks)
+    if (!spot || Math.abs(sp - atm) > spot * 0.15) continue;
     for (const [side, optType] of [["call_options", "CE"], ["put_options", "PE"]]) {
       const opt = row[side]; if (!opt) continue;
       const md = opt.market_data, gr = opt.option_greeks;
@@ -5484,12 +5616,9 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       const ltp = md.ltp, delta = gr?.delta || 0, iv = gr?.iv || 0, theta = gr?.theta || 0;
 
       // ── Reject stale / expired option data ──
-      // IV = 0 means no implied volatility — option is not being priced (expired or illiquid)
-      // Delta = ±1.0 exactly on a non-deep-ITM option = stale/expired Greeks
-      // These appear when today is the expiry day and market is closed
       const absD0 = Math.abs(delta);
-      if(iv === 0 && absD0 > 0.95) continue;  // expired: IV=0, delta at max
-      if(iv === 0 && ltp < 1)      continue;  // expired: no IV, worthless premium
+      if(iv === 0 && absD0 > 0.95) continue;
+      if(iv === 0 && ltp < 1)      continue;
       const oi = md?.oi || 0, prevOI = md?.prev_oi || oi;
       const oiChg = prevOI > 0 ? ((oi - prevOI) / prevOI * 100) : 0;
       const absD = Math.abs(delta);
@@ -5501,45 +5630,49 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       if (oiChg <= -CFG.oi)   signals.push({l:"OI "+oiChg.toFixed(0)+"% Unwind",s:1});
       if (theta < -0.5)       signals.push({l:"Θ "+theta?.toFixed(2),     s:1});
       if (sp === atm)         signals.push({l:"ATM",                       s:1});
-      // Ensure ATM strike always has at least one signal (for visibility)
       if (!signals.length && absD >= 0.10 && ltp > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
       if (!signals.length)    continue;
 
-      // Entry / SL / Target — Smart IV-based calculation
+      // Entry / SL / Target
       const entry = ltp;
       const _opt  = calcSmartOptionSLTarget(entry, spot, sp, iv, delta, theta, expiry, vix, optType);
-      const sl    = _opt.sl;
-      const tgt   = _opt.tgt;
-      const rr    = _opt.rr;
-      const slTgtMethod = _opt.method;
+      const sl    = _opt.sl, tgt = _opt.tgt, rr = _opt.rr, slTgtMethod = _opt.method;
 
-      // Amount required (lot size × premium)
       const lot = lotSize || 1;
       const amtRequired = +(ltp * lot).toFixed(0);
       const maxLoss     = +(sl > 0 ? (ltp - sl) * lot : ltp * lot * 0.25).toFixed(0);
       const maxProfit   = +((tgt - ltp) * lot).toFixed(0);
 
-      // Confidence score
-      const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain, stockPCR);
+      // ── Confidence: now uses marketCtx composite score for direction multiplier ──
+      const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain, stockPCR, marketCtx);
       const _fiiConf    = applyFIIBias(_rawOptConf, optType==="CE" ? niftyBullish : !niftyBullish);
       const confidence  = applyCalibration(_fiiConf, "OPTION");
 
-      // Market-direction-aware action
+      // ── trendAligned: based on composite momentum, not just day change ──
+      // In neutral market, both CE and PE are treated as "aligned" (show both)
       const isCE   = optType === "CE";
+      const trendAligned = isNeutral
+        ? true  // neutral = show all, let confidence sort them
+        : (isCE ? compositeScore > 0 : compositeScore < 0);
+
+      // Direction label reflects composite momentum, not just day change
+      const momentumDir = isNeutral ? "NEUTRAL"
+                        : compositeScore > 2  ? "STRONGLY BULLISH"
+                        : compositeScore > 0  ? "BULLISH"
+                        : compositeScore < -2 ? "STRONGLY BEARISH"
+                        : "BEARISH";
+
+      // Action logic
       const aligned = (isCE && niftyBullish) || (!isCE && !niftyBullish);
       let action = "WATCH";
-      if(!aligned){
-        // Counter-trend: only show SELL (unwinding of wrong-direction OI)
+      if(!aligned && !isNeutral){
         if(absD >= CFG.delta && oiChg <= -CFG.oi) action = "SELL";
-        // else stays WATCH — never BUY a counter-trend option
       } else {
-        // With-trend: BUY if delta + OI buildup confirm
-        if(absD >= CFG.delta && oiChg >= 5)  action = "BUY";
-        else if(absD >= CFG.delta)            action = "BUY";
+        if(absD >= CFG.delta && oiChg >= 5) action = "BUY";
+        else if(absD >= CFG.delta)           action = "BUY";
       }
-      if(iv >= CFG.iv && oiChg <= -CFG.oi) action = "SELL"; // IV crush regardless
+      if(iv >= CFG.iv && oiChg <= -CFG.oi) action = "SELL";
 
-      const trendAligned = (optType==="CE" && niftyBullish) || (optType==="PE" && !niftyBullish);
       picks.push({
         strike: sp, type: optType, entry, sl, tgt, rr,
         iv, delta, theta, oi, oiChg, action, signals,
@@ -5547,14 +5680,15 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         confidence, atm: sp === atm, spot, expiry, und: name,
         lot, amtRequired, maxLoss, maxProfit,
         trendAligned,
-        trendDir: niftyBullish ? "BULLISH" : "BEARISH",
+        trendDir: momentumDir,
+        momentumLabel: marketCtx?.momentumLabel || "",
+        compositeScore,
         slTgtMethod,
         stockPCR: stockPCR||null,
       });
     }
   }
-  // Sort by confidence DESC
-  return picks.sort((a, b) => b.confidence - a.confidence);  // no slice — filtered by minOptConf in renderOptionsGroups
+  return picks.sort((a, b) => b.confidence - a.confidence);
 }
 
 // ══════════════════════════════════════
@@ -5792,38 +5926,56 @@ function renderStockCards(picks,totalScanned,containerId){
   }).join(""):`<div class="empty-state">No picks pass current filters<br><span style="font-size:11px;color:#64748b">Conf≥${CFG.minStockConf}% · Pot≥${CFG.pot}% · Risk&lt;${CFG.risk}% · R:R≥${CFG.rr}</span><br><span style="font-size:10px">Scanned ${totalScanned||50} stocks · Lower thresholds in ⚙ Settings</span></div>`;
 }
 
-function renderStatsOptions(idxGroups, niftyBull, chgPct, vix){
-  // Market direction warning banner
+function renderStatsOptions(idxGroups, niftyBull, chgPct, vix, marketCtx){
   const chg = chgPct || 0;
   const bull = niftyBull !== undefined ? niftyBull : true;
-  const absChg = Math.abs(chg);
-  let dirBanner = "";
-  if(absChg > 0.5){
-    const strong = absChg > 1.5;
-    const color  = bull ? "#16a34a" : "#dc2626";
-    const bg     = bull ? "#f0fdf4" : "#fef2f2";
-    const border = bull ? "#bbf7d0" : "#fecaca";
-    const icon   = bull ? "📈" : "📉";
-    const txt    = bull
-      ? `${icon} Market is ${strong?"STRONGLY ":""}BULLISH today (${chg>=0?"+":""}${chg.toFixed(2)}%) — CALL options aligned with trend`
-      : `${icon} Market is ${strong?"STRONGLY ":""}BEARISH today (${chg.toFixed(2)}%) — PUT options aligned with trend · CALL signals capped at 40%`;
-    dirBanner = `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 13px;margin-bottom:12px;font-size:11px;font-weight:700;color:${color}">${txt}</div>`;
+  const cs   = marketCtx?.compositeScore ?? (bull ? 1 : -1);
+  const isNeutral = marketCtx?.neutral === true;
+  const momentumLabel = marketCtx?.momentumLabel || "";
+  const vwapPos = marketCtx?.vwap > 0
+    ? (marketCtx.spot >= marketCtx.vwap ? "Above VWAP ₹"+fmt(marketCtx.vwap,0) : "Below VWAP ₹"+fmt(marketCtx.vwap,0))
+    : "";
+
+  // ── Market direction banner: composite-based, not just day % ──
+  const color  = isNeutral ? "#d97706" : cs > 0 ? "#16a34a" : "#dc2626";
+  const bg     = isNeutral ? "#fffbeb" : cs > 0 ? "#f0fdf4" : "#fef2f2";
+  const border = isNeutral ? "#fde68a" : cs > 0 ? "#bbf7d0" : "#fecaca";
+  const strong = Math.abs(cs) > 2;
+  const icon   = isNeutral ? "↔" : cs > 0 ? "📈" : "📉";
+  let dirLine;
+  if(isNeutral){
+    dirLine = `↔ Market is NEUTRAL — showing both CE & PE · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · Momentum: ${momentumLabel}`;
+  } else if(cs > 0){
+    dirLine = `${icon} Intraday momentum ${strong?"STRONGLY ":""}BULLISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · ${momentumLabel}${vwapPos?" · "+vwapPos:""} → CE aligned`;
+  } else {
+    dirLine = `${icon} Intraday momentum ${strong?"STRONGLY ":""}BEARISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · ${momentumLabel}${vwapPos?" · "+vwapPos:""} → PE aligned`;
   }
+  // Add gap-vs-momentum note when they diverge (the exact scenario user reported)
+  let gapNote = "";
+  if(marketCtx){
+    const gapBull = chg >= 0;
+    const momBull = cs > 0;
+    if(!isNeutral && gapBull !== momBull){
+      gapNote = `<div style="margin-top:4px;font-size:9px;font-weight:600;opacity:.85">
+        ⚡ Gap ${gapBull?"up":"down"} (${chg>=0?"+":""}${chg.toFixed(2)}%) but intraday momentum reversed ${momBull?"bullish":"bearish"} — signals updated to reflect CURRENT direction
+      </div>`;
+    }
+  }
+  const dirBanner = `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 13px;margin-bottom:12px;font-size:11px;font-weight:700;color:${color}">${dirLine}${gapNote}</div>`;
   document.getElementById("options-body").insertAdjacentHTML("afterbegin", dirBanner);
 
-  // 2×2 grid on mobile, 4 across on wider screens
   document.getElementById("stats-options").style.gridTemplateColumns="repeat(auto-fill,minmax(min(calc(50% - 5px),200px),1fr))";
   document.getElementById("stats-options").innerHTML=idxGroups.map(g=>{
     const pc=g.pcr>1?"up":g.pcr>0.7?"am":"dn";
-    const pts=g.spotPts||0; const color=clr(pts); const sign=pts>=0?"+":"";
+    const pts=g.spotPts||0; const col=clr(pts); const sign=pts>=0?"+":"";
     const mp=g.maxPain||0;
     const mpDist=mp&&g.spot?((mp-g.spot)/g.spot*100).toFixed(1):null;
     const mpColor=mpDist&&+mpDist<0?"dn":mpDist&&+mpDist>0?"up":"am";
     const cw=g.oiWalls?.callWall||0, pw=g.oiWalls?.putWall||0;
     return`<div class="sc" style="min-width:0;overflow:hidden">
       <div class="sc-lbl">${g.name} SPOT · ${isOpen()?"LIVE":"LAST CLOSE"}</div>
-      <div class="sc-val ${color}" id="opt-spot-${g.name}" data-prev="${g.spot}" style="font-size:clamp(14px,4vw,20px)">₹${fmt(g.spot,0)}</div>
-      <div class="sc-sub ${color}" id="opt-pts-${g.name}">${sign}${fmt(pts,2)} pts</div>
+      <div class="sc-val ${col}" id="opt-spot-${g.name}" data-prev="${g.spot}" style="font-size:clamp(14px,4vw,20px)">₹${fmt(g.spot,0)}</div>
+      <div class="sc-sub ${col}" id="opt-pts-${g.name}">${sign}${fmt(pts,2)} pts</div>
       <div class="sc-note" style="margin-top:5px;line-height:1.6;font-size:9px">
         PCR <span class="${pc}" style="font-weight:700">${g.pcr}</span>
         ${mp?` · 🎯<span class="${mpColor}">${mpDist>0?"+":""}${mpDist}%</span>`:""}
@@ -6207,23 +6359,80 @@ async function lookupStock(){
     ].filter(Boolean).length;
     const mtfScore = Math.round(mtfBullish / 5 * 100); // 0-100%
 
-    // Step 3: Market context — use net_change (reliable) not close comparison
-    document.getElementById("lkp-progress").textContent="Fetching market context...";
+    // Step 3: Market context — composite intraday momentum (same engine as F&O tab)
+    document.getElementById("lkp-progress").textContent="Fetching market context + intraday momentum...";
     let vix=15,vixSc=70,pcrSc=50,nBull=true,nChgPct=0,realPCR=0.9;
+    let lkpMarketCtx = null; // composite context passed to scanChain
     try{
-      const mD=await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
+      // Fetch Nifty quote + VIX + Nifty 5-min intraday + stock 5-min intraday in parallel
+      const [mD, niftyIntraday, stockIntraday] = await Promise.all([
+        fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX"),
+        fetchIntraday("NSE_INDEX|Nifty 50","5minute").catch(()=>[]),
+        fetchIntraday(inst.key,"5minute").catch(()=>[])
+      ]);
+
       const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
       const vQ2=mD["NSE_INDEX|India VIX"]||mD["NSE_INDEX:India VIX"];
       if(vQ2) vix=vQ2.last_price||15;
+
       if(nQ2){
-        // Use net_change — same reliable method as F&O tab
-        const netChg=nQ2.net_change!=null?nQ2.net_change
-                    :(nQ2.ohlc?.open?nQ2.last_price-nQ2.ohlc.open:0);
-        nChgPct=nQ2.last_price>0?(netChg/nQ2.last_price)*100:0;
-        nBull=nChgPct>-0.3; // bearish only if clearly negative
+        const nSpot = nQ2.last_price;
+        const netChg = nQ2.net_change!=null ? nQ2.net_change
+                     : (nQ2.ohlc?.open ? nSpot-nQ2.ohlc.open : 0);
+        nChgPct = nSpot>0 ? (netChg/nSpot)*100 : 0;
+
+        // ── Factor A: Nifty intraday momentum (last 30 min = 6 × 5-min candles) ──
+        let nMomentumScore = 0, nMomentumLabel = "NEUTRAL", nIntradayVWAP = 0;
+        if(niftyIntraday.length >= 3){
+          const recent = niftyIntraday.slice(-6);
+          const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
+          const upC = recent.filter(c=>+c[4]>+c[1]).length;
+          const dnC = recent.filter(c=>+c[4]<+c[1]).length;
+          if(movePct>0.4) nMomentumScore+=2; else if(movePct>0.15) nMomentumScore+=1;
+          else if(movePct<-0.4) nMomentumScore-=2; else if(movePct<-0.15) nMomentumScore-=1;
+          if(upC>=4) nMomentumScore+=1; else if(dnC>=4) nMomentumScore-=1;
+          nMomentumScore = Math.max(-3,Math.min(3,nMomentumScore));
+          nMomentumLabel = nMomentumScore>=2?"RISING STRONGLY":nMomentumScore>=1?"RISING"
+                         :nMomentumScore<=-2?"FALLING STRONGLY":nMomentumScore<=-1?"FALLING":"FLAT";
+          let tpvSum=0,volSum=0;
+          for(const c of niftyIntraday){ const tp=(+c[2]+ +c[3]+ +c[4])/3,v=+c[5]; tpvSum+=tp*v; volSum+=v; }
+          nIntradayVWAP = volSum>0 ? tpvSum/volSum : 0;
+        }
+
+        // ── Factor B: Stock intraday momentum ──
+        let sMomentumScore = 0, sMomentumLabel = "NEUTRAL";
+        if(stockIntraday.length >= 3){
+          const recent = stockIntraday.slice(-6);
+          const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
+          const upC = recent.filter(c=>+c[4]>+c[1]).length;
+          const dnC = recent.filter(c=>+c[4]<+c[1]).length;
+          if(movePct>0.4) sMomentumScore+=2; else if(movePct>0.15) sMomentumScore+=1;
+          else if(movePct<-0.4) sMomentumScore-=2; else if(movePct<-0.15) sMomentumScore-=1;
+          if(upC>=4) sMomentumScore+=1; else if(dnC>=4) sMomentumScore-=1;
+          sMomentumScore = Math.max(-3,Math.min(3,sMomentumScore));
+          sMomentumLabel = sMomentumScore>=2?"RISING STRONGLY":sMomentumScore>=1?"RISING"
+                          :sMomentumScore<=-2?"FALLING STRONGLY":sMomentumScore<=-1?"FALLING":"FLAT";
+        }
+
+        // ── Composite score: Nifty momentum(35%) + Stock momentum(30%) + VWAP(20%) + Day(15%) ──
+        const dayScore    = nChgPct>1?2:nChgPct>0.3?1:nChgPct<-1?-2:nChgPct<-0.3?-1:0;
+        const vwapScore   = nIntradayVWAP>0 ? (nSpot>=nIntradayVWAP?1:-1) : 0;
+        const compositeScore = (nMomentumScore*1.17) + (sMomentumScore*1.0) + (vwapScore*1.75) + (dayScore*0.5);
+        const isNeutral   = Math.abs(compositeScore) < 0.5;
+        nBull = compositeScore > 0;
+
+        lkpMarketCtx = {
+          spot: nSpot, vwap: nIntradayVWAP, momentumScore: nMomentumScore,
+          momentumLabel: nMomentumLabel, stockMomentumScore: sMomentumScore,
+          stockMomentumLabel: sMomentumLabel, dayChange: nChgPct, dayScore,
+          vwapScore, compositeScore: +compositeScore.toFixed(2),
+          bullish: nBull, neutral: isNeutral, vix
+        };
+
+        lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% · ${nMomentumLabel} · Stock mom: ${sMomentumLabel} · composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":nBull?"BULLISH":"BEARISH"}`);
       }
       vixSc=interpVIX(vix).sc;
-      // Fetch real Nifty PCR (async, best-effort)
+      // Fetch real Nifty PCR
       try{
         const nExp=await fetchExpiries("NSE_INDEX|Nifty 50");
         if(nExp.length){
@@ -6231,21 +6440,13 @@ async function lookupStock(){
           const ceOI_n=nCh.reduce((s,x)=>s+(x.call_options?.market_data?.oi||0),0);
           const peOI_n=nCh.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
           if(ceOI_n>0){ realPCR=+(peOI_n/ceOI_n).toFixed(2); pcrSc=interpPCR(realPCR).sc; }
-          lg(`Analyse: real Nifty PCR=${realPCR}`);
         }
       }catch(e2){ lg("PCR fetch: "+e2.message,"w"); }
-      lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% → ${nBull?"BULLISH":"BEARISH"} VIX=${vix.toFixed(1)} PCR=${realPCR}`);
     }catch(e){ lg("Market ctx: "+e.message,"w"); }
 
-    // Also factor in the stock's own trend — if stock is strongly down, treat as bearish for options
-    // This prevents showing BUY CALL on a stock that is -4% on the day
+    // optBullForStock: use composite direction (already accounts for stock momentum)
+    const optBullForStock = nBull;
     const stockChgPct = chgPct || 0;
-    // Combined signal: stock must agree with market for BUY CALL signal
-    // If stock is down >1% AND nifty is down → definitively bearish for this stock's options
-    const stockBull = stockChgPct > -0.5;
-    // For options direction: stock-level direction takes priority over index
-    const optBullForStock = stockBull && nBull;
-    lg(`Analyse options direction: stock ${stockChgPct.toFixed(2)}% + Nifty ${nChgPct.toFixed(2)}% → ${optBullForStock?"CALL":"PUT"} aligned`);
 
     // Step 4: Score — identical logic to triggerScan for consistency
     const patterns=tech.patterns||{}, sr=tech.sr||{};
@@ -6371,20 +6572,34 @@ async function lookupStock(){
         const pcr2    = ceOI>0 ? +(peOI/ceOI).toFixed(2) : 1;
         const maxPain2= calcMaxPain(chain);
         const oiWalls2= calcOIWalls(chain);
-        const allPicks= scanChain(chain,atm,ltp,sym,expiry,realLot,optBullForStock,vix,maxPain2,null);
+        const allPicks= scanChain(chain,atm,ltp,sym,expiry,realLot,optBullForStock,vix,maxPain2,null,lkpMarketCtx);
         const picks   = allPicks.filter(p=>p.confidence>=CFG.minOptConf);
         const mp2dist = maxPain2&&ltp ? ((maxPain2-ltp)/ltp*100).toFixed(1) : null;
 
-        // Direction banner
-        const _bull     = optBullForStock;
-        const _dirColor = _bull ? "#15803d" : "#dc2626";
-        const _dirBg    = _bull ? "#f0fdf4"  : "#fef2f2";
-        const _dirBord  = _bull ? "#bbf7d0"  : "#fecaca";
-        const _dirIcon  = _bull ? "📈" : "📉";
-        const _dirTxt   = _bull
-          ? `${_dirIcon} BULLISH — CALL options aligned with trend (Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct>=0?"+":""}${stockChgPct.toFixed(2)}%)`
-          : `${_dirIcon} BEARISH — PUT options aligned with trend · CALL signals penalised (Nifty ${nChgPct.toFixed(2)}%, ${sym} ${stockChgPct.toFixed(2)}%)`;
-        const _dirBanner = `<div style="background:${_dirBg};border:1px solid ${_dirBord};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:11px;font-weight:700;color:${_dirColor};grid-column:1/-1">${_dirTxt}</div>`;
+        // ── Direction banner: composite momentum-based (same as F&O tab) ──
+        const _cs       = lkpMarketCtx?.compositeScore ?? (optBullForStock ? 1 : -1);
+        const _isNeut   = lkpMarketCtx?.neutral === true;
+        const _mLabel   = lkpMarketCtx?.momentumLabel || "";
+        const _sLabel   = lkpMarketCtx?.stockMomentumLabel || "";
+        const _dirColor = _isNeut?"#d97706":_cs>0?"#15803d":"#dc2626";
+        const _dirBg    = _isNeut?"#fffbeb":_cs>0?"#f0fdf4":"#fef2f2";
+        const _dirBord  = _isNeut?"#fde68a":_cs>0?"#bbf7d0":"#fecaca";
+        const _icon     = _isNeut?"↔":_cs>0?"📈":"📉";
+        const _strong   = Math.abs(_cs)>2;
+
+        let _dirTxt;
+        if(_isNeut){
+          _dirTxt=`↔ Market NEUTRAL — showing CE & PE · Nifty: ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% · ${sym} momentum: ${_sLabel}`;
+        } else {
+          _dirTxt=`${_icon} Intraday ${_strong?"STRONGLY ":""}${_cs>0?"BULLISH":"BEARISH"} · Nifty: ${_mLabel} · ${sym}: ${_sLabel} → ${_cs>0?"CALL":"PUT"} aligned`;
+        }
+        // Warn when gap direction diverges from intraday momentum
+        const _gapBull = nChgPct>=0, _momBull = _cs>0;
+        let _gapNote="";
+        if(!_isNeut && _gapBull!==_momBull){
+          _gapNote=`<div style="margin-top:4px;font-size:9px;font-weight:600;opacity:.85">⚡ Gap ${_gapBull?"up":"down"} (${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}%) but intraday momentum reversed ${_momBull?"bullish":"bearish"} — signals reflect CURRENT direction</div>`;
+        }
+        const _dirBanner=`<div style="background:${_dirBg};border:1px solid ${_dirBord};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:11px;font-weight:700;color:${_dirColor};grid-column:1/-1">${_dirTxt}${_gapNote}</div>`;
 
         document.getElementById("lkp-fo-stats").innerHTML=
           _dirBanner+
@@ -6397,7 +6612,7 @@ async function lookupStock(){
         // Split aligned / counter
         const _aligned  = picks.filter(p=>p.trendAligned);
         const _counter  = picks.filter(p=>!p.trendAligned);
-        const _dirLabel = optBullForStock ? "📈 BULLISH" : "📉 BEARISH";
+        const _dirLabel = _isNeut ? "↔ NEUTRAL" : _cs>0 ? "📈 BULLISH" : "📉 BEARISH";
         document.getElementById("lkp-fo-badge").textContent=`${_dirLabel} · ${_aligned.length} with-trend · ${_counter.length} counter · Exp ${expiry}`;
 
         let _foHtml = "";

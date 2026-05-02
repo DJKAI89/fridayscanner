@@ -461,6 +461,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div class="disc">⚠ Breakout signals: EMA 50/200 cross, PDH/PDL, Supertrend(7,3), Volume, 52-Week, Gap, NR7, RS vs Nifty. Not SEBI-registered advice. Always DYODD.</div>
   </div>
 </div>
+
   </div>
 
   <!-- OPTIONS -->
@@ -473,7 +474,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div id="tod-options"></div>
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-options"></div>
-      
   <!-- Filter tabs -->
   <div id="opt-filter-bar" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
     <button id="oft-all"      onclick="filterOptions('all')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#16a34a;color:#fff">All</button>
@@ -2915,6 +2915,8 @@ function boot(){
   setTimeout(()=>loadConfCalibration(), 3500);
   // One-time migration: split legacy single-file log → daily partition (runs once per user)
   setTimeout(()=>ghMigrateIfNeeded().catch(e=>lg("Migration: "+e.message,"w")), 5000);
+  // Load breakout self-calibration from signal history
+  setTimeout(()=>loadBreakoutCalibration().catch(e=>lg("BoCalib: "+e.message,"w")), 7000);
   // Auto-check signal outcomes on boot (silent) — only during/just after market hours
   setTimeout(()=>{
     if(GH.token && GH.user && GH.repo && isOpen()){
@@ -3446,6 +3448,12 @@ async function fetchCandles(key,from,to,interval="day"){
 }
 // Intraday candles (today only): interval = "1minute" or "30minute"
 async function fetchIntraday(key,interval="30minute"){
+  // Upstox returns HTTP 400 when market is closed — intraday candles don't exist yet
+  // Skip the call entirely; callers handle empty array as "no intraday data"
+  if(!isOpen()){
+    lg(`fetchIntraday: market closed — skipping ${interval} call for ${key.slice(0,25)}`,"o");
+    return [];
+  }
   const d=await withRetry(()=>apiGet("/v2/historical-candle/intraday/"+encodeURIComponent(key)+"/"+interval),"intraday:"+interval+":"+key.slice(0,20));
   return d?.data?.candles||[];
 }
@@ -3807,6 +3815,242 @@ function detectRSIDivergence(candles){
 // PRO_ConfidenceCalculator.cs — EXACT PORT FROM C# SOURCE
 // Confidence = (Signal×35%) + (Market×25%) + (Volume×20%) + (PriceAction×20%)
 // ═══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 1 — Time-of-day phase helper
+// NSE opening 9:15-9:45 is noisy — high false breakout rate
+// Midday 9:45-14:00 is cleaner — institutional activity
+// Closing 14:00-15:30 — last-hour momentum real but volatile
+// ══════════════════════════════════════════════════════════════════════
+function getIntradayPhase(){
+  const now = new Date();
+  const ts  = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",hour12:false});
+  const [h,m] = ts.split(":").map(Number);
+  const mins  = (h%24)*60+m;
+  if(mins < 9*60+15)  return "pre";
+  if(mins < 9*60+45)  return "opening";  // 9:15–9:45 → noisy
+  if(mins < 14*60)    return "midday";   // 9:45–14:00 → cleanest
+  if(mins < 15*60+30) return "closing";  // 14:00–15:30 → last hour
+  return "closed";
+}
+
+// Returns confidence penalty for time of day (0 = no penalty, -ve = reduce confidence)
+function getTimeOfDayPenalty(){
+  const phase = getIntradayPhase();
+  if(phase==="opening") return -15; // first 30 min: high noise, many fake breakouts
+  if(phase==="closing") return  -5; // last 90 min: slightly elevated risk
+  if(phase==="pre" || phase==="closed") return -8; // outside hours: use prev-day signals cautiously
+  return 0; // midday: no penalty
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 2 — Wick rejection filter
+// A breakout candle that closes near its low = rejection (fake breakout)
+// Strong breakout candle closes in top 60% of its range
+// ══════════════════════════════════════════════════════════════════════
+function calcWickRejection(candles){
+  if(!candles||!candles.length) return null;
+  const c    = candles[0]; // today (newest-first)
+  const open = +c[1], high = +c[2], low = +c[3], close = +c[4];
+  const range= high-low;
+  if(range<=0) return null;
+  const closePos     = (close-low)/range;         // 0=closed at low, 1=closed at high
+  const upperWickPct = (high-Math.max(open,close))/range; // % of candle that is upper wick
+  const lowerWickPct = (Math.min(open,close)-low) /range; // % of candle that is lower wick
+  const bullStrong   = closePos >= 0.6 && upperWickPct < 0.25; // closed in top 40%, small upper wick
+  const bullWeak     = closePos >= 0.4 && closePos < 0.6;
+  const bearRejected = closePos < 0.35 && upperWickPct > 0.4;  // big upper wick = selling pressure
+  const bullRejected = closePos > 0.65 && lowerWickPct > 0.4;  // big lower wick after gap-down
+  return { closePos:+closePos.toFixed(2), upperWickPct:+upperWickPct.toFixed(2),
+           lowerWickPct:+lowerWickPct.toFixed(2), bullStrong, bullWeak,
+           bearRejected, bullRejected };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 3 — Expiry day detection + adjustments
+// ══════════════════════════════════════════════════════════════════════
+function isExpiryDay(expiryDateStr){
+  // Check if today is the expiry date (same calendar date in IST)
+  if(!expiryDateStr) return false;
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  return today === expiryDateStr;
+}
+
+function isWeeklyExpiryDay(){
+  // Nifty/BankNifty weekly expiry = Thursday (may shift on holidays but Thursday is the base)
+  const day = new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+  return day==="Thu";
+}
+
+// Expiry-day SL/Target modifier — call AFTER calcSmartOptionSLTarget to adjust
+function applyExpiryDayAdjustment(slTgt, delta, iv, entry, spot, strike){
+  if(!isWeeklyExpiryDay()) return slTgt;
+  const moneyness = spot>0 ? Math.abs(strike-spot)/spot : 0;
+  // On expiry day: gamma explosion near ATM → tighter SL, lower target
+  // Deep OTM on expiry → near-worthless, very tight SL
+  let { sl, tgt, rr, method, dte } = slTgt;
+  if(dte > 1) return slTgt; // not same-week expiry, skip
+
+  if(moneyness < 0.01){
+    // ATM on expiry: gamma very high, big swings — widen SL slightly, boost target
+    const atmGammaSL = +(entry * 0.75).toFixed(2);  // 25% SL (wider for gamma swings)
+    const atmGammaTgt= +(entry * 1.60).toFixed(2);  // 60% target
+    sl  = Math.max(sl, atmGammaSL);
+    tgt = Math.max(tgt, atmGammaTgt);
+  } else if(moneyness > 0.03){
+    // OTM on expiry: theta crushes value rapidly → tight SL
+    sl  = +(entry * 0.70).toFixed(2);  // max 30% loss
+    tgt = +(entry * 1.40).toFixed(2);  // 40% target
+  }
+  const risk = entry-sl;
+  rr = risk>0 ? +((tgt-entry)/risk).toFixed(2) : rr;
+  return { sl, tgt, rr, method: method+" | EXPIRY DAY", dte };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 6 — Self-calibrating breakout score
+// Reads Signal Log (breakout-tagged signals) to learn which signal
+// combinations have the best win rates, then adjusts boScore output
+// ══════════════════════════════════════════════════════════════════════
+let BREAKOUT_CALIBRATION = null; // { signalType → { winRate, adj, total } }
+
+async function loadBreakoutCalibration(){
+  if(!GH.token||!GH.user||!GH.repo) return;
+  try{
+    const signals = await ghReadMultipleDays(45);
+    const boSignals = signals.filter(s=>s.source==="BREAKOUT"&&(s.status==="TARGET_HIT"||s.status==="SL_HIT"));
+    if(boSignals.length < 8){ lg("Breakout calibration: need 8+ closed breakout signals","w"); return; }
+    const byType = {};
+    for(const s of boSignals){
+      const t = s.breakoutType||"UNKNOWN";
+      if(!byType[t]) byType[t]={hits:0,total:0};
+      byType[t].total++;
+      if(s.status==="TARGET_HIT") byType[t].hits++;
+    }
+    BREAKOUT_CALIBRATION={};
+    for(const[t,d] of Object.entries(byType)){
+      if(d.total<3) continue;
+      const wr=d.hits/d.total;
+      // Baseline expected win rate for breakout = 45%
+      const adj=Math.max(-3,Math.min(3,Math.round((wr-0.45)*10)));
+      BREAKOUT_CALIBRATION[t]={ winRate:+( wr*100).toFixed(0), adj, total:d.total };
+    }
+    lg("Breakout calibration: "+JSON.stringify(BREAKOUT_CALIBRATION),"o");
+  }catch(e){ lg("loadBreakoutCalibration: "+e.message,"w"); }
+}
+
+function applyBreakoutCalibration(score, primarySignalType){
+  if(!BREAKOUT_CALIBRATION||!primarySignalType) return score;
+  const cal=BREAKOUT_CALIBRATION[primarySignalType];
+  if(!cal||cal.total<3) return score;
+  return Math.min(10,Math.max(1,score+cal.adj));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 7 — IV Percentile (IV vs Historical Volatility)
+// Current IV compared to the stock's own recent HV range
+// IV/HV > 1.3 = overpriced (sell), < 0.7 = underpriced (buy)
+// ══════════════════════════════════════════════════════════════════════
+function calcIVPercentile(iv, closes){
+  if(!iv||iv<=0||!closes||closes.length<30) return null;
+  // Compute 20-day HV from daily returns
+  const returns=[];
+  for(let i=1;i<closes.length;i++) returns.push(Math.log(closes[i]/closes[i-1]));
+  const recent=returns.slice(-20);
+  const mean=recent.reduce((s,r)=>s+r,0)/recent.length;
+  const variance=recent.reduce((s,r)=>s+(r-mean)**2,0)/recent.length;
+  const hv20=+( Math.sqrt(variance*252)*100).toFixed(1);
+
+  // Rolling 60-day HV range for percentile
+  const hvs=[];
+  for(let i=20;i<=Math.min(60,returns.length);i++){
+    const r=returns.slice(-i,-i+20);
+    const m=r.reduce((s,x)=>s+x,0)/r.length;
+    const v=r.reduce((s,x)=>s+(x-m)**2,0)/r.length;
+    hvs.push(Math.sqrt(v*252)*100);
+  }
+  const hvMin=hvs.length?Math.min(...hvs):hv20*0.7;
+  const hvMax=hvs.length?Math.max(...hvs):hv20*1.3;
+
+  const ivHvRatio=hv20>0?+(iv/hv20).toFixed(2):1;
+  // Percentile of IV within HV range (0=cheapest ever, 100=most expensive ever)
+  const ivPct=hvMax>hvMin?+((iv-hvMin)/(hvMax-hvMin)*100).toFixed(0):50;
+  const cheap  = ivHvRatio < 0.75;  // IV significantly below HV → buy options
+  const rich   = ivHvRatio > 1.30;  // IV significantly above HV → sell/write options
+  const fair   = !cheap&&!rich;
+
+  return { iv:+iv.toFixed(1), hv20, ivHvRatio, ivPct:Math.min(100,Math.max(0,ivPct)),
+           cheap, rich, fair, hvMin:+hvMin.toFixed(1), hvMax:+hvMax.toFixed(1) };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 8 — Intraday VWAP for individual stocks
+// Fetches 5-min intraday candles and computes true session VWAP
+// Returns: { vwap, aboveVWAP, distPct, strong }
+// ══════════════════════════════════════════════════════════════════════
+// Shared intraday VWAP cache: sym → { vwap, ts }
+const _intradayVWAPCache={};
+async function fetchStockIntradayVWAP(key, sym){
+  // Skip when market closed — intraday endpoint returns HTTP 400
+  if(!isOpen()) return null;
+  const cached=_intradayVWAPCache[sym];
+  if(cached&&Date.now()-cached.ts<5*60*1000) return cached.vwap;
+  try{
+    const candles=await fetchIntraday(key,"5minute");
+    if(!candles.length) return null;
+    let tpvSum=0,volSum=0;
+    for(const c of candles){ const tp=(+c[2]+ +c[3]+ +c[4])/3,v=+c[5]; tpvSum+=tp*v; volSum+=v; }
+    const vwap=volSum>0?+(tpvSum/volSum).toFixed(2):null;
+    if(vwap) _intradayVWAPCache[sym]={vwap,ts:Date.now()};
+    return vwap;
+  }catch(e){ return null; }
+}
+
+function calcStockVWAPSignal(ltp, intradayVWAP){
+  if(!intradayVWAP||!ltp) return null;
+  const distPct=+((ltp-intradayVWAP)/intradayVWAP*100).toFixed(2);
+  const aboveVWAP=ltp>=intradayVWAP;
+  const strong=Math.abs(distPct)>0.5;     // >0.5% from VWAP = meaningful position
+  const nearVWAP=Math.abs(distPct)<=0.2;  // within 0.2% = at VWAP = watch for break
+  return { vwap:intradayVWAP, distPct, aboveVWAP, strong, nearVWAP };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// FEATURE 4 — Breakout push alerts
+// Fires browser notifications for high-score new breakouts
+// Deduped by signal ID so same stock doesn't alert on every scan
+// ══════════════════════════════════════════════════════════════════════
+const _alertedBreakouts = new Set(); // sym+signalType → prevents repeat alerts
+
+function fireBreakoutAlerts(results){
+  if(!_notifPermission) return;
+  const urgent = results.filter(r=>r.score>=7); // only high-conviction signals
+  for(const r of urgent){
+    // Primary signal type for dedup key
+    const sigType = r.ema?.goldenCross?"GOLDEN_CROSS"
+                  : r.ema?.deathCross?"DEATH_CROSS"
+                  : r.wk52?.breakHigh?"52WK_HIGH"
+                  : r.wk52?.breakLow?"52WK_LOW"
+                  : r.pdhl?.bullBreakout?"PDH_BREAK"
+                  : r.pdhl?.bearBreakout?"PDL_BREAK"
+                  : r.st?.crossed?(r.st.trend==="UP"?"ST_UP":"ST_DOWN")
+                  : "GENERIC";
+    const alertKey = r.s+"_"+sigType;
+    if(_alertedBreakouts.has(alertKey)) continue;
+    _alertedBreakouts.add(alertKey);
+    const emoji = r.isBull?"📈":"📉";
+    const sigLabel = sigType.replace(/_/g," ");
+    sendNotification(
+      `${emoji} Breakout: ${r.s} ${r.dir} (${r.score}/10)`,
+      `${sigLabel} · LTP ₹${fmt(r.ltp)} · Target ₹${fmt(r.trade.target)} · SL ₹${fmt(r.trade.sl)}`,
+      "bo_"+alertKey
+    );
+    lg(`🔔 Breakout alert fired: ${r.s} ${sigType} score=${r.score}`,"o");
+  }
+}
+
+// Clear alert dedup on new scan (so a stock that re-breaks after SL can alert again)
+function clearBreakoutAlerts(){ _alertedBreakouts.clear(); }
+
 function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patterns, rec, numIndsOverride) {
   // numIndsOverride: if provided, use directly (from countIndicators); else count from inds array
   // rec = "STRONG BUY" | "BUY" | "MODERATE" | "WATCH" | "AVOID"
@@ -3842,7 +4086,8 @@ function calcConfidence(inds, vixSc, pcrSc, niftyBull, secSc, vol, avgVol, patte
   }
   paScore = Math.min(100, Math.max(0, paScore));
 
-  return +(sigScore * 0.35 + mktScore * 0.25 + volScore * 0.20 + paScore * 0.20).toFixed(1);
+  const timeAdj = getTimeOfDayPenalty();
+  return +(Math.min(99,Math.max(1, sigScore * 0.35 + mktScore * 0.25 + volScore * 0.20 + paScore * 0.20 + timeAdj))).toFixed(1);
 }
 
 // ── CountConfirmingIndicators ──
@@ -5016,6 +5261,21 @@ async function triggerScan(){
     }
     lg(`✅ Candle data: ${candleOK}/${top20.length} stocks (staggered batches)`, "o");
 
+    // ── Gap 8: Fetch intraday VWAP for top 20 stocks (market hours only) ──
+    // Daily VWAP from candles is already in tech[s].vwap — this adds live SESSION VWAP
+    if(isOpen()){
+      updateScanProgress("Step 4b/5: Fetching intraday VWAP...");
+      const vwapBatch=top20.slice(0,15); // top 15 by volume
+      for(let vb=0;vb<vwapBatch.length;vb+=3){
+        const slice=vwapBatch.slice(vb,vb+3);
+        await Promise.allSettled(slice.map((inst,idx)=>
+          sleep(idx*180).then(()=>fetchStockIntradayVWAP(inst.key,inst.s))
+        ));
+        if(vb+3<vwapBatch.length) await sleep(280);
+      }
+      lg(`✅ Intraday VWAP fetched for up to 15 stocks`,"o");
+    }
+
     // ── STEP 5: Analysis ──
     updateScanProgress("Step 5/5: Calculating scores...");
 
@@ -5056,8 +5316,11 @@ async function triggerScan(){
         ? Math.round(Math.min(100, Math.max(0, 50 + secIdxChg * 8))) // map -6%→2 to +6%→98
         : secMap[sec] ? Math.round(secMap[sec].g/secMap[sec].c*100) : 50;
 
-      // VWAP signal: price above VWAP = institutional buying bias
-      const aboveVWAP = vwap > 0 ? ltp > vwap : null;
+      // ── Gap 8: Use intraday session VWAP if available (fetched above), else fall back to daily ──
+      const cachedIntradayVWAP = _intradayVWAPCache[inst.s]?.vwap||0;
+      const effectiveVWAP      = cachedIntradayVWAP > 0 ? cachedIntradayVWAP : (vwap||0);
+      const aboveVWAP          = effectiveVWAP > 0 ? ltp > effectiveVWAP : null;
+      const vwapType           = cachedIntradayVWAP > 0 ? "intraday" : "daily";
 
       // S/R proximity: price within 1% of key resistance = caution
       const nearResist = sr.pivotR1 ? Math.abs((ltp-sr.pivotR1)/ltp*100) < 1 : false;
@@ -5123,7 +5386,7 @@ async function triggerScan(){
        stocks.push({...inst, ltp, prev:q.ohlc?.close||ltp, high, low, vol, chgPct,
         rsi:t.rsi, macdBull:t.macdBull, a50:t.a50, a200:t.a200,
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
-        target, sl, slTargets, secSc, passes, vwap, sr, delivPct, aboveVWAP, reversal, entryTrigger,
+        target, sl, slTargets, secSc, passes, vwap: effectiveVWAP, vwapType, sr, delivPct, aboveVWAP, reversal, entryTrigger,
         macd:t.macd, bb:t.bb, adx:t.adx, vwapBands:t.vwapBands, rsiDiv:t.rsiDiv,
         avgVol20: t.avgVol20||0});
       
@@ -5307,11 +5570,8 @@ async function loadOptions(force=true){
         optVix = vQ2?.last_price || 15;
 
         // ── Factor A: Intraday momentum (last 30 min = last 6 × 5-min candles) ──
-        // Direction = is price higher now than 30 min ago?
-        // Also compute slope: rising, falling, or flat
-        let momentumScore = 0; // -3 to +3
-        let momentumLabel = "NEUTRAL";
-        let intradayVWAP  = 0;
+        // When market is closed, intradayCandles will be [] — skip momentum, use day change only
+        let momentumScore = 0, momentumLabel = "N/A (market closed)", intradayVWAP = 0;
         if(intradayCandles.length >= 3){
           const recent = intradayCandles.slice(-6); // last 30 min
           const oldest = recent[0], latest = recent[recent.length-1];
@@ -5371,9 +5631,10 @@ async function loadOptions(force=true){
         const compositeScore = (momentumScore * 1.33) + (dayScore * 0.5) + (vwapScore * 1.75);
 
         // Threshold: positive = bullish, negative = bearish
-        // Small dead-band ±0.5 = treat as neutral (suggest BOTH CE & PE near-ATM)
+        // Wider dead-band when market closed (no intraday momentum available)
+        const deadBand = intradayCandles.length >= 3 ? 0.5 : 1.0;
         optNiftyBullish = compositeScore > 0;
-        const isNeutral = Math.abs(compositeScore) < 0.5;
+        const isNeutral = Math.abs(compositeScore) < deadBand;
 
         // Store full context for use in scanChain confidence scoring
         marketCtx = {
@@ -5608,7 +5869,25 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // ── Signal bonus (up to 12 pts) ──
   const sigBonus = Math.min(12, signals.filter(s=>s.s>=2).length * 6);
 
-  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus + momentumBonus;
+  // ── Expiry day bonus: ATM OI buildup on expiry = very high signal strength ──
+  let expiryBonus = 0;
+  if(isWeeklyExpiryDay()){
+    const moneyness = spot>0 ? Math.abs(strike-spot)/spot : 0;
+    if(moneyness < 0.01 && oiChg >= 10) expiryBonus = 10; // ATM + strong OI build on expiry
+    else if(moneyness > 0.04)            expiryBonus = -8; // Far OTM on expiry = dangerous
+  }
+
+  // ── IV Percentile vs VIX: cheap IV → buy bonus, rich IV → buy penalty ──
+  // Options bought when IV is historically cheap have better expected value
+  const _ivRatioConf = vix>0&&iv>0 ? iv/vix : 1;
+  const ivPercentileAdj = _ivRatioConf < 0.80 ?  6   // IV cheap → bonus for buyers
+                        : _ivRatioConf > 1.40 ? -8   // IV rich → penalty for buyers (sell instead)
+                        : 0;
+  // Only apply to BUY side — sellers benefit from rich IV so no penalty for them
+  const isBuyAction = (isCE && (marketCtx?.compositeScore??1) > 0) || (!isCE && (marketCtx?.compositeScore??-1) < 0);
+  const ivAdjFinal  = isBuyAction ? ivPercentileAdj : -ivPercentileAdj;
+
+  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus + momentumBonus + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
 
   // ── Trend strength boost ──
   // Strongly aligned (market clearly trending in option direction)
@@ -5683,7 +5962,8 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       // Entry / SL / Target
       const entry = ltp;
       const _opt  = calcSmartOptionSLTarget(entry, spot, sp, iv, delta, theta, expiry, vix, optType);
-      const sl    = _opt.sl, tgt = _opt.tgt, rr = _opt.rr, slTgtMethod = _opt.method;
+      const _optAdj = applyExpiryDayAdjustment(_opt, delta, iv, entry, spot, sp);
+      const sl    = _optAdj.sl, tgt = _optAdj.tgt, rr = _optAdj.rr, slTgtMethod = _optAdj.method;
 
       const lot = lotSize || 1;
       const amtRequired = +(ltp * lot).toFixed(0);
@@ -5732,6 +6012,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         compositeScore,
         slTgtMethod,
         stockPCR: stockPCR||null,
+        vix: vix||15,
       });
     }
   }
@@ -5875,6 +6156,8 @@ function renderStockCards(picks,totalScanned,containerId){
         ${p.rsiDiv?.bullish?`<span style="background:#fff7ed;color:#c2410c;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">RSI Div↑ +${Math.min(12,(p.rsiDiv.strength||0))}pts</span>`:""}
         ${p.rsiDiv?.hidden_bullish?`<span style="background:#fef3c7;color:#92400e;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">Hidden Div↑</span>`:""}
         ${p.vwapBands?.nearLowerBand?`<span style="background:#f0f9ff;color:#0369a1;font-size:8px;font-weight:600;padding:2px 6px;border-radius:8px">VWAP Value</span>`:""}
+        ${p.aboveVWAP===true&&p.vwap>0?`<span style="background:#dcfce7;color:#15803d;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">▲ ${p.vwapType==="intraday"?"Session":"Daily"} VWAP ₹${fmt(p.vwap,0)}</span>`:""}
+        ${p.aboveVWAP===false&&p.vwap>0?`<span style="background:#fef2f2;color:#dc2626;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">▼ ${p.vwapType==="intraday"?"Session":"Daily"} VWAP ₹${fmt(p.vwap,0)}</span>`:""}
         ${p.mtfBoost?`<span style="background:#ecfdf5;color:#047857;font-size:8px;font-weight:700;padding:2px 6px;border-radius:8px">MTF+${p.mtfBoost} ${p.mtfNote||""}</span>`:""}
       </div>
 
@@ -6097,6 +6380,18 @@ function optCard(p,i){
   const dc=Math.abs(p.delta)>=0.5?"up":Math.abs(p.delta)>=0.3?"am":"dn";
   const ivc=p.iv>=35?"dn":p.iv>=20?"am":"up";
   const confC=p.confidence>=CFG.minOptConf?"up":p.confidence>=(CFG.minOptConf-15)?"am":"dn";
+
+  // ── Gap 7: IV Percentile — compute from spot & ATR proxy inline ──
+  // We don't have historical closes here, so use IV vs VIX as a quick proxy
+  // IV < VIX*0.8 = cheap; IV > VIX*1.4 = rich
+  const _vix = p.vix || 15;
+  const _ivRatio = p.iv>0&&_vix>0 ? +(p.iv/_vix).toFixed(2) : null;
+  const _ivCheap  = _ivRatio!=null && _ivRatio < 0.80;
+  const _ivRich   = _ivRatio!=null && _ivRatio > 1.40;
+  const _ivLabel  = _ivCheap ? `💡 IV CHEAP (${_ivRatio}× VIX)` : _ivRich ? `🔥 IV RICH (${_ivRatio}× VIX)` : null;
+  const _ivColor  = _ivCheap ? "#065f46" : _ivRich ? "#991b1b" : "#374151";
+  const _ivBg     = _ivCheap ? "#ecfdf5" : _ivRich ? "#fef2f2" : "transparent";
+  const _ivBorder = _ivCheap ? "#a7f3d0" : _ivRich ? "#fecaca" : "transparent";
   return`<div class="card ${rc}" style="animation-delay:${i*.03}s">
     <span class="c-rec ${rc}">${p.action}</span>
     ${p.atm?`<span style="position:absolute;top:11px;right:72px;background:#eff6ff;color:#1d4ed8;font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px">ATM</span>`:""}
@@ -6116,8 +6411,9 @@ function optCard(p,i){
       <div class="ts-box"><div class="ts-l">STOP LOSS</div><div class="ts-v dn">₹${fmt(p.sl)}</div><div class="ts-s dn">−${p.entry>0?((p.entry-p.sl)/p.entry*100).toFixed(2):0}%</div></div>
       <div class="ts-box"><div class="ts-l">TARGET</div><div class="ts-v up">₹${fmt(p.tgt)}</div><div class="ts-s up">+${p.entry>0?((p.tgt-p.entry)/p.entry*100).toFixed(2):0}% · R:R ${p.rr}</div></div>
     </div>
-    ${p.slTgtMethod?`<div style="font-size:8px;color:#94a3b8;margin-top:3px;padding:0 2px">📐 ${p.slTgtMethod}</div>`:""}
-    <!-- Confidence bar -->
+    ${p.slTgtMethod?`<div style="font-size:8px;color:#94a3b8;margin-top:3px;padding:0 2px">📐 ${p.slTgtMethod}${isWeeklyExpiryDay()?" · ⚡ EXPIRY DAY":""}</div>`:""}
+    ${isWeeklyExpiryDay()?`<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:3px 8px;margin-top:4px;margin-bottom:6px;font-size:9px;font-weight:700;color:#92400e">⚡ EXPIRY DAY — Gamma elevated · ATM moves 3-5× normal · Tight SL applied</div>`:""}
+    ${getIntradayPhase()==="opening"?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:3px 8px;margin-bottom:6px;font-size:9px;font-weight:700;color:#9a3412">⏰ OPENING HOUR (9:15–9:45) — High noise period, -15 confidence applied</div>`:""}
     <div class="bar-row" style="margin-bottom:8px">
       <span class="bar-lbl">Confidence</span>
       <div class="bar-track"><div class="bar-fill" style="width:${p.confidence}%;background:${p.confidence>=CFG.minOptConf?"#16a34a":p.confidence>=(CFG.minOptConf-15)?"#d97706":"#dc2626"}"></div></div>
@@ -6126,7 +6422,11 @@ function optCard(p,i){
     <!-- Greeks -->
     <div class="c-metrics cm4" style="gap:1px;margin-bottom:7px">
       <div class="cbox ${rc}"><div class="cb-l">DELTA Δ</div><div class="cb-v ${dc}" style="font-size:13px">${p.delta!=null?p.delta.toFixed(2):"—"}</div></div>
-      <div class="cbox ${rc}"><div class="cb-l">IV %</div><div class="cb-v ${ivc}" style="font-size:13px">${p.iv?.toFixed(1)??"—"}</div></div>
+      <div class="cbox ${rc}" style="${_ivLabel?`background:${_ivBg};border:1px solid ${_ivBorder}`:""}">
+        <div class="cb-l">IV %</div>
+        <div class="cb-v ${ivc}" style="font-size:13px">${p.iv?.toFixed(1)??"—"}</div>
+        ${_ivLabel?`<div class="cb-s" style="color:${_ivColor};font-weight:700;font-size:7px">${_ivLabel}</div>`:""}
+      </div>
       <div class="cbox ${rc}"><div class="cb-l">THETA Θ</div><div class="cb-v dn" style="font-size:13px">${p.theta!=null?p.theta.toFixed(2):"—"}</div></div>
       <div class="cbox ${rc}"><div class="cb-l">OI CHG</div><div class="cb-v ${p.oiChg>=0?"up":"dn"}" style="font-size:13px">${p.oiChg?.toFixed(0)??"—"}%</div></div>
     </div>
@@ -6433,8 +6733,9 @@ async function lookupStock(){
                      : (nQ2.ohlc?.open ? nSpot-nQ2.ohlc.open : 0);
         nChgPct = nSpot>0 ? (netChg/nSpot)*100 : 0;
 
-        // ── Factor A: Nifty intraday momentum (last 30 min = 6 × 5-min candles) ──
-        let nMomentumScore = 0, nMomentumLabel = "NEUTRAL", nIntradayVWAP = 0;
+        // ── Factor A: Nifty intraday momentum (last 30 min) ──
+        // intradayCandles is [] when market closed — fallback to day-change only
+        let nMomentumScore = 0, nMomentumLabel = isOpen()?"NEUTRAL":"N/A (market closed)", nIntradayVWAP = 0;
         if(niftyIntraday.length >= 3){
           const recent = niftyIntraday.slice(-6);
           const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
@@ -6452,7 +6753,8 @@ async function lookupStock(){
         }
 
         // ── Factor B: Stock intraday momentum ──
-        let sMomentumScore = 0, sMomentumLabel = "NEUTRAL";
+        // stockIntraday is [] when market closed
+        let sMomentumScore = 0, sMomentumLabel = isOpen()?"NEUTRAL":"N/A (market closed)";
         if(stockIntraday.length >= 3){
           const recent = stockIntraday.slice(-6);
           const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
@@ -6559,7 +6861,10 @@ async function lookupStock(){
     const stockObj={...inst,ltp,prev:q.ohlc?.close||ltp,high,low,vol,chgPct,
       rsi:tech.rsi,macdBull:tech.macdBull,a50:tech.a50,a200:tech.a200,
       atr:tech.atr,patterns,numInds,nearSupp,conf,risk,pot,rec,
-      target,sl,secSc:secSc_lkp,passes:true,vwap:tech.vwap||0,sr,delivPct,aboveVWAP:tech.vwap>0?ltp>tech.vwap:null,reversal,entryTrigger,
+      target,sl,secSc:secSc_lkp,passes:true,
+      vwap: (_intradayVWAPCache[sym]?.vwap||tech.vwap||0),
+      vwapType: _intradayVWAPCache[sym]?.vwap>0?"intraday":"daily",
+      sr,delivPct,aboveVWAP:(_intradayVWAPCache[sym]?.vwap||tech.vwap)>0?ltp>(_intradayVWAPCache[sym]?.vwap||tech.vwap):null,reversal,entryTrigger,
       macd:tech.macd,bb:tech.bb,adx:tech.adx,vwapBands:tech.vwapBands,rsiDiv:tech.rsiDiv,
       avgVol20:tech.avgVol20||0};
 
@@ -7049,8 +7354,8 @@ function calcRelativeStrength(closes,niftyCloses){
     outperforming:rs>1, underperforming:rs<-1, strongly:Math.abs(rs)>3 };
 }
 
-// ── Composite Breakout Score (0-10) — all 8 signals ──
-function boScore(ema,pdhl,st,vol,wk52,mom,nr7,bb,weeklyMTF,gap,adx,rs){
+// ── Composite Breakout Score (0-10) — all 8 signals + time + wick + sector ──
+function boScore(ema,pdhl,st,vol,wk52,mom,nr7,bb,weeklyMTF,gap,adx,rs,wick,sectorScore,phase){
   let bullPts=0, bearPts=0;
 
   if(ema){
@@ -7104,10 +7409,28 @@ function boScore(ema,pdhl,st,vol,wk52,mom,nr7,bb,weeklyMTF,gap,adx,rs){
     if(rs.underperforming&&rs.strongly) bearPts+=1;
   }
 
+  // ── Feature 2: Wick rejection penalty ──
+  // A breakout with a rejecting wick is likely a fake — penalise heavily
+  if(wick){
+    if(wick.bearRejected) bullPts=Math.max(0,bullPts-3);  // upper wick rejection on bull move
+    if(wick.bullRejected) bearPts=Math.max(0,bearPts-3);  // lower wick rejection on bear move
+    if(wick.bullStrong)   { bullPts+=1; bearPts+=1; }     // strong close = conviction
+  }
+
+  // ── Feature 5: Sector rotation context ──
+  // sectorScore: -1 (weak sector), 0 (neutral), +1 (strong sector)
+  if(sectorScore > 0)       { bullPts+=1; }
+  else if(sectorScore < 0)  { bearPts+=1; }
+
   const dominant=Math.max(bullPts,bearPts);
   const conflict =Math.min(bullPts,bearPts);
-  // Conflict penalty + normalise to 0-10 (raw max ≈28)
-  return Math.min(10,Math.max(1,Math.round((dominant-conflict*0.5)/2.8)));
+  let raw=(dominant-conflict*0.5)/2.8;
+
+  // ── Feature 1: Time-of-day penalty ──
+  if(phase==="opening") raw-=1.5;      // first 30 min: reduce score 1.5 pts
+  else if(phase==="closing") raw-=0.5; // last 90 min: reduce 0.5 pts
+
+  return Math.min(10,Math.max(1,Math.round(raw)));
 }
 
 // ── Determine primary signal direction — weighted voting ──
@@ -7255,8 +7578,34 @@ function renderBoCards(results,filter){
       else if(r.mom.bearConf) pills.push(`<span style="font-size:8px;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">❌ RSI+MACD BEAR</span>`);
       else if(r.mom.contra) pills.push(`<span style="font-size:8px;font-weight:700;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:10px;padding:2px 7px">⚡ MOMENTUM CONTRA</span>`);
     }
+    if(r.stockVWAP){
+      if(r.stockVWAP.aboveVWAP&&r.stockVWAP.strong)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:2px 7px">📊 ABOVE VWAP ₹${fmt(r.stockVWAP.vwap,0)} (+${r.stockVWAP.distPct}%)</span>`);
+      else if(!r.stockVWAP.aboveVWAP&&r.stockVWAP.strong)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📊 BELOW VWAP ₹${fmt(r.stockVWAP.vwap,0)} (${r.stockVWAP.distPct}%)</span>`);
+      else if(r.stockVWAP.nearVWAP)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#f8fafc;color:#64748b;border:1px solid #e2e8f0;border-radius:10px;padding:2px 7px">📊 AT VWAP ₹${fmt(r.stockVWAP.vwap,0)}</span>`);
+    }
+    if(r.wick){
+      if(r.wick.bearRejected)
+        pills.push(`<span style="font-size:8px;font-weight:800;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">🕯 WICK REJECTION ↑</span>`);
+      else if(r.wick.bullStrong)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;padding:2px 7px">🕯 STRONG CLOSE ${Math.round(r.wick.closePos*100)}%</span>`);
+    }
+    if(r.ivPct){
+      if(r.ivPct.cheap)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:2px 7px">💡 IV CHEAP ${r.ivPct.ivHvRatio}× HV</span>`);
+      else if(r.ivPct.rich)
+        pills.push(`<span style="font-size:8px;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">💡 IV RICH ${r.ivPct.ivHvRatio}× HV</span>`);
+    }
+    if(r.sectorScore>0)
+      pills.push(`<span style="font-size:8px;font-weight:700;background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;border-radius:10px;padding:2px 7px">🏭 ${r.sec} STRONG</span>`);
+    else if(r.sectorScore<0)
+      pills.push(`<span style="font-size:8px;font-weight:700;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">🏭 ${r.sec} WEAK</span>`);
     if(r.weeklyMTF&&r.weeklyMTF.confirms)
       pills.push(`<span style="font-size:8px;font-weight:700;background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;border-radius:10px;padding:2px 7px">📅 WEEKLY CONFIRMS</span>`);
+    if(r.phase==="opening")
+      pills.push(`<span style="font-size:8px;font-weight:700;background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⏰ OPENING HOUR -15 conf</span>`);
     if(r.adx&&r.adx.strong)
       pills.push(`<span style="font-size:8px;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:2px 7px">💪 ADX ${r.adx.adx} STRONG</span>`);
     else if(r.adx&&r.adx.choppy)
@@ -7308,6 +7657,17 @@ function renderBoCards(results,filter){
       if(r.mom.bullConf||r.mom.bearConf) whyParts.push(`RSI ${r.mom.rsi} + MACD ${r.mom.macdBull?"bullish":"bearish"} — momentum confirms direction`);
       else if(r.mom.contra) whyParts.push(`⚠ RSI ${r.mom.rsi} diverges from price direction — momentum not confirmed`);
     }
+    if(r.wick){
+      if(r.wick.bearRejected) whyParts.push(`⚠ Upper wick rejection (${Math.round(r.wick.upperWickPct*100)}% wick) — buying pressure failed, close pos ${Math.round(r.wick.closePos*100)}%`);
+      else if(r.wick.bullStrong) whyParts.push(`Candle closed in top ${Math.round((1-r.wick.closePos)*100<40?100-Math.round((1-r.wick.closePos)*100):Math.round(r.wick.closePos*100))}% of range — strong conviction close`);
+    }
+    if(r.stockVWAP&&r.stockVWAP.strong)
+      whyParts.push(`${r.stockVWAP.aboveVWAP?"Above":"Below"} intraday VWAP ₹${fmt(r.stockVWAP.vwap,0)} by ${Math.abs(r.stockVWAP.distPct)}% — ${r.stockVWAP.aboveVWAP?"institutional support":"institutional resistance"}`);
+    if(r.ivPct){
+      if(r.ivPct.cheap) whyParts.push(`Options appear cheap: IV(${r.ivPct.iv}%) is ${r.ivPct.ivHvRatio}× HV(${r.ivPct.hv20}%) — good time to buy options on this move`);
+      else if(r.ivPct.rich) whyParts.push(`Options appear expensive: IV(${r.ivPct.iv}%) is ${r.ivPct.ivHvRatio}× HV(${r.ivPct.hv20}%) — prefer spreads or be cautious buying premium`);
+    }
+    if(r.sectorScore!==0) whyParts.push(`${r.sec} sector ${r.sectorScore>0?"outperforming":"underperforming"} market — ${r.sectorScore>0?"tailwind":"headwind"} for this signal`);
     if(r.weeklyMTF){
       if(r.weeklyMTF.confirms) whyParts.push(`Weekly candle ${r.weeklyMTF.wBullish?"bullish":"bearish"} + ${r.weeklyMTF.wBreakHigh?"weekly high break":"weekly low break"} — higher timeframe aligned`);
       else if(r.weeklyMTF.aligned) whyParts.push(`Weekly trend ${r.weeklyMTF.wBullish?"bullish":r.weeklyMTF.wBearish?"bearish":"neutral"} — HTF support`);
@@ -7378,8 +7738,7 @@ function renderBoCards(results,filter){
 async function loadBreakout(force=false){
   if(window._breakoutLoading&&!force) return;
   window._breakoutLoading=true;
-
-  const errEl=document.getElementById("err-breakout");
+  if(force) clearBreakoutAlerts(); // allow re-alerting on fresh scan
   const loadEl=document.getElementById("loading-breakout");
   const dashEl=document.getElementById("dash-breakout");
   if(errEl) errEl.style.display="none";
@@ -7473,9 +7832,10 @@ async function loadBreakout(force=false){
     }
     lg(`Breakout candles: ${candleDone}/${byVol.length} stocks`,"o");
 
-    // ── Step 3: Compute all 8 signals ──
+    // ── Step 3: Compute all signals ──
     progress("Step 3/3: Computing signals...");
     const results=[];
+    const phase=getIntradayPhase(); // Feature 1: time-of-day
 
     for(const item of byVol){
       const q=item._q;
@@ -7487,7 +7847,6 @@ async function loadBreakout(force=false){
       const ema   = t.ema;
       const st    = t.st;
       const pdhl  = detectPDHLBreakout(ltp,t.candles);
-      // New signals
       const vol      = calcVolumeSurge(t.candles);
       const wk52     = calc52WkBreakout(ltp,t.candles);
       const nr7      = calcNR7(t.candles);
@@ -7495,39 +7854,76 @@ async function loadBreakout(force=false){
       const gap      = detectGap(t.candles);
       const adx      = calcADXStrength(t.candles);
       const rs       = calcRelativeStrength(t.closes,niftyCloses);
+      // Feature 2: wick rejection
+      const wick     = calcWickRejection(t.candles);
+      // Feature 5: sector from stock object + existing _sectorIdxMap
+      const sec      = item.sec||"NSE";
+      const secIdxChg= _sectorIdxMap[sec];
+      const sectorScore= secIdxChg!=null?(secIdxChg>1?1:secIdxChg<-1?-1:0):0;
 
-      // Direction first (needed for momentum confluence)
       const dir   = boDirection(ema,pdhl,st);
       const isBull= dir==="BULL";
-
       const mom      = calcMomentumConfluence(t.closes,isBull);
       const weeklyMTF= calcWeeklyMTF(t.weekly,ltp,isBull);
 
-      const score=boScore(ema,pdhl,st,vol,wk52,mom,nr7,bb,weeklyMTF,gap,adx,rs);
-      if(score<2) continue; // skip very weak signals
+      // Feature 1+2+5: pass phase, wick, sectorScore to boScore
+      let score=boScore(ema,pdhl,st,vol,wk52,mom,nr7,bb,weeklyMTF,gap,adx,rs,wick,sectorScore,phase);
+
+      // Feature 6: self-calibrating adjustment
+      const primaryType=ema?.goldenCross?"GOLDEN_CROSS":ema?.deathCross?"DEATH_CROSS"
+                       :wk52?.breakHigh?"52WK_HIGH":wk52?.breakLow?"52WK_LOW"
+                       :pdhl?.bullBreakout?"PDH_BREAK":pdhl?.bearBreakout?"PDL_BREAK"
+                       :st?.crossed?(st.trend==="UP"?"ST_CROSS_UP":"ST_CROSS_DOWN"):"GENERIC";
+      score=applyBreakoutCalibration(score,primaryType);
+      if(score<2) continue;
 
       const ema200=ema?.ema200||0;
       const trade =boSLTarget(ltp,t.atr,isBull,pdhl?.pdh||0,pdhl?.pdl||0,ema200);
+      // Feature 7: IV Percentile (from daily returns as HV proxy)
+      const ivPct = calcIVPercentile(t.atr>0?(t.atr/ltp*100*Math.sqrt(252)):null, t.closes);
 
       results.push({
         ...item, ltp, chgPct, ema, pdhl, st, score, dir,
         vol, wk52, mom, nr7, bb, gap, adx, rs, weeklyMTF,
-        trade, atr:t.atr, isBull
+        wick, sectorScore, sec, ivPct,
+        trade, atr:t.atr, isBull, primaryType, phase,
+        stockVWAP:null // populated below
       });
     }
 
-    // Sort: 52wk breaks + EMA crosses first (highest conviction), then score
+    // Feature 8: batch-fetch intraday VWAP for top 20 by score
+    const topForVWAP=[...results].sort((a,b)=>b.score-a.score).slice(0,20);
+    progress("Step 3/3: Fetching intraday VWAP for top stocks...");
+    for(let i=0;i<topForVWAP.length;i+=3){
+      const batch=topForVWAP.slice(i,i+3);
+      await Promise.allSettled(batch.map((r,idx)=>
+        sleep(idx*200).then(()=>fetchStockIntradayVWAP(r.key,r.s).then(vwap=>{
+          if(vwap){
+            const sv=calcStockVWAPSignal(r.ltp,vwap);
+            r.stockVWAP=sv;
+            if(sv){
+              const vwapBoost=(r.isBull&&sv.aboveVWAP&&sv.strong)?1
+                            :(!r.isBull&&!sv.aboveVWAP&&sv.strong)?1
+                            :(r.isBull&&!sv.aboveVWAP&&sv.strong)?-1:0;
+              r.score=Math.min(10,Math.max(1,r.score+vwapBoost));
+            }
+          }
+        })).catch(()=>{})
+      ));
+      if(i+3<topForVWAP.length) await sleep(300);
+    }
+
+    // Sort: 52wk + EMA cross first, then score
     results.sort((a,b)=>{
-      const aPriority=(a.wk52?.breakHigh||a.wk52?.breakLow?2:0)
-                     +(a.ema?.goldenCross||a.ema?.deathCross?2:0)
-                     +(a.st?.crossed?1:0);
-      const bPriority=(b.wk52?.breakHigh||b.wk52?.breakLow?2:0)
-                     +(b.ema?.goldenCross||b.ema?.deathCross?2:0)
-                     +(b.st?.crossed?1:0);
-      return bPriority-aPriority||b.score-a.score;
+      const ap=(a.wk52?.breakHigh||a.wk52?.breakLow?2:0)+(a.ema?.goldenCross||a.ema?.deathCross?2:0)+(a.st?.crossed?1:0);
+      const bp=(b.wk52?.breakHigh||b.wk52?.breakLow?2:0)+(b.ema?.goldenCross||b.ema?.deathCross?2:0)+(b.st?.crossed?1:0);
+      return bp-ap||b.score-a.score;
     });
 
     _boResults=results;
+
+    // Feature 4: push alerts for high-conviction breakouts (score≥7)
+    fireBreakoutAlerts(results);
 
     // ── Stats dashboard ──
     const goldCross =results.filter(r=>r.ema?.goldenCross).length;
@@ -7559,6 +7955,39 @@ async function loadBreakout(force=false){
 
     filterBreakout(_boFilter);
     lg(`✅ Breakout scan: ${results.length} signals (${goldCross}GC·${deathCross}DC·${pdhBreak}PDH·${pdlBreak}PDL·${stCrossed}ST)`,"o");
+
+    // ── Gap 6 fix: Log high-score breakout signals with source+breakoutType tags ──
+    // These tags enable self-calibration via loadBreakoutCalibration()
+    if(GH.token&&GH.user&&GH.repo){
+      const istDate=new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+      const istTime=new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+      const boSigs=results.filter(r=>r.score>=6).map(r=>({
+        id:          `${istDate}-${istTime.replace(/:/g,'').slice(0,4)}-${r.s}-BO`,
+        date:        istDate,
+        time:        istTime,
+        type:        "STOCK",
+        source:      "BREAKOUT",            // ← enables calibration filter
+        breakoutType: r.primaryType||"GENERIC", // ← enables per-signal-type calibration
+        stock:       r.s,
+        name:        r.n||r.s,
+        signal:      r.isBull?"BUY":"SELL",
+        confidence:  r.score*10,            // score 0-10 → 0-100%
+        strength:    r.score>=8?"STRONG":r.score>=6?"MODERATE":"WATCH",
+        entry:       +r.ltp.toFixed(2),
+        sl:          +r.trade.sl.toFixed(2),
+        target:      +r.trade.target.toFixed(2),
+        rr:          r.trade.rr,
+        status:      "OPEN",
+        exitPrice:   null, exitTime:null, pnlPct:null,
+        // Extra context for post-trade analysis
+        boScore:     r.score,
+        sector:      r.sec||"NSE",
+        volRatio:    r.vol?.ratio||null,
+        wk52pos:     r.wk52?.rangePos||null,
+        phase:       r.phase||null,
+      }));
+      if(boSigs.length) logSignals(boSigs).catch(e=>lg("Breakout log: "+e.message,"w"));
+    }
 
   }catch(e){
     lg("Breakout scan error: "+e.message,"e");

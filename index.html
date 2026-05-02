@@ -278,9 +278,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 <button class="nav-item" id="nav-analysis" onclick="switchTab('analysis');closeMenu()">
   <span class="nav-icon">📊</span><span class="nav-label">Analysis</span><span class="nav-badge" id="nb-analysis">—</span>
 </button>
-<button class="nav-item" id="nav-breakout" onclick="switchTab('breakout');closeMenu()">
-  <span class="nav-icon">🚀</span><span class="nav-label">Breakout Scanner</span><span class="nav-badge" id="nb-breakout">—</span>
-</button>
 <button class="nav-item" id="nav-settings" onclick="switchTab('settings');closeMenu()">
   <span class="nav-icon">⚙</span><span class="nav-label">Settings</span>
 </button>
@@ -309,7 +306,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div class="hdr-r" id="hdr-ctrl" style="display:none">
     <div class="cdown"><div class="cdown-v" id="cdown">5:00</div><div class="cdown-l" id="cdown-lbl">NEXT SCAN</div></div>
     <div style="display:flex;align-items:center;gap:5px"><div class="dot live" id="sdot"></div><span style="font-size:10px;color:#64748b" id="stxt">Live</span></div>
-    <button class="btn btn-g" id="scan-btn" onclick="triggerScan()">▶ Scan</button>
+    <button class="btn btn-g" id="scan-btn" onclick="onScanBtn()">▶ Scan</button>
     <button class="btn btn-s" onclick="toggleLog()">🔍</button>
   </div>
 </div>
@@ -384,18 +381,86 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <!-- STOCKS -->
 
   <div class="pane active" id="pane-stocks">
-    <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-    <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
-    <div id="dash-stocks" style="display:none">
-    <div id="tod-stocks"></div>
-      <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
-      <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
-      <div class="stats-g" id="stats-stocks"></div>
-      <div class="stats-g" id="fii-widget" style="margin-top:-4px"></div>
-      <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Loading filters...</span></div>
-      <div class="cards-g" id="cards-stocks"></div>
-      <div class="disc">⚠ AI-assisted analysis from FRIDAY's professional engine. Not SEBI-registered advice. Always do your own research.</div>
+    <!-- ── Sub-mode toggle: Picks ↔ Breakout ── -->
+    <div style="display:flex;gap:0;margin-bottom:14px;background:#f1f5f9;border-radius:10px;padding:3px">
+      <button id="stocks-mode-picks"    onclick="setStocksMode('picks')"
+        style="flex:1;padding:8px 0;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:#fff;color:#1d4ed8;box-shadow:0 1px 4px rgba(0,0,0,.1);transition:all .2s">
+        📊 Picks
+      </button>
+      <button id="stocks-mode-breakout" onclick="setStocksMode('breakout')"
+        style="flex:1;padding:8px 0;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:transparent;color:#64748b;transition:all .2s">
+        🚀 Breakout
+      </button>
     </div>
+
+<!-- ════ PICKS VIEW ════ -->
+<div id="stocks-view-picks">
+  <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
+  <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
+  <div id="dash-stocks" style="display:none">
+    <div id="tod-stocks"></div>
+    <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
+    <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
+    <div class="stats-g" id="stats-stocks"></div>
+    <div class="stats-g" id="fii-widget" style="margin-top:-4px"></div>
+    <div class="sec-hdr"><h3 id="stocks-title">Professional Picks</h3><span id="stocks-sub">Loading filters...</span></div>
+    <div class="cards-g" id="cards-stocks"></div>
+    <div class="disc">⚠ AI-assisted analysis from FRIDAY's professional engine. Not SEBI-registered advice. Always do your own research.</div>
+  </div>
+</div>
+
+<!-- ════ BREAKOUT VIEW ════ -->
+<div id="stocks-view-breakout" style="display:none">
+  <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
+  <div id="loading-breakout" style="display:none" class="spin-wrap">
+    <div class="spin"></div>
+    <p style="font-size:13px;font-weight:600;color:#374151">Running Breakout Scanner...</p>
+    <p id="bo-progress" style="font-size:11px;color:#7c3aed;margin-top:6px;font-weight:600">Starting...</p>
+    <p style="font-size:10px;color:#94a3b8;margin-top:4px">EMA 50/200 · PDH/PDL · Supertrend · Volume · 52-Week · Gap · NR7 · RS</p>
+  </div>
+  <div id="dash-breakout" style="display:none">
+    <div class="last-upd"><div class="upd-dot" style="background:#7c3aed"></div><span id="breakout-upd-time">Not scanned yet</span>
+      <button onclick="loadBreakout(true)" class="btn btn-s" style="margin-left:auto;font-size:10px;padding:4px 10px">🔄 Re-scan</button>
+    </div>
+    <div class="stats-g" id="bo-stats" style="margin-bottom:12px"></div>
+    <!-- Signal legend -->
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px">
+      <span style="font-size:9px;font-weight:700;color:#374151;align-self:center;margin-right:2px">SIGNALS:</span>
+      <span style="font-size:8px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⭐ GOLDEN CROSS</span>
+      <span style="font-size:8px;font-weight:700;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">💀 DEATH CROSS</span>
+      <span style="font-size:8px;font-weight:700;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">🚀 PDH BREAK</span>
+      <span style="font-size:8px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📉 PDL BREAK</span>
+      <span style="font-size:8px;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:10px;padding:2px 7px">📈 ST CROSS UP</span>
+      <span style="font-size:8px;font-weight:700;background:#faf5ff;color:#6b21a8;border:1px solid #ddd6fe;border-radius:10px;padding:2px 7px">📉 ST CROSS DOWN</span>
+      <span style="font-size:8px;font-weight:700;background:#fdf4ff;color:#7e22ce;border:1px solid #e9d5ff;border-radius:10px;padding:2px 7px">🔥 VOL SURGE</span>
+      <span style="font-size:8px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">🏆 52WK HIGH</span>
+      <span style="font-size:8px;font-weight:700;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">⬆ GAP UP</span>
+      <span style="font-size:8px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">⬇ GAP DOWN</span>
+      <span style="font-size:8px;font-weight:700;background:#f0f9ff;color:#0c4a6e;border:1px solid #bae6fd;border-radius:10px;padding:2px 7px">🎯 NR7</span>
+      <span style="font-size:8px;font-weight:700;background:#f0f9ff;color:#0c4a6e;border:1px solid #bae6fd;border-radius:10px;padding:2px 7px">🗜 BB SQUEEZE</span>
+      <span style="font-size:8px;font-weight:700;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">✅ RSI+MACD</span>
+      <span style="font-size:8px;font-weight:700;background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;border-radius:10px;padding:2px 7px">📅 WEEKLY</span>
+      <span style="font-size:8px;font-weight:700;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:2px 7px">🚀 RS vs NIFTY</span>
+      <span style="font-size:8px;font-weight:700;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;border-radius:10px;padding:2px 7px">⚡ MIXED</span>
+    </div>
+    <!-- Sub-tabs -->
+    <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch">
+      <button id="bo-tab-all"     onclick="filterBreakout('all')"     style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#7c3aed;color:#fff">All</button>
+      <button id="bo-tab-bull"    onclick="filterBreakout('bull')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📈 Bullish</button>
+      <button id="bo-tab-bear"    onclick="filterBreakout('bear')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📉 Bearish</button>
+      <button id="bo-tab-ema"     onclick="filterBreakout('ema')"     style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">⭐ EMA</button>
+      <button id="bo-tab-pdhl"    onclick="filterBreakout('pdhl')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">🚀 PDH/PDL</button>
+      <button id="bo-tab-st"      onclick="filterBreakout('st')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📈 ST</button>
+      <button id="bo-tab-vol"     onclick="filterBreakout('vol')"     style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">🔥 Volume</button>
+      <button id="bo-tab-52wk"    onclick="filterBreakout('52wk')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">🏆 52Wk</button>
+      <button id="bo-tab-gap"     onclick="filterBreakout('gap')"     style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">⬆ Gap</button>
+      <button id="bo-tab-squeeze" onclick="filterBreakout('squeeze')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">🗜 Squeeze</button>
+      <button id="bo-tab-rs"      onclick="filterBreakout('rs')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">🚀 RS</button>
+    </div>
+    <div class="cards-g" id="bo-cards"></div>
+    <div class="disc">⚠ Breakout signals: EMA 50/200 cross, PDH/PDL, Supertrend(7,3), Volume, 52-Week, Gap, NR7, RS vs Nifty. Not SEBI-registered advice. Always DYODD.</div>
+  </div>
+</div>
   </div>
 
   <!-- OPTIONS -->
@@ -408,7 +473,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div id="tod-options"></div>
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-options"></div>
-
+      
   <!-- Filter tabs -->
   <div id="opt-filter-bar" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
     <button id="oft-all"      onclick="filterOptions('all')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#16a34a;color:#fff">All</button>
@@ -577,54 +642,6 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   </div>
 
   <!-- BREAKOUT SCANNER -->
-
-  <div class="pane" id="pane-breakout">
-    <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
-
-<!-- Loading -->
-<div id="loading-breakout" style="display:none" class="spin-wrap">
-  <div class="spin"></div>
-  <p style="font-size:13px;font-weight:600;color:#374151">Running Breakout Scanner...</p>
-  <p id="bo-progress" style="font-size:11px;color:#7c3aed;margin-top:6px;font-weight:600">Starting...</p>
-  <p style="font-size:10px;color:#94a3b8;margin-top:4px">EMA 50/200 Cross · Previous Day H/L · Supertrend (7,3)</p>
-</div>
-
-<!-- Dashboard -->
-<div id="dash-breakout" style="display:none">
-  <div class="last-upd"><div class="upd-dot" style="background:#7c3aed"></div><span id="breakout-upd-time">Not scanned yet</span>
-    <button onclick="loadBreakout(true)" class="btn btn-s" style="margin-left:auto;font-size:10px;padding:4px 10px">🔄 Re-scan</button>
-  </div>
-
-  <!-- Stats row -->
-  <div class="stats-g" id="bo-stats" style="margin-bottom:12px"></div>
-
-  <!-- Signal legend -->
-  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px">
-    <span style="font-size:9px;font-weight:700;color:#374151;align-self:center;margin-right:2px">SIGNALS:</span>
-    <span style="font-size:8px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⭐ GOLDEN CROSS</span>
-    <span style="font-size:8px;font-weight:700;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">💀 DEATH CROSS</span>
-    <span style="font-size:8px;font-weight:700;background:#dcfce7;color:#15803d;border:1px solid #86efac;border-radius:10px;padding:2px 7px">🚀 PDH BREAK</span>
-    <span style="font-size:8px;font-weight:700;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:10px;padding:2px 7px">📉 PDL BREAK</span>
-    <span style="font-size:8px;font-weight:700;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:10px;padding:2px 7px">📈 ST UP</span>
-    <span style="font-size:8px;font-weight:700;background:#faf5ff;color:#6b21a8;border:1px solid #ddd6fe;border-radius:10px;padding:2px 7px">📉 ST DOWN</span>
-  </div>
-
-  <!-- Sub-tabs -->
-  <div style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
-    <button id="bo-tab-all" onclick="filterBreakout('all')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#7c3aed;color:#fff">All Signals</button>
-    <button id="bo-tab-bull" onclick="filterBreakout('bull')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📈 Bullish</button>
-    <button id="bo-tab-bear" onclick="filterBreakout('bear')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">📉 Bearish</button>
-    <button id="bo-tab-ema" onclick="filterBreakout('ema')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">EMA Cross</button>
-    <button id="bo-tab-pdhl" onclick="filterBreakout('pdhl')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">PDH/PDL</button>
-    <button id="bo-tab-st" onclick="filterBreakout('st')" style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Supertrend</button>
-  </div>
-
-  <!-- Cards -->
-  <div class="cards-g" id="bo-cards"></div>
-  <div class="disc">⚠ Breakout signals: EMA 50/200 cross, PDH/PDL breakout, Supertrend(7,3). Not SEBI-registered advice. Always DYODD.</div>
-</div>
-
-  </div>
 
   <div class="pane" id="pane-settings">
     <div style="font-size:13px;font-weight:800;color:#0f172a;margin-bottom:16px">⚙ Settings</div>
@@ -3041,7 +3058,43 @@ function resetSettings(){
 // ══════════════════════════════════════
 // SLIDE MENU + NAVIGATION
 // ══════════════════════════════════════
-const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',log:'📋 Signal Log',analysis:'📊 Analysis',breakout:'🚀 Breakout',settings:'⚙ Settings'};
+function onScanBtn(){
+  if(activeTab === 'stocks' && _stocksMode === 'breakout'){
+    loadBreakout(true);
+  } else {
+    triggerScan();
+  }
+}
+
+// ── Current stocks sub-mode: 'picks' or 'breakout' ──
+let _stocksMode = 'picks';
+
+function setStocksMode(mode){
+  _stocksMode = mode;
+  // Toggle view visibility
+  document.getElementById('stocks-view-picks').style.display    = mode==='picks'    ? '' : 'none';
+  document.getElementById('stocks-view-breakout').style.display = mode==='breakout' ? '' : 'none';
+  // Style toggle buttons
+  const pbtn = document.getElementById('stocks-mode-picks');
+  const bbtn = document.getElementById('stocks-mode-breakout');
+  if(pbtn){
+    pbtn.style.background   = mode==='picks'    ? '#fff'        : 'transparent';
+    pbtn.style.color        = mode==='picks'    ? '#1d4ed8'     : '#64748b';
+    pbtn.style.boxShadow    = mode==='picks'    ? '0 1px 4px rgba(0,0,0,.1)' : 'none';
+  }
+  if(bbtn){
+    bbtn.style.background   = mode==='breakout' ? '#fff'        : 'transparent';
+    bbtn.style.color        = mode==='breakout' ? '#7c3aed'     : '#64748b';
+    bbtn.style.boxShadow    = mode==='breakout' ? '0 1px 4px rgba(0,0,0,.1)' : 'none';
+  }
+  // Auto-load breakout if switching to it and stale
+  if(mode==='breakout'){
+    const stale = Date.now() - (window._lastBreakoutTs||0) > 5*60*1000;
+    if(stale){ window._lastBreakoutTs = Date.now(); loadBreakout(false); }
+  }
+}
+
+const PAGE_LABELS={stocks:'📈 Stocks',options:'⚡ F&O Options',portfolio:'💼 Portfolio',lookup:'🔍 Analyse',log:'📋 Signal Log',analysis:'📊 Analysis',settings:'⚙ Settings'};
 
 function openMenu(){
   document.getElementById("nav-drawer").classList.add("open");
@@ -3089,13 +3142,7 @@ function switchTab(t){
   }
   if(t==="analysis"){
     const _lastAR = window._lastAnalysisRenderTs || 0;
-    // 30s cache — analysis reflects recent closes quickly
     if(Date.now() - _lastAR > 30000){ window._lastAnalysisRenderTs = Date.now(); renderAnalysisTab(); }
-  }
-  if(t==="breakout"){
-    const _lastBR = window._lastBreakoutTs || 0;
-    // Auto-load when first visiting; re-load if >5 min stale
-    if(Date.now() - _lastBR > 5*60*1000){ window._lastBreakoutTs = Date.now(); loadBreakout(false); }
   }
 }
 
@@ -6009,16 +6056,21 @@ function renderOptionsGroups(groups){
   const totalAligned  = idxAligned.length + stkAligned.length;
   const totalCounter  = idxCounter.length + stkCounter.length;
 
+  // Detect neutral market from first pick's compositeScore
+  const _firstPick = allIdxPicks[0] || allStkPicks[0];
+  const _isNeutralMkt = _firstPick ? Math.abs(_firstPick.compositeScore||0) < 0.5 : false;
+
   let html="";
-  // ── With-trend signals (primary) ──
+  // ── With-trend (or neutral: both sides) ──
+  const _alignedHdrColor = _isNeutralMkt ? {bg:"#fffbeb",border:"#fde68a",text:"#92400e",icon:"↔",label:"NEUTRAL MARKET — Both CE & PE shown"} : {bg:"#f0fdf4",border:"#bbf7d0",text:"#15803d",icon:"✅",label:"WITH-TREND signals · sorted by confidence"};
   if(idxAligned.length){
     const _capTxt=CFG.maxOptCapital>0?` · cap≤₹${(CFG.maxOptCapital/1000).toFixed(0)}K`:"";
-    html+=`<div class="opt-group-hdr" style="background:#f0fdf4;border-color:#bbf7d0;color:#15803d">✅ Index Options — ${idxAligned.length} WITH-TREND signals · conf≥${CFG.minOptConf}%${_capTxt} · sorted by confidence</div><div class="cards-g">`;
+    html+=`<div class="opt-group-hdr" style="background:${_alignedHdrColor.bg};border-color:${_alignedHdrColor.border};color:${_alignedHdrColor.text}">${_alignedHdrColor.icon} Index Options — ${idxAligned.length} ${_alignedHdrColor.label} · conf≥${CFG.minOptConf}%${_capTxt}</div><div class="cards-g">`;
     idxAligned.forEach((p,i)=>{html+=optCard(p,i);});
     html+="</div>";
   }
   if(stkAligned.length){
-    html+=`<div class="opt-group-hdr" style="margin-top:16px;background:#f0fdf4;border-color:#bbf7d0;color:#15803d">✅ Stock Options — ${stkAligned.length} WITH-TREND signals · sorted by confidence</div><div class="cards-g">`;
+    html+=`<div class="opt-group-hdr" style="margin-top:16px;background:${_alignedHdrColor.bg};border-color:${_alignedHdrColor.border};color:${_alignedHdrColor.text}">${_alignedHdrColor.icon} Stock Options — ${stkAligned.length} ${_alignedHdrColor.label}</div><div class="cards-g">`;
     stkAligned.forEach((p,i)=>{html+=optCard(p,i);});
     html+="</div>";
   }
@@ -6048,7 +6100,7 @@ function optCard(p,i){
   return`<div class="card ${rc}" style="animation-delay:${i*.03}s">
     <span class="c-rec ${rc}">${p.action}</span>
     ${p.atm?`<span style="position:absolute;top:11px;right:72px;background:#eff6ff;color:#1d4ed8;font-size:8px;font-weight:700;padding:2px 6px;border-radius:10px">ATM</span>`:""}
-    ${!p.trendAligned?`<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:4px 10px;margin-bottom:8px;font-size:9px;font-weight:700;color:#92400e">⚠ AGAINST TREND — Market is ${p.trendDir}. This option is counter-directional. Lower confidence applies.</div>`:""}
+    ${!p.trendAligned?`<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:4px 10px;margin-bottom:8px;font-size:9px;font-weight:700;color:#92400e">⚠ AGAINST TREND — Market momentum: ${p.momentumLabel||p.trendDir}${p.compositeScore!=null?" (score "+p.compositeScore+")":""} · This ${p.type} is counter-directional. Lower confidence applied.</div>`:""}
     <div class="c-head">
       <div class="c-sym">${p.und} ${p.strike} ${p.type} <span style="font-size:10px;font-weight:700;color:${p.confidence>=CFG.minOptConf?"#16a34a":p.confidence>=(CFG.minOptConf-15)?"#d97706":"#dc2626"}">${p.confidence}% conf</span></div>
       <div class="c-name">${p.type==="CE"?"📈 Call":"📉 Put"} · Lot ${p.lot} · Spot ₹${fmt(p.spot,0)} · Exp ${p.expiry}</div>
@@ -6977,9 +7029,10 @@ function calcADXStrength(candles){
   const adx=calcADX(candles);
   if(!adx||!adx.adx) return null;
   const v=+adx.adx.toFixed(1);
+  // calcADX returns plusDI/minusDI (not diPlus/diMinus — fixed field names)
   return { adx:v, trending:v>25, strong:v>40, choppy:v<20,
-    diPlus:adx.diPlus?+adx.diPlus.toFixed(1):null,
-    diMinus:adx.diMinus?+adx.diMinus.toFixed(1):null };
+    diPlus :adx.plusDI  != null ? +adx.plusDI.toFixed(1)  : null,
+    diMinus:adx.minusDI != null ? +adx.minusDI.toFixed(1) : null };
 }
 
 // ── Signal 8: Relative Strength vs Nifty (20-day) ──
@@ -7100,27 +7153,37 @@ let _boFilter="all";
 
 function filterBreakout(f){
   _boFilter=f;
-  // Update tab styles
-  ["all","bull","bear","ema","pdhl","st"].forEach(tab=>{
+  const allTabs=["all","bull","bear","ema","pdhl","st","vol","52wk","gap","squeeze","rs"];
+  allTabs.forEach(tab=>{
     const el=document.getElementById("bo-tab-"+tab);
     if(!el) return;
     if(tab===f){ el.style.background="#7c3aed"; el.style.color="#fff"; el.style.border="none"; }
-    else{ el.style.background="#fff"; el.style.color="#374151"; el.style.border="1px solid #e2e8f0"; }
+    else        { el.style.background="#fff";    el.style.color="#374151"; el.style.border="1px solid #e2e8f0"; }
   });
   renderBoCards(_boResults,f);
 }
 
 function renderBoCards(results,filter){
   const el=document.getElementById("bo-cards");
-  if(!el||!results.length){ if(el) el.innerHTML=`<div class="empty-state">No breakout signals found.<br><span style="font-size:10px;color:#94a3b8">Try scanning during market hours for live breakouts.</span></div>`; return; }
+  if(!el||!results.length){
+    if(el) el.innerHTML=`<div class="empty-state">No breakout signals found.<br><span style="font-size:10px;color:#94a3b8">Try scanning during market hours for live breakouts.</span></div>`;
+    return;
+  }
 
   const filtered=results.filter(r=>{
-    if(filter==="bull") return r.dir==="BULL";
-    if(filter==="bear") return r.dir==="BEAR";
-    if(filter==="ema")  return r.ema&&(r.ema.goldenCross||r.ema.deathCross||r.ema.nearCross);
-    if(filter==="pdhl") return r.pdhl&&(r.pdhl.bullBreakout||r.pdhl.bearBreakout||r.pdhl.nearPDH||r.pdhl.nearPDL);
-    if(filter==="st")   return r.st&&(r.st.crossed||true);
-    return true;
+    switch(filter){
+      case "bull":    return r.dir==="BULL";
+      case "bear":    return r.dir==="BEAR";
+      case "ema":     return r.ema&&(r.ema.goldenCross||r.ema.deathCross||r.ema.nearCross);
+      case "pdhl":    return r.pdhl&&(r.pdhl.bullBreakout||r.pdhl.bearBreakout||r.pdhl.nearPDH||r.pdhl.nearPDL);
+      case "st":      return r.st&&r.st.crossed;
+      case "vol":     return r.vol&&(r.vol.confirmed||r.vol.strong);
+      case "52wk":    return r.wk52&&(r.wk52.breakHigh||r.wk52.atHigh||r.wk52.breakLow||r.wk52.atLow);
+      case "gap":     return r.gap&&(r.gap.gapUp||r.gap.gapDown);
+      case "squeeze": return (r.nr7&&(r.nr7.isNR7||r.nr7.isNR4))||(r.bb&&(r.bb.squeeze||r.bb.extremeSqueeze));
+      case "rs":      return r.rs&&(r.rs.outperforming||r.rs.underperforming)&&r.rs.strongly;
+      default:        return true;
+    }
   });
 
   if(!filtered.length){ el.innerHTML=`<div class="empty-state">No signals in this category.</div>`; return; }
@@ -7488,7 +7551,7 @@ async function loadBreakout(force=false){
     const now=getIST();
     const updEl=document.getElementById("breakout-upd-time");
     if(updEl) updEl.textContent="Last scan: "+now;
-    updateNavBadge("breakout", results.length+" signals");
+    updateNavBadge("stocks", results.length+" signals 🚀");
     lastStockScan=now;
 
     if(loadEl) loadEl.style.display="none";

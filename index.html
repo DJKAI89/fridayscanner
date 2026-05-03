@@ -5407,7 +5407,10 @@ async function triggerScan(){
         atr:t.atr, patterns, numInds, nearSupp, nearResist, conf, risk, pot, rec,
         target, sl, slTargets, secSc, passes, vwap: effectiveVWAP, vwapType, sr, delivPct, aboveVWAP, reversal, entryTrigger,
         macd:t.macd, bb:t.bb, adx:t.adx, vwapBands:t.vwapBands, rsiDiv:t.rsiDiv,
-        avgVol20: t.avgVol20||0});
+        avgVol20: t.avgVol20||0,
+        recentCandles: (t.candles||[]).slice(0,20), // newest-first, last 20 days for mini chart
+        closes: t.closes||[] // oldest→newest for EMA overlay
+      });
       
     }
 
@@ -6119,6 +6122,132 @@ function renderStatsStocks(n,b,vix,vixTxt,pcr,pcrTxt,sent,sentSc,topSec,cnt){
   renderFIIWidget(); // inject FII widget if data available
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// MINI CANDLESTICK CHART — pure SVG, no external library
+// candles: newest-first array [ [ts,o,h,l,c,v], ... ]
+// closes:  oldest-first array for EMA overlay
+// opts: { entry, target, sl, ema50, ema200, width, height }
+// ══════════════════════════════════════════════════════════════════════
+function drawMiniCandleChart(candles, closes, opts={}){
+  if(!candles||candles.length<3) return "";
+
+  const W = opts.width  || 320;
+  const H = opts.height || 90;
+  const PAD = { top:6, right:4, bottom:14, left:2 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top  - PAD.bottom;
+
+  // Use last 20 candles, display left→right (oldest first)
+  const raw = candles.slice(0,20).reverse();
+  const N   = raw.length;
+  if(N<2) return "";
+
+  // Price range — include SL/Target/entry in range
+  const highs  = raw.map(c=>+c[2]);
+  const lows   = raw.map(c=>+c[3]);
+  let priceHigh = Math.max(...highs);
+  let priceLow  = Math.min(...lows);
+  if(opts.target&&opts.target>0) priceHigh=Math.max(priceHigh,opts.target);
+  if(opts.sl&&opts.sl>0)         priceLow =Math.min(priceLow,opts.sl);
+  if(opts.entry&&opts.entry>0){  priceHigh=Math.max(priceHigh,opts.entry); priceLow=Math.min(priceLow,opts.entry); }
+  const range = priceHigh - priceLow;
+  if(range<=0) return "";
+
+  // Price → Y coordinate
+  const py = p => PAD.top + chartH * (1 - (p - priceLow) / range);
+
+  // Candle layout
+  const slotW  = chartW / N;
+  const candleW= Math.max(2, slotW * 0.6);
+  const cx = i => PAD.left + (i + 0.5) * slotW;
+
+  let candleSVG = "";
+  for(let i=0;i<N;i++){
+    const [,o,h,l,c] = raw[i].map(Number);
+    const isUp  = c >= o;
+    const color = isUp ? "#16a34a" : "#dc2626";
+    const bodyTop = py(Math.max(o,c));
+    const bodyBot = py(Math.min(o,c));
+    const bodyH   = Math.max(1, bodyBot - bodyTop);
+    const x       = cx(i);
+
+    // Wick
+    candleSVG += `<line x1="${x}" y1="${py(h)}" x2="${x}" y2="${py(l)}" stroke="${color}" stroke-width="1" opacity="0.8"/>`;
+    // Body
+    candleSVG += `<rect x="${(x-candleW/2).toFixed(1)}" y="${bodyTop.toFixed(1)}" width="${candleW.toFixed(1)}" height="${bodyH.toFixed(1)}" fill="${color}" rx="0.5"/>`;
+  }
+
+  // EMA50 and EMA200 lines (from closes array, oldest→newest)
+  let ema50Line = "", ema200Line = "";
+  if(closes&&closes.length>=50){
+    // Compute EMA value for each of the last N candles
+    const ema50Vals=[], ema200Vals=[];
+    for(let i=0;i<N;i++){
+      const slice = closes.slice(0, closes.length - (N-1-i));
+      if(slice.length>=50)  ema50Vals.push(calcEMA(slice,50));
+      else                  ema50Vals.push(null);
+      if(slice.length>=200) ema200Vals.push(calcEMA(slice,200));
+      else                  ema200Vals.push(null);
+    }
+    const linePoints=(vals,color,dasharray="")=>{
+      const pts=vals.map((v,i)=>v!=null?`${cx(i).toFixed(1)},${py(v).toFixed(1)}`:null).filter(Boolean);
+      if(pts.length<2) return "";
+      return `<polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.75" ${dasharray?`stroke-dasharray="${dasharray}"`:""} stroke-linejoin="round"/>`;
+    };
+    ema50Line  = linePoints(ema50Vals,  "#2563eb");      // blue
+    ema200Line = linePoints(ema200Vals, "#9333ea","3,2"); // purple dashed
+  }
+
+  // Horizontal price lines — Entry, Target, SL
+  const hLine = (price, color, label, dashed=false)=>{
+    if(!price||price<=0) return "";
+    const y = py(price);
+    if(y<PAD.top||y>H-PAD.bottom+2) return ""; // out of view
+    return `
+      <line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W-PAD.right}" y2="${y.toFixed(1)}"
+        stroke="${color}" stroke-width="${dashed?"1":"1.5"}" opacity="0.9"
+        ${dashed?'stroke-dasharray="4,3"':''} />
+      <text x="${W-PAD.right-2}" y="${(y-2).toFixed(1)}" text-anchor="end"
+        font-size="7" font-weight="700" fill="${color}" font-family="system-ui,sans-serif">${label}</text>`;
+  };
+
+  // X-axis date labels (first and last candle)
+  const dateLabel = (c,xPos,anchor)=>{
+    if(!c||!c[0]) return "";
+    const d = new Date(c[0]);
+    const label = isNaN(d)?"":`${d.getDate()}/${d.getMonth()+1}`;
+    return `<text x="${xPos}" y="${H-1}" text-anchor="${anchor}" font-size="7" fill="#94a3b8" font-family="system-ui,sans-serif">${label}</text>`;
+  };
+
+  const today = raw[N-1];
+  const first = raw[0];
+
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg"
+    style="display:block;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;margin:8px 0 4px">
+    <!-- Grid lines -->
+    <line x1="${PAD.left}" y1="${PAD.top}" x2="${W-PAD.right}" y2="${PAD.top}" stroke="#e2e8f0" stroke-width="0.5"/>
+    <line x1="${PAD.left}" y1="${(PAD.top+chartH/2).toFixed(1)}" x2="${W-PAD.right}" y2="${(PAD.top+chartH/2).toFixed(1)}" stroke="#e2e8f0" stroke-width="0.5" stroke-dasharray="2,2"/>
+    <line x1="${PAD.left}" y1="${PAD.top+chartH}" x2="${W-PAD.right}" y2="${PAD.top+chartH}" stroke="#e2e8f0" stroke-width="0.5"/>
+    <!-- EMA overlays -->
+    ${ema200Line}
+    ${ema50Line}
+    <!-- Candles -->
+    ${candleSVG}
+    <!-- Price lines -->
+    ${hLine(opts.target,"#16a34a","Tgt")}
+    ${hLine(opts.entry, "#1d4ed8","Entry",true)}
+    ${hLine(opts.sl,    "#dc2626","SL")}
+    <!-- Date labels -->
+    ${dateLabel(first, PAD.left+2, "start")}
+    ${dateLabel(today, W-PAD.right-2, "end")}
+    <!-- Legend -->
+    <line x1="${PAD.left+2}" y1="${H-8}" x2="${PAD.left+14}" y2="${H-8}" stroke="#2563eb" stroke-width="1.2"/>
+    <text x="${PAD.left+16}" y="${H-5}" font-size="6.5" fill="#64748b" font-family="system-ui,sans-serif">EMA50</text>
+    <line x1="${PAD.left+46}" y1="${H-8}" x2="${PAD.left+58}" y2="${H-8}" stroke="#9333ea" stroke-width="1.2" stroke-dasharray="3,2"/>
+    <text x="${PAD.left+60}" y="${H-5}" font-size="6.5" fill="#64748b" font-family="system-ui,sans-serif">EMA200</text>
+  </svg>`;
+}
+
 function renderStockCards(picks,totalScanned,containerId){
   const RC2={"STRONG BUY":"strong-buy","BUY":"buy","MODERATE":"moderate","WATCH":"watch","AVOID":"avoid"};
   const cardContainerId = containerId || "cards-stocks";
@@ -6201,6 +6330,22 @@ function renderStockCards(picks,totalScanned,containerId){
           </div>
           <div style="font-size:18px;font-weight:800;color:${col}">₹${fmt(et.trigger)}</div>
           <div style="font-size:9px;color:#64748b;margin-top:1px">${et.method}${et.note?" · "+et.note:""}</div>
+        </div>`;
+      })()}
+
+      <!-- ── Mini Candlestick Chart ── -->
+      ${(()=>{
+        if(!p.recentCandles||p.recentCandles.length<3) return "";
+        // Compute EMA values for overlay
+        const ema50Val  = p.closes&&p.closes.length>=50  ? calcEMA(p.closes,50)  : null;
+        const ema200Val = p.closes&&p.closes.length>=200 ? calcEMA(p.closes,200) : null;
+        const entry = p.entryTrigger?.trigger||p.ltp;
+        return `<div style="margin-bottom:8px">
+          <div style="font-size:8px;font-weight:700;color:#94a3b8;margin-bottom:2px;letter-spacing:.5px">20-DAY CHART${ema50Val?` · EMA50 ₹${fmt(ema50Val,0)}`:""}${ema200Val?` · EMA200 ₹${fmt(ema200Val,0)}`:""}</div>
+          ${drawMiniCandleChart(p.recentCandles, p.closes||[], {
+            entry, target:p.target, sl:p.sl,
+            width:320, height:92
+          })}
         </div>`;
       })()}
 
@@ -7747,6 +7892,18 @@ function renderBoCards(results,filter){
       <!-- Strength bar -->
       ${scoreBar}
 
+      <!-- Mini Candlestick Chart -->
+      ${(()=>{
+        if(!r.candles||r.candles.length<3) return "";
+        return `<div style="margin-bottom:6px">
+          <div style="font-size:8px;font-weight:700;color:#94a3b8;margin-bottom:2px;letter-spacing:.5px">20-DAY CHART${r.ema?.ema50?` · EMA50 ₹${fmt(r.ema.ema50,0)}`:""}${r.ema?.ema200?` · EMA200 ₹${fmt(r.ema.ema200,0)}`:""}</div>
+          ${drawMiniCandleChart(r.candles, r.closes||[], {
+            entry:r.ltp, target:r.trade.target, sl:r.trade.sl,
+            width:320, height:92
+          })}
+        </div>`;
+      })()}
+
       <!-- Why -->
       <div style="margin-top:8px;padding-top:7px;border-top:1px solid ${isBull?"#bbf7d0":"#fecaca"};font-size:10px;color:#475569;line-height:1.6">
         ${whyParts.map(p=>`→ ${p}`).join("<br>")}
@@ -7912,7 +8069,9 @@ async function loadBreakout(force=false){
         vol, wk52, mom, nr7, bb, gap, adx, rs, weeklyMTF,
         wick, sectorScore, sec, ivPct,
         trade, atr:t.atr, isBull, primaryType, phase,
-        stockVWAP:null // populated below
+        candles: (t.candles||[]).slice(0,20), // for mini chart
+        closes: t.closes||[],                 // for EMA overlay
+        stockVWAP:null
       });
     }
 

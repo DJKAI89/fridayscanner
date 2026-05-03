@@ -399,6 +399,9 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
   <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
   <div id="dash-stocks" style="display:none">
     <div id="tod-stocks"></div>
+    <div id="stocks-holiday-notice" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 13px;margin-bottom:10px;font-size:11px;font-weight:700;color:#92400e">
+      📅 NSE Market Holiday — showing signals based on last close prices. Volume and intraday signals are not applicable today.
+    </div>
     <div class="mkt-closed" id="mkt-closed" style="display:none">🕐 NSE Market Closed</div>
     <div class="last-upd"><div class="upd-dot"></div><span id="stocks-upd-time">Updating...</span></div>
     <div class="stats-g" id="stats-stocks"></div>
@@ -423,7 +426,10 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <button onclick="loadBreakout(true)" class="btn btn-s" style="margin-left:auto;font-size:10px;padding:4px 10px">🔄 Re-scan</button>
     </div>
     <div class="stats-g" id="bo-stats" style="margin-bottom:12px"></div>
-    <!-- Signal legend -->
+    <!-- Holiday / closed market notice (shown dynamically by JS) -->
+    <div id="bo-market-notice" style="display:none;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 13px;margin-bottom:12px;font-size:11px;font-weight:700;color:#92400e">
+      📅 NSE Market Closed — showing signals based on last close prices. Intraday signals (PDH/PDL breaks, Volume, Gap) are not applicable today.
+    </div>
     <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:8px">
       <span style="font-size:9px;font-weight:700;color:#374151;align-self:center;margin-right:2px">SIGNALS:</span>
       <span style="font-size:8px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde68a;border-radius:10px;padding:2px 7px">⭐ GOLDEN CROSS</span>
@@ -474,6 +480,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     <div id="tod-options"></div>
       <div class="last-upd"><div class="upd-dot"></div><span id="options-upd-time">Updating...</span></div>
       <div class="stats-g" id="stats-options"></div>
+
   <!-- Filter tabs -->
   <div id="opt-filter-bar" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
     <button id="oft-all"      onclick="filterOptions('all')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#16a34a;color:#fff">All</button>
@@ -3826,20 +3833,27 @@ function getIntradayPhase(){
   const ts  = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"2-digit",minute:"2-digit",hour12:false});
   const [h,m] = ts.split(":").map(Number);
   const mins  = (h%24)*60+m;
+  // If Upstox API confirmed market is closed (holiday or weekend), mark as holiday
+  if(_mktStatusCache && !_mktStatusCache.open && Date.now()-_mktStatusTs < MKT_CACHE_MS){
+    const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
+    if(day!=="Sat"&&day!=="Sun"&&mins>=9*60+15&&mins<=15*60+30) return "holiday"; // weekday trading hours but market closed = NSE holiday
+  }
   if(mins < 9*60+15)  return "pre";
-  if(mins < 9*60+45)  return "opening";  // 9:15–9:45 → noisy
-  if(mins < 14*60)    return "midday";   // 9:45–14:00 → cleanest
-  if(mins < 15*60+30) return "closing";  // 14:00–15:30 → last hour
+  if(mins < 9*60+45)  return "opening";
+  if(mins < 14*60)    return "midday";
+  if(mins < 15*60+30) return "closing";
   return "closed";
 }
 
-// Returns confidence penalty for time of day (0 = no penalty, -ve = reduce confidence)
+// Returns confidence penalty for time of day (0 = no penalty)
 function getTimeOfDayPenalty(){
   const phase = getIntradayPhase();
   if(phase==="opening") return -15; // first 30 min: high noise, many fake breakouts
   if(phase==="closing") return  -5; // last 90 min: slightly elevated risk
-  if(phase==="pre" || phase==="closed") return -8; // outside hours: use prev-day signals cautiously
-  return 0; // midday: no penalty
+  if(phase==="pre")     return  -8; // pre-market: use prev-day signals cautiously
+  if(phase==="closed")  return  -8; // after hours: use prev-day signals cautiously
+  // holiday and midday: no penalty — historical signals are clean
+  return 0;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5279,6 +5293,9 @@ async function triggerScan(){
     // ── STEP 5: Analysis ──
     updateScanProgress("Step 5/5: Calculating scores...");
 
+    // On market holidays/weekends, volume is 0 — don't penalise for it
+    const _isHoliday = getIntradayPhase()==="holiday"||!isOpen();
+
     // Pre-compute sector map
     const secMap = {};
     for(const item of quoted){
@@ -5330,13 +5347,15 @@ async function triggerScan(){
       const preRec = preRR>=2.0 ? "BUY" : preRR>=1.5 ? "MODERATE" : "WATCH";
 
       // Volume indicator
-      const volOk = t.avgVol20 ? (vol >= t.avgVol20*1.2) : null;
+      // On holidays vol=0 — treat as neutral (use avgVol20 as proxy so it doesn't kill score)
+      const effectiveVol = (_isHoliday && vol===0) ? (t.avgVol20||1) : vol;
+      const volOk = t.avgVol20 ? (effectiveVol >= t.avgVol20*1.2) : null;
 
       // Delivery % boost — high delivery = institutional conviction
       const delivBoost = delivPct!=null ? (delivPct>=60 ? 1 : delivPct<=25 ? -1 : 0) : 0;
 
       const numInds = countIndicatorsEx(t.rsi, t.macdBull, t.a50, t.a200, volOk, nearSupp, patterns, preRec, t.macd, t.bb, t.adx, t.rsiDiv);
-      let conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, vol, t.avgVol20||vol, patterns, preRec, numInds);
+      let conf  = calcConfidence(null, vixSc, pcrSc, nBull, secSc, effectiveVol, t.avgVol20||effectiveVol, patterns, preRec, numInds);
 
       // MACD enhancements
       if(t.macd){
@@ -5465,6 +5484,9 @@ async function triggerScan(){
 
     document.getElementById("loading-stocks").style.display = "none";
     document.getElementById("dash-stocks").style.display = "block";
+    // Show holiday notice when market is not open
+    const stkNotice=document.getElementById("stocks-holiday-notice");
+    if(stkNotice) stkNotice.style.display=isOpen()?"none":"block";
     setStatus("live","Live");
     scanSecs = CFG.scanStocks*60;
     lg(`✅ Done: ${picks.length} picks from ${quoted.length} stocks | ${sent} | VIX ${vix.toFixed(1)} | PCR ${typeof pcr==="number"?pcr.toFixed(2):pcr}`,"o");
@@ -7875,7 +7897,10 @@ async function loadBreakout(force=false){
                        :pdhl?.bullBreakout?"PDH_BREAK":pdhl?.bearBreakout?"PDL_BREAK"
                        :st?.crossed?(st.trend==="UP"?"ST_CROSS_UP":"ST_CROSS_DOWN"):"GENERIC";
       score=applyBreakoutCalibration(score,primaryType);
-      if(score<2) continue;
+
+      // On non-trading days (holiday/weekend), lower threshold so EMA/ST/52wk signals still show
+      const minScore = (phase==="holiday"||phase==="closed"||phase==="pre") ? 1 : 2;
+      if(score<minScore) continue;
 
       const ema200=ema?.ema200||0;
       const trade =boSLTarget(ltp,t.atr,isBull,pdhl?.pdh||0,pdhl?.pdl||0,ema200);
@@ -7952,6 +7977,10 @@ async function loadBreakout(force=false){
 
     if(loadEl) loadEl.style.display="none";
     if(dashEl) dashEl.style.display="block";
+
+    // Show holiday/closed notice when market is not open
+    const boNotice=document.getElementById("bo-market-notice");
+    if(boNotice) boNotice.style.display=isOpen()?"none":"block";
 
     filterBreakout(_boFilter);
     lg(`✅ Breakout scan: ${results.length} signals (${goldCross}GC·${deathCross}DC·${pdhBreak}PDH·${pdlBreak}PDL·${stCrossed}ST)`,"o");

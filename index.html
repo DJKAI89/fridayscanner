@@ -7908,7 +7908,7 @@ function renderBoCards(results,filter){
       <div style="margin-top:8px;padding-top:7px;border-top:1px solid ${isBull?"#bbf7d0":"#fecaca"};font-size:10px;color:#475569;line-height:1.6">
         ${whyParts.map(p=>`→ ${p}`).join("<br>")}
       </div>
-      <div style="margin-top:4px;font-size:8px;color:#94a3b8">${t.method}</div>
+      <div style="margin-top:4px;font-size:8px;color:#94a3b8">${r.trade?.method||""}</div>
     </div>`;
   }).join("");
 }
@@ -7917,7 +7917,8 @@ function renderBoCards(results,filter){
 async function loadBreakout(force=false){
   if(window._breakoutLoading&&!force) return;
   window._breakoutLoading=true;
-  if(force) clearBreakoutAlerts(); // allow re-alerting on fresh scan
+  if(force) clearBreakoutAlerts();
+  const errEl=document.getElementById("err-breakout");
   const loadEl=document.getElementById("loading-breakout");
   const dashEl=document.getElementById("dash-breakout");
   if(errEl) errEl.style.display="none";

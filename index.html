@@ -4004,12 +4004,31 @@ function calcIVPercentile(iv, closes){
 // Shared intraday VWAP cache: sym → { vwap, ts }
 const _intradayVWAPCache={};
 async function fetchStockIntradayVWAP(key, sym){
-  // Skip when market closed — intraday endpoint returns HTTP 400
   if(!isOpen()) return null;
   const cached=_intradayVWAPCache[sym];
   if(cached&&Date.now()-cached.ts<5*60*1000) return cached.vwap;
   try{
-    const candles=await fetchIntraday(key,"5minute");
+    // Hard 4-second timeout — VWAP is best-effort, never block the scan
+    const full="https://api.upstox.com/v2/historical-candle/intraday/"+encodeURIComponent(key)+"/5minute";
+    const hdrs={"Authorization":"Bearer "+TOKEN,"Accept":"application/json"};
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),4000);
+    let res;
+    try{
+      // Try direct first (no proxy) — fastest, avoids all proxy issues
+      res=await fetch(full,{headers:hdrs,signal:controller.signal});
+    }catch(e){
+      // Direct failed (CORS on file://) — try corsproxy once, no retry
+      if(!_proxyCooldown.corsproxy||Date.now()>_proxyCooldown.corsproxy){
+        try{
+          res=await fetch("https://corsproxy.io/?"+encodeURIComponent(full),{headers:hdrs,signal:controller.signal});
+        }catch(e2){ clearTimeout(timer); return null; }
+      } else { clearTimeout(timer); return null; }
+    }
+    clearTimeout(timer);
+    if(!res||!res.ok) return null;
+    const d=await res.json();
+    const candles=d?.data?.candles||[];
     if(!candles.length) return null;
     let tpvSum=0,volSum=0;
     for(const c of candles){ const tp=(+c[2]+ +c[3]+ +c[4])/3,v=+c[5]; tpvSum+=tp*v; volSum+=v; }
@@ -5275,19 +5294,21 @@ async function triggerScan(){
     }
     lg(`✅ Candle data: ${candleOK}/${top20.length} stocks (staggered batches)`, "o");
 
-    // ── Gap 8: Fetch intraday VWAP for top 20 stocks (market hours only) ──
-    // Daily VWAP from candles is already in tech[s].vwap — this adds live SESSION VWAP
+    // ── Gap 8: Fetch intraday VWAP for top 15 stocks — FIRE AND FORGET ──
+    // Runs in background. Results go into _intradayVWAPCache and are used
+    // when effectiveVWAP is read below. Scan never waits for this.
     if(isOpen()){
-      updateScanProgress("Step 4b/5: Fetching intraday VWAP...");
-      const vwapBatch=top20.slice(0,15); // top 15 by volume
-      for(let vb=0;vb<vwapBatch.length;vb+=3){
-        const slice=vwapBatch.slice(vb,vb+3);
-        await Promise.allSettled(slice.map((inst,idx)=>
-          sleep(idx*180).then(()=>fetchStockIntradayVWAP(inst.key,inst.s))
-        ));
-        if(vb+3<vwapBatch.length) await sleep(280);
-      }
-      lg(`✅ Intraday VWAP fetched for up to 15 stocks`,"o");
+      const vwapBatch=top20.slice(0,15);
+      (async()=>{
+        for(let vb=0;vb<vwapBatch.length;vb+=3){
+          const slice=vwapBatch.slice(vb,vb+3);
+          await Promise.allSettled(slice.map((inst,idx)=>
+            sleep(idx*180).then(()=>fetchStockIntradayVWAP(inst.key,inst.s))
+          ));
+          if(vb+3<vwapBatch.length) await sleep(250);
+        }
+        lg("✅ Background VWAP complete","o");
+      })().catch(()=>{});
     }
 
     // ── STEP 5: Analysis ──
@@ -8076,26 +8097,30 @@ async function loadBreakout(force=false){
       });
     }
 
-    // Feature 8: batch-fetch intraday VWAP for top 20 by score
+    // Feature 8: fire-and-forget VWAP fetch for top 20 — scan proceeds immediately
     const topForVWAP=[...results].sort((a,b)=>b.score-a.score).slice(0,20);
-    progress("Step 3/3: Fetching intraday VWAP for top stocks...");
-    for(let i=0;i<topForVWAP.length;i+=3){
-      const batch=topForVWAP.slice(i,i+3);
-      await Promise.allSettled(batch.map((r,idx)=>
-        sleep(idx*200).then(()=>fetchStockIntradayVWAP(r.key,r.s).then(vwap=>{
-          if(vwap){
-            const sv=calcStockVWAPSignal(r.ltp,vwap);
-            r.stockVWAP=sv;
-            if(sv){
-              const vwapBoost=(r.isBull&&sv.aboveVWAP&&sv.strong)?1
-                            :(!r.isBull&&!sv.aboveVWAP&&sv.strong)?1
-                            :(r.isBull&&!sv.aboveVWAP&&sv.strong)?-1:0;
-              r.score=Math.min(10,Math.max(1,r.score+vwapBoost));
-            }
-          }
-        })).catch(()=>{})
-      ));
-      if(i+3<topForVWAP.length) await sleep(300);
+    if(isOpen()){
+      (async()=>{
+        for(let i=0;i<topForVWAP.length;i+=3){
+          const batch=topForVWAP.slice(i,i+3);
+          await Promise.allSettled(batch.map((r,idx)=>
+            sleep(idx*200).then(()=>fetchStockIntradayVWAP(r.key,r.s).then(vwap=>{
+              if(vwap){
+                const sv=calcStockVWAPSignal(r.ltp,vwap);
+                r.stockVWAP=sv;
+                if(sv){
+                  const boost=(r.isBull&&sv.aboveVWAP&&sv.strong)?1
+                             :(!r.isBull&&!sv.aboveVWAP&&sv.strong)?1
+                             :(r.isBull&&!sv.aboveVWAP&&sv.strong)?-1:0;
+                  r.score=Math.min(10,Math.max(1,r.score+boost));
+                }
+              }
+            })).catch(()=>{})
+          ));
+          if(i+3<topForVWAP.length) await sleep(300);
+        }
+        lg("✅ Background breakout VWAP complete","o");
+      })().catch(()=>{});
     }
 
     // Sort: 52wk + EMA cross first, then score

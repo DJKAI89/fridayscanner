@@ -394,6 +394,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
     </div>
 
 <!-- ════ PICKS VIEW ════ -->
+
 <div id="stocks-view-picks">
   <div class="err-b" id="err-stocks"><h4>⚠ Error</h4><p id="err-stocks-msg"></p><button onclick="triggerScan()" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
   <div id="loading-stocks" class="spin-wrap"><div class="spin"></div><p style="font-size:13px;font-weight:600;color:#374151">Fetching professional analysis...</p><p id="scan-progress" style="font-size:11px;color:#16a34a;margin-top:6px;font-weight:600">Starting...</p><p style="font-size:10px;color:#94a3b8;margin-top:4px">RSI · MACD · MA50/200 · Candle Patterns · VIX · PCR · Confidence · Risk</p></div>
@@ -413,6 +414,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 </div>
 
 <!-- ════ BREAKOUT VIEW ════ -->
+
 <div id="stocks-view-breakout" style="display:none">
   <div class="err-b" id="err-breakout"><h4>⚠ Breakout Scan Error</h4><p id="err-breakout-msg"></p><button onclick="loadBreakout(true)" style="margin-top:7px;background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 11px;font-size:10px;cursor:pointer;font-weight:600">Retry</button></div>
   <div id="loading-breakout" style="display:none" class="spin-wrap">
@@ -482,6 +484,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
       <div class="stats-g" id="stats-options"></div>
 
   <!-- Filter tabs -->
+
   <div id="opt-filter-bar" style="display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px">
     <button id="oft-all"      onclick="filterOptions('all')"      style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#16a34a;color:#fff">All</button>
     <button id="oft-nifty"    onclick="filterOptions('nifty')"    style="white-space:nowrap;padding:6px 12px;border-radius:20px;border:1px solid #e2e8f0;font-size:11px;font-weight:700;cursor:pointer;background:#fff;color:#374151">Nifty</button>
@@ -908,6 +911,7 @@ let scanning=false,optLoading=false,portLoading=false;
 let scanTimer,optTimer,tickTimer,portTimer,cdTimer,moodTimer,scanSecs;
 let liveTrackTimer=null;          // auto-refreshes live P&L for open signals every 30s
 let _liveTrackLastGHWrite=0;      // throttle GitHub writes to every 5 min
+let _lastStockPriceRefresh=0;     // throttle stock live price refresh to every 30 min
 let _livePriceCache={};           // in-memory: sigId → {price, ts} — avoids redundant API calls
 let _lastLiveFetch=0;             // timestamp of last full price fetch
 let lastPrices={},rsiCache={};
@@ -2019,6 +2023,10 @@ async function logSignals(newSignals){
 function buildStockSignal(p){
   const istDate = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
   const istTime = new Date().toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",hour12:false});
+  // holdDays: how many trading days to track this signal before auto-expiring
+  // STRONG BUY/SELL = 5 days (swing), BUY/SELL = 3 days, MODERATE = 2 days, WATCH = 1 day
+  const rec = (p.rec||"").toUpperCase();
+  const holdDays = rec.includes("STRONG") ? 5 : rec==="BUY"||rec==="SELL" ? 3 : rec==="MODERATE" ? 2 : 1;
   return {
     id:          `${istDate}-${istTime.replace(/:/g,'').slice(0,4)}-${p.s}-STOCK`,
     date:        istDate,
@@ -2047,6 +2055,7 @@ function buildStockSignal(p){
     slMethod:    p.slTargets?.consMethod?.includes("R1") ? "S1 support" : "ATR+VIX",
     tgtMethod:   p.slTargets?.modMethod || "2:1 R:R",
     status:      "OPEN",
+    holdDays,              // ← how many days to track before auto-expiry
     exitPrice:   null,
     exitTime:    null,
     pnlPct:      null,
@@ -2162,9 +2171,12 @@ async function _fetchPricesForOpenSignals(openSignals, istDate){
   const optPriceMap= {};
 
   // ── Stock / index underlying prices ──
+  // Options need per-minute updates (theta decay). Stocks: 30-min refresh is enough.
+  const stockRefreshDue = Date.now() - _lastStockPriceRefresh > 30*60*1000;
   const stockSyms     = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
   const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
-  const allSyms       = [...new Set([...stockSyms, ...optUnderlying])];
+  // Always fetch underlying for options (needed for chain fetch). Stocks: only if due.
+  const allSyms       = [...new Set([...(stockRefreshDue?stockSyms:[]), ...optUnderlying])];
 
   if(allSyms.length){
     try{
@@ -2179,6 +2191,7 @@ async function _fetchPricesForOpenSignals(openSignals, istDate){
       priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
       priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
       priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
+      if(stockRefreshDue && stockSyms.length) _lastStockPriceRefresh = Date.now();
     }catch(e){ lg("_fetchPrices stock: "+e.message,"w"); }
   }
 
@@ -2220,17 +2233,32 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
     if(sig.status !== "OPEN") continue;
     const isBull = isBullSignal(sig);
 
-    // ── Rule 1: Past-day STOCK signal → always auto-expire ──
-    // Stocks are intraday/short-term signals. Overnight carry = expired.
+    // ── Rule 1: Past-day STOCK signal — expire only after holdDays trading days ──
+    // STRONG BUY = 5 days, BUY = 3 days, MODERATE = 2 days, WATCH = 1 day (intraday)
     if(sig.type==="STOCK" && sig.date < istDate){
-      const exitPx = priceMap[sig.stock] || sig.livePrice || sig.entry;
-      sig.status    = "EXPIRED";
-      sig.exitPrice = +exitPx.toFixed(2);
-      sig.exitTime  = istTime;
-      sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
-      sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
-      autoExpired++;
-      continue;
+      const holdDays = sig.holdDays ?? 1; // legacy signals without holdDays = intraday
+      // Calculate trading days elapsed (approximate: calendar days × 5/7)
+      const msPerDay = 864e5;
+      const calDaysElapsed = (new Date(istDate) - new Date(sig.date)) / msPerDay;
+      const tradingDaysElapsed = Math.round(calDaysElapsed * 5 / 7);
+
+      if(tradingDaysElapsed < holdDays){
+        // Still within holding period — track live price, check SL/Target
+        const currentPrice = priceMap[sig.stock];
+        if(currentPrice==null){ continue; } // price not available — skip this cycle
+        // Fall through to Rule 3 (active signal check) below
+      } else {
+        // Holding period expired — auto-expire at current price
+        const exitPx = priceMap[sig.stock] || sig.livePrice || sig.entry;
+        sig.status    = "EXPIRED";
+        sig.exitPrice = +exitPx.toFixed(2);
+        sig.exitTime  = istTime;
+        sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
+        sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
+        sig.note      = `Auto-expired after ${holdDays} day${holdDays>1?"s":""}`;
+        autoExpired++;
+        continue;
+      }
     }
 
     // ── Rule 2: Option with PAST expiry → expire (worthless or at final price) ──
@@ -2838,10 +2866,20 @@ async function renderLogTab(signalsIn){
       const progColor = prog>=100?"#16a34a":prog<0?"#dc2626":prog>=50?"#d97706":"#0ea5e9";
       const progLabel = prog>=100?"🎯 Target reached!":prog>=75?"Almost at target":prog>=50?"Halfway to target":prog>=25?"Moving toward target":prog<0?"⚠ Moving toward SL":"Waiting for move";
       const slLabel   = slDist!=null ? (slDist<=5?"⚠ Near SL":slDist<0?"🔴 SL breached":"+"+slDist.toFixed(1)+"% from SL") : "";
+
+      // Stock hold period badge
+      let holdBadge = "";
+      if(s.type==="STOCK" && s.holdDays){
+        const calDays = Math.round((new Date().setHours(0,0,0,0) - new Date(s.date).setHours(0,0,0,0))/864e5);
+        const tradDays = Math.round(calDays*5/7);
+        const rem = Math.max(0, s.holdDays - tradDays);
+        holdBadge = `<span style="font-size:7px;font-weight:700;background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd;border-radius:8px;padding:1px 5px;margin-left:4px">⏱ ${rem}d left · updates 30min</span>`;
+      }
+
       livePriceRow = `
         <div style="margin-top:6px;padding:6px 8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <span style="font-size:9px;color:#64748b">📡 Live: <b style="color:#0f172a;font-size:10px">₹${fmt(s.livePrice)}</b></span>
+            <span style="font-size:9px;color:#64748b">📡 Live: <b style="color:#0f172a;font-size:10px">₹${fmt(s.livePrice)}</b>${holdBadge}</span>
             <span style="font-size:8px;color:${progColor};font-weight:700">${progLabel}</span>
           </div>
           <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
@@ -2858,6 +2896,14 @@ async function renderLogTab(signalsIn){
             </div>
             <span style="font-size:8px;color:${progColor};font-weight:700">${prog}%</span>
           </div>
+        </div>`;
+    } else if(s.status==="OPEN" && s.livePrice==null && s.type==="STOCK" && s.holdDays){
+      const calDays = Math.round((new Date().setHours(0,0,0,0) - new Date(s.date).setHours(0,0,0,0))/864e5);
+      const tradDays = Math.round(calDays*5/7);
+      const rem = Math.max(0, s.holdDays - tradDays);
+      livePriceRow = `
+        <div style="margin-top:6px;padding:6px 8px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0">
+          <span style="font-size:9px;color:#64748b">⏳ Awaiting first price update · tracking for ${rem} more day${rem!==1?"s":""} · updates every 30 min during market hours</span>
         </div>`;
     } else if(s.status==="EXPIRED" && s.note && s.note.includes("last live")){
       livePriceRow = `<div style="font-size:9px;color:#f59e0b;margin-top:2px">⚠ Exited at last live price — post-market value was ₹0</div>`;

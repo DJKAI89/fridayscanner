@@ -4232,11 +4232,12 @@ function calcPotential(ltp, target, sl, numInds, rec) {
 
   // ── WinRate: C# GetWinRate ──
   // Base from recommendation, then indicator adjustments, capped 35-75%
-  let wr = rec === "STRONG BUY" ? 68 : rec === "BUY" ? 62 : rec === "MODERATE" ? 55 : rec === "WATCH" ? 50 : 45;
-  if (numInds >= 5)      wr += 10;
-  else if (numInds >= 4) wr += 6;
-  else if (numInds >= 3) wr += 3;
-  else if (numInds <= 1) wr -= 8;
+  // Win rate base by recommendation — adjusted for Nifty50 large-cap reality
+  let wr = rec === "STRONG BUY" ? 68 : rec === "BUY" ? 62 : rec === "MODERATE" ? 57 : rec === "WATCH" ? 52 : 45;
+  if (numInds >= 5)      wr += 8;
+  else if (numInds >= 4) wr += 5;
+  else if (numInds >= 3) wr += 2;
+  else if (numInds <= 1) wr -= 6;
   wr = Math.min(75, Math.max(35, wr));
 
   // Adjusted Potential = Base × (WinRate/100) × R:R
@@ -4518,11 +4519,16 @@ function detectReversal(ltp, rsi, patterns, sr, vix, pcr, nBull, chgPct, atr, hi
 }
 
 function getRec(conf, pot, risk, rr) {
-  // C# GetProfessionalRecommendation (exact thresholds)
-  if (conf >= 80 && pot >= 15 && risk <= 30 && rr >= 2.5) return "STRONG BUY";
-  if (conf >= 70 && pot >= 10 && risk <= 40 && rr >= 2.0) return "BUY";
-  if (conf >= 60 && pot >=  8 && risk <= 50)               return "MODERATE";
-  if (conf >= 50 || pot >= 12)                             return "WATCH";
+  // Thresholds calibrated for Nifty50 large-caps:
+  // ATR-based targets are typically 3-6%, not 10-15% (small-cap range)
+  // STRONG BUY: very high confidence + all conditions excellent
+  if (conf >= 80 && pot >= 5  && risk <= 30 && rr >= 2.5) return "STRONG BUY";
+  // BUY: high confidence, reasonable pot, acceptable risk
+  if (conf >= 70 && pot >= 3  && risk <= 40 && rr >= 2.0) return "BUY";
+  // MODERATE: decent setup, at least minimal upside potential
+  if (conf >= 60 && pot >= 2  && risk <= 50)               return "MODERATE";
+  // WATCH: above noise floor — worth monitoring
+  if (conf >= 50 || pot >= 3)                              return "WATCH";
   return "AVOID";
 }
 
@@ -5854,6 +5860,15 @@ async function loadOptions(force=true){
     const allSpots=groups.filter(g=>g.type==="index");
     renderTimeOfDayBanner("tod-options", optNiftyChgPct, optVix);
     renderStatsOptions(allSpots, optNiftyBullish, optNiftyChgPct, optVix, marketCtx);
+    _lastOptGroups = groups;      // store for filter
+    _activeOptFilter = 'all';     // reset to All on fresh scan
+    // reset tab styles
+    ['all','nifty','banknifty','sensex','finnifty','stocks','buy','sell'].forEach(t=>{
+      const el=document.getElementById('oft-'+t);
+      if(!el) return;
+      if(t==='all'){ el.style.background='#16a34a'; el.style.color='#fff'; el.style.border='none'; }
+      else          { el.style.background='#fff'; el.style.color='#374151'; el.style.border='1px solid #e2e8f0'; }
+    });
     renderOptionsGroups(groups);
 
     // ── Badge: count exactly what renderOptionsGroups shows (with-trend + conf + cap filters) ──
@@ -6552,7 +6567,39 @@ function renderStatsOptions(idxGroups, niftyBull, chgPct, vix, marketCtx){
   }).join("");
 }
 
+// ── Store last rendered groups for filter re-use ──
+let _lastOptGroups = [];
+let _activeOptFilter = 'all';
+
+function filterOptions(f){
+  _activeOptFilter = f;
+  // Update tab styles
+  const tabs = ['all','nifty','banknifty','sensex','finnifty','stocks','buy','sell'];
+  tabs.forEach(t => {
+    const el = document.getElementById('oft-'+t);
+    if(!el) return;
+    if(t === f){ el.style.background='#16a34a'; el.style.color='#fff'; el.style.border='none'; }
+    else        { el.style.background='#fff';    el.style.color='#374151'; el.style.border='1px solid #e2e8f0'; }
+  });
+
+  if(!_lastOptGroups.length) return;
+
+  // Filter groups based on selection
+  let filtered = _lastOptGroups;
+  if(f === 'nifty')     filtered = _lastOptGroups.filter(g => g.name === 'Nifty');
+  else if(f === 'banknifty') filtered = _lastOptGroups.filter(g => g.name === 'BankNifty' || g.name === 'Nifty Bank');
+  else if(f === 'sensex')    filtered = _lastOptGroups.filter(g => g.name === 'SENSEX' || g.name === 'Sensex');
+  else if(f === 'finnifty')  filtered = _lastOptGroups.filter(g => g.name === 'FinNifty' || g.name === 'Nifty Fin Service');
+  else if(f === 'stocks')    filtered = _lastOptGroups.filter(g => g.type === 'stock');
+  else if(f === 'buy')       filtered = _lastOptGroups.map(g => ({...g, picks: g.picks.filter(p => p.action==='BUY')})).filter(g => g.picks.length);
+  else if(f === 'sell')      filtered = _lastOptGroups.map(g => ({...g, picks: g.picks.filter(p => p.action==='SELL')})).filter(g => g.picks.length);
+
+  renderOptionsGroups(filtered);
+}
+
 function renderOptionsGroups(groups){
+  // Store for filter re-use (only store when called with full data, not filtered subset)
+  if(groups === _lastOptGroups || groups.length >= _lastOptGroups.length) _lastOptGroups = groups;
   const body=document.getElementById("options-body");
   if(!groups.length){body.innerHTML=`<div class="empty-state">No option signals found. Market may be closed or API limit reached.</div>`;return;}
 
@@ -8346,9 +8393,10 @@ async function refreshMarketStatus(){
 
     let msg = "";
     if(!open){
-      if(exStatus.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
+      if(status.includes("holiday"))       msg = "🏖 NSE Holiday · No live data";
       else if(status.includes("pre_open"))   msg = "⏰ Pre-market · NSE opens at 9:15 AM IST";
-      else if(status.includes("end_of_day")) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
+      else if(status.includes("end_of_day")
+        ||status.includes("closed") ) msg = "🔔 Post-market · NSE closed at 3:30 PM IST";
       else                                   msg = "🔔 NSE Market Closed";
     }
 

@@ -2166,13 +2166,15 @@ function computeLiveFields(sig, currentPrice){
 
 // ── Fetch all live prices for a set of open signals ──
 // Returns { priceMap: sym→price, optPriceMap: sig.id→price }
-async function _fetchPricesForOpenSignals(openSignals, istDate){
+// forceStocks=true bypasses the 30-min throttle — always used for the manual Update button.
+async function _fetchPricesForOpenSignals(openSignals, istDate, forceStocks=false){
   const priceMap   = {};
   const optPriceMap= {};
 
   // ── Stock / index underlying prices ──
-  // Options need per-minute updates (theta decay). Stocks: 30-min refresh is enough.
-  const stockRefreshDue = Date.now() - _lastStockPriceRefresh > 30*60*1000;
+  // Auto-tracker throttles stock fetches to every 30 min to save API quota.
+  // Manual "Update Outcomes" passes forceStocks=true so the user always gets fresh prices.
+  const stockRefreshDue = forceStocks || Date.now() - _lastStockPriceRefresh > 30*60*1000;
   const stockSyms     = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
   const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
   // Always fetch underlying for options (needed for chain fetch). Stocks: only if due.
@@ -2477,7 +2479,9 @@ async function checkAllOutcomes(silent=false){
     lg(`checkAllOutcomes: ${openSignals.length} open signals across ${Object.keys(dayMap).length} days`,"o");
 
     // ── Step 3: Fetch all needed prices ──
-    const { priceMap, optPriceMap } = await _fetchPricesForOpenSignals(openSignals, istDate);
+    // forceStocks=true: manual button always fetches fresh stock prices,
+    // bypassing the 30-min auto-tracker throttle that was causing stocks to be skipped.
+    const { priceMap, optPriceMap } = await _fetchPricesForOpenSignals(openSignals, istDate, true);
 
     // ── Step 4: Resolve outcomes across all loaded day files ──
     let totalClosed=0, totalLive=0, totalAutoExp=0;
@@ -3400,6 +3404,9 @@ async function withRetry(fn, label="", retries=3){
       return await fn();
     }catch(e){
       if(e.message==="TOKEN_EXPIRED") throw e;
+      // 4xx = client-side error (bad request, not found, etc.) — retrying will NEVER help
+      // Most common: HTTP 400 when intraday candle data isn't ready yet (first few mins of market)
+      if(e.message?.startsWith("HTTP 4")) throw e;
       if(attempt===retries) throw e;
       // Exponential backoff: 1.5s → 3s → 4.5s + up to 500ms jitter
       const wait = attempt * 1500 + Math.random() * 500;
@@ -3420,23 +3427,24 @@ function _parseUpstoxResponse(txt){
 }
 
 // ── API call with smart proxy rotation ──
-// Priority: direct → corsproxy (if not cooling) → allorigins (if not cooling) → wait & retry cooling proxy
+// Priority: direct → corsproxy (if not cooling) → corsproxy forced (last resort)
+// ⚠ allorigins.win intentionally excluded: it strips Authorization headers → Upstox 401/failures
 async function apiGet(url){
   const full = "https://api.upstox.com" + url;
   const hdrs = { "Authorization":"Bearer "+TOKEN, "Accept":"application/json" };
 
   // Build ordered proxy list, skipping proxies in cooldown
+  // ⚠ allorigins.win REMOVED: it strips the Authorization header before forwarding,
+  //   so Upstox sees an unauthenticated request and returns errors / load failures.
+  //   corsproxy.io correctly forwards all headers including Authorization.
   const buildProxies = () => {
     const list = [];
     list.push({ n:"direct",     f:()=>fetch(full, {headers:hdrs}) });
     if(_proxyAvailable("corsproxy"))
       list.push({ n:"corsproxy",  f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full), {headers:hdrs}) });
-    if(_proxyAvailable("allorigins"))
-      list.push({ n:"allorigins", f:()=>fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(full), {headers:hdrs}) });
-    // If all proxies cooling, add them back anyway as last resort
+    // If corsproxy is in cooldown, force it as last resort (still better than allorigins)
     if(list.length === 1){
       list.push({ n:"corsproxy",  f:()=>fetch("https://corsproxy.io/?"+encodeURIComponent(full), {headers:hdrs}), forced:true });
-      list.push({ n:"allorigins", f:()=>fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(full), {headers:hdrs}), forced:true });
     }
     return list;
   };
@@ -3458,6 +3466,13 @@ async function apiGet(url){
       if(res.status === 503 || res.status === 502){
         lg(`${p.n} ✗ HTTP ${res.status} — trying next proxy`,"w");
         continue;
+      }
+
+      // HTTP 400 = Bad Request — data genuinely not available yet (intraday before first candle,
+      // or request is malformed). Other proxies will get the same 400 from Upstox.
+      // Throw immediately so withRetry can skip its retry loop for this error type.
+      if(res.status === 400){
+        throw new Error("HTTP 400 (data not available yet — intraday candle may not have formed)");
       }
 
       if(!res.ok) throw new Error("HTTP "+res.status);
@@ -3507,6 +3522,23 @@ async function fetchIntraday(key,interval="30minute"){
     lg(`fetchIntraday: market closed — skipping ${interval} call for ${key.slice(0,25)}`,"o");
     return [];
   }
+  // ── Candle-ready guard ───────────────────────────────────────────────────────
+  // Upstox returns HTTP 400 during the first N minutes after open because the
+  // first candle hasn't closed yet.  Each interval needs its own minimum wait:
+  //   1min  → ready at 9:16 AM  (1 min after open)
+  //   5min  → ready at 9:20 AM  (5 min after open)
+  //   30min → ready at 9:45 AM  (30 min after open)
+  const _minMap={"1minute":1,"5minute":5,"30minute":30};
+  const _minAfterOpen=_minMap[interval]||5;
+  const _now=new Date();
+  const _istH=+_now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false});
+  const _istM=+_now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+  const _minsAfterOpen=(_istH*60+_istM)-(9*60+15);
+  if(_minsAfterOpen<_minAfterOpen){
+    lg(`fetchIntraday: ${interval} candle not ready yet (${_minsAfterOpen}m since open, need ${_minAfterOpen}m) — skipping`,"o");
+    return [];
+  }
+  // ────────────────────────────────────────────────────────────────────────────
   const d=await withRetry(()=>apiGet("/v2/historical-candle/intraday/"+encodeURIComponent(key)+"/"+interval),"intraday:"+interval+":"+key.slice(0,20));
   return d?.data?.candles||[];
 }
@@ -4051,6 +4083,12 @@ function calcIVPercentile(iv, closes){
 const _intradayVWAPCache={};
 async function fetchStockIntradayVWAP(key, sym){
   if(!isOpen()) return null;
+  // ── Candle-ready guard: 5-min candle not formed until 9:20 AM ───────────────
+  const _nvw=new Date();
+  const _nvwH=+_nvw.toLocaleString("en-US",{timeZone:"Asia/Kolkata",hour:"numeric",hour12:false});
+  const _nvwM=+_nvw.toLocaleString("en-US",{timeZone:"Asia/Kolkata",minute:"numeric"});
+  if(_nvwH*60+_nvwM < 9*60+20){ return null; } // 9:20 AM IST = first 5min candle ready
+  // ────────────────────────────────────────────────────────────────────────────
   const cached=_intradayVWAPCache[sym];
   if(cached&&Date.now()-cached.ts<5*60*1000) return cached.vwap;
   try{
@@ -4065,6 +4103,7 @@ async function fetchStockIntradayVWAP(key, sym){
       res=await fetch(full,{headers:hdrs,signal:controller.signal});
     }catch(e){
       // Direct failed (CORS on file://) — try corsproxy once, no retry
+      // ⚠ allorigins removed: it strips Authorization header → Upstox returns errors
       if(!_proxyCooldown.corsproxy||Date.now()>_proxyCooldown.corsproxy){
         try{
           res=await fetch("https://corsproxy.io/?"+encodeURIComponent(full),{headers:hdrs,signal:controller.signal});
@@ -4072,7 +4111,7 @@ async function fetchStockIntradayVWAP(key, sym){
       } else { clearTimeout(timer); return null; }
     }
     clearTimeout(timer);
-    if(!res||!res.ok) return null;
+    if(!res||!res.ok) return null; // includes HTTP 400 (candle not ready) — already guarded above
     const d=await res.json();
     const candles=d?.data?.candles||[];
     if(!candles.length) return null;

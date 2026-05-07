@@ -2033,6 +2033,10 @@ function buildStockSignal(p){
     time:        istTime,
     type:        "STOCK",
     stock:       p.s,
+    instrKey:    p.key||null,   // ← Upstox instrument key saved at creation time
+                                //   (e.g. "NSE_EQ|INE528G01035") so price lookups in
+                                //   _fetchPricesForOpenSignals never depend on STOCK_MASTER_MAP
+                                //   being in memory (survives page refresh, stocks.json reload).
     name:        p.n,
     signal:      p.rec,
     confidence:  p.conf,
@@ -2175,25 +2179,61 @@ async function _fetchPricesForOpenSignals(openSignals, istDate, forceStocks=fals
   // Auto-tracker throttles stock fetches to every 30 min to save API quota.
   // Manual "Update Outcomes" passes forceStocks=true so the user always gets fresh prices.
   const stockRefreshDue = forceStocks || Date.now() - _lastStockPriceRefresh > 30*60*1000;
-  const stockSyms     = [...new Set(openSignals.filter(s=>s.type==="STOCK").map(s=>s.stock))];
-  const optUnderlying = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
-  // Always fetch underlying for options (needed for chain fetch). Stocks: only if due.
-  const allSyms       = [...new Set([...(stockRefreshDue?stockSyms:[]), ...optUnderlying])];
+  const stockSignals   = openSignals.filter(s=>s.type==="STOCK");
+  const stockSyms      = [...new Set(stockSignals.map(s=>s.stock))];
+  const optUnderlying  = [...new Set(openSignals.filter(s=>s.type==="OPTION").map(s=>s.stock))];
+  // Always fetch underlying for options. Stocks: only if due.
+  const allSyms        = [...new Set([...(stockRefreshDue?stockSyms:[]), ...optUnderlying])];
 
   if(allSyms.length){
     try{
-      const keys    = allSyms.map(sym=>(STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym))?.key).filter(Boolean).join(",");
-      const idxKeys = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
-      const quotes  = await fetchQ([keys,idxKeys].filter(Boolean).join(","));
+      // ── Build instrument keys ──
+      // Priority 1: sig.instrKey — saved at signal creation time, survives page refresh.
+      // Priority 2: in-memory lookup tables (STOCK_MASTER_MAP → NIFTY50 → FO_STOCK_LIST).
+      //             These are only available if stocks.json loaded since last page open.
+      // Using sig.instrKey as primary source eliminates dependency on in-memory state.
+      const stockKeyMap = {}; // sym → instrKey
+      if(stockRefreshDue){
+        stockSignals.forEach(sig=>{
+          if(stockKeyMap[sig.stock]) return; // already resolved
+          // Try instrKey stored in signal first (most reliable)
+          if(sig.instrKey){ stockKeyMap[sig.stock]=sig.instrKey; return; }
+          // Fallback: search in-memory lists
+          const inst = STOCK_MASTER_MAP[sig.stock]
+                    || NIFTY50.find(s=>s.s===sig.stock)
+                    || FO_STOCK_LIST.find(s=>s.s===sig.stock);
+          if(inst?.key) stockKeyMap[sig.stock]=inst.key;
+        });
+      }
+      // Option underlying keys still come from in-memory lists (options don't store instrKey)
+      const optKeys = optUnderlying.map(sym=>{
+        const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym);
+        return inst?.key||null;
+      }).filter(Boolean);
+
+      const allKeys  = [...new Set([...Object.values(stockKeyMap), ...optKeys])].join(",");
+      const idxKeys  = "NSE_INDEX|Nifty 50,NSE_INDEX|Nifty Bank,BSE_INDEX|SENSEX,NSE_INDEX|Nifty Fin Service";
+      const quotes   = await fetchQ([allKeys,idxKeys].filter(Boolean).join(","));
+
+      // Map quotes back into priceMap using instrKey → sym pairing
       allSyms.forEach(sym=>{
-        const inst = STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym);
-        if(inst?.key && quotes[inst.key]) priceMap[sym] = quotes[inst.key].last_price;
+        const key = stockKeyMap[sym]
+                 || (STOCK_MASTER_MAP[sym]||NIFTY50.find(s=>s.s===sym)||FO_STOCK_LIST.find(s=>s.s===sym))?.key;
+        if(key && quotes[key]) priceMap[sym] = quotes[key].last_price;
       });
       priceMap["NIFTY"]    = quotes["NSE_INDEX|Nifty 50"]?.last_price;
       priceMap["BANKNIFTY"]= quotes["NSE_INDEX|Nifty Bank"]?.last_price;
       priceMap["SENSEX"]   = quotes["BSE_INDEX|SENSEX"]?.last_price;
       priceMap["FINNIFTY"] = quotes["NSE_INDEX|Nifty Fin Service"]?.last_price;
       if(stockRefreshDue && stockSyms.length) _lastStockPriceRefresh = Date.now();
+
+      // Debug: log which syms got a price vs which failed (helps diagnose future issues)
+      if(stockRefreshDue && stockSyms.length){
+        const resolved = stockSyms.filter(s=>priceMap[s]!=null);
+        const missing  = stockSyms.filter(s=>priceMap[s]==null);
+        lg(`_fetchPrices: ${resolved.length}/${stockSyms.length} stock prices resolved. `
+          +(missing.length?`Missing instrKey/list entry for: ${missing.join(",")}`:``), "o");
+      }
     }catch(e){ lg("_fetchPrices stock: "+e.message,"w"); }
   }
 
@@ -5908,7 +5948,7 @@ async function loadOptions(force=true){
       if(t==='all'){ el.style.background='#16a34a'; el.style.color='#fff'; el.style.border='none'; }
       else          { el.style.background='#fff'; el.style.color='#374151'; el.style.border='1px solid #e2e8f0'; }
     });
-    renderOptionsGroups(groups);
+    renderOptionsGroups(groups, true); // true = full unfiltered dataset, update master cache
 
     // ── Badge: count exactly what renderOptionsGroups shows (with-trend + conf + cap filters) ──
     const _badgeCapLimit = CFG.maxOptCapital > 0 ? CFG.maxOptCapital : Infinity;
@@ -6625,10 +6665,10 @@ function filterOptions(f){
 
   // Filter groups based on selection
   let filtered = _lastOptGroups;
-  if(f === 'nifty')     filtered = _lastOptGroups.filter(g => g.name === 'Nifty');
-  else if(f === 'banknifty') filtered = _lastOptGroups.filter(g => g.name === 'BankNifty' || g.name === 'Nifty Bank');
-  else if(f === 'sensex')    filtered = _lastOptGroups.filter(g => g.name === 'SENSEX' || g.name === 'Sensex');
-  else if(f === 'finnifty')  filtered = _lastOptGroups.filter(g => g.name === 'FinNifty' || g.name === 'Nifty Fin Service');
+  if(f === 'nifty')          filtered = _lastOptGroups.filter(g => g.name === 'NIFTY');
+  else if(f === 'banknifty') filtered = _lastOptGroups.filter(g => g.name === 'BANKNIFTY');
+  else if(f === 'sensex')    filtered = _lastOptGroups.filter(g => g.name === 'SENSEX');
+  else if(f === 'finnifty')  filtered = _lastOptGroups.filter(g => g.name === 'FINNIFTY');
   else if(f === 'stocks')    filtered = _lastOptGroups.filter(g => g.type === 'stock');
   else if(f === 'buy')       filtered = _lastOptGroups.map(g => ({...g, picks: g.picks.filter(p => p.action==='BUY')})).filter(g => g.picks.length);
   else if(f === 'sell')      filtered = _lastOptGroups.map(g => ({...g, picks: g.picks.filter(p => p.action==='SELL')})).filter(g => g.picks.length);
@@ -6636,9 +6676,10 @@ function filterOptions(f){
   renderOptionsGroups(filtered);
 }
 
-function renderOptionsGroups(groups){
-  // Store for filter re-use (only store when called with full data, not filtered subset)
-  if(groups === _lastOptGroups || groups.length >= _lastOptGroups.length) _lastOptGroups = groups;
+function renderOptionsGroups(groups, _isFullData=false){
+  // Only overwrite the master cache when called with the full unfiltered dataset.
+  // filterOptions() always passes a filtered subset — never overwrite from there.
+  if(_isFullData) _lastOptGroups = groups;
   const body=document.getElementById("options-body");
   if(!groups.length){body.innerHTML=`<div class="empty-state">No option signals found. Market may be closed or API limit reached.</div>`;return;}
 
@@ -8315,6 +8356,7 @@ async function loadBreakout(force=false){
         source:      "BREAKOUT",            // ← enables calibration filter
         breakoutType: r.primaryType||"GENERIC", // ← enables per-signal-type calibration
         stock:       r.s,
+        instrKey:    r.key||null,           // ← saved at creation; survives page refresh
         name:        r.n||r.s,
         signal:      r.isBull?"BUY":"SELL",
         confidence:  r.score*10,            // score 0-10 → 0-100%

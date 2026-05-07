@@ -893,7 +893,12 @@ async function refreshIndexLots(){
 // ══════════════════════════════════════
 let TOKEN=localStorage.getItem("friday_token")||"";
 const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.3,iv:15,oi:5,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:50,maxOptCapital:0,moodRefresh:10};
+// ── Default config — calibrated from historical signal data ──
+// Key changes from original defaults:
+//   delta:      0.30 → 0.40  (only near-ATM options; delta<0.40 = OTM, hit SL from theta alone)
+//   oi:         5    → 15    (5% OI change is noise; 15%+ = meaningful institutional positioning)
+//   minOptConf: 50   → 70    (historical data shows 65% conf still has 7% win rate; 70+ is cleaner)
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.40,iv:15,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:70,maxOptCapital:0,moodRefresh:10};
 let CFG = DEF; // start with DEF
 try{
   const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
@@ -919,6 +924,16 @@ let activeTab="stocks";
 let lastStockScan="—",lastOptScan="—",lastPortScan="—";
 // Sector data — populated by triggerScan, read by analysis tab for consistent confidence scoring
 let _sectorIdxMap = {}; // sector name → index change %
+
+// ── Phase 1: Signal quality state ──
+// PDH/PDL cache: instrKey → { pdh, pdl, date } — refreshed once per trading day
+const _pdhlCache = {};
+// Previous options scan composite score per underlying — for second-scan confirmation
+// sym → { compositeScore, time }
+const _prevScanCtx = {};
+// Previous PCR per underlying — for PCR trend signal (replaces raw OI change)
+// sym → pcr from last scan
+const _prevPCRCache = {};
 let _secMap       = {}; // sector name → {g: gains count, c: total count}
 
 // ══════════════════════════════════════
@@ -2638,10 +2653,13 @@ async function renderAnalysisTab(signalsIn){
   const peSignals = closed.filter(s=>s.optType==="PE"||s.signal==="PUT");
   const ceWR = wr(ceSignals), peWR = wr(peSignals);
 
-  // ── BUY vs WATCH vs MODERATE ──
-  const sigTypes = ["BUY","WATCH","MODERATE"].map(t=>{
-    const g = closed.filter(s=>s.signal===t);
-    return {t, ...wr(g)||{h:0,t:0,r:null}};
+  // ── BUY vs SELL vs WATCH (signal direction) ──
+  // Bug fix: outer variable was named 't' same as wr()'s return field 't' (count),
+  // so spread was overwriting the type label with the count → "170 signal" label.
+  const sigTypes = ["BUY","SELL","WATCH","MODERATE"].map(type=>{
+    const g = closed.filter(s=>s.signal===type);
+    const stats = wr(g)||{h:0,t:0,r:null};
+    return {type, ...stats};
   }).filter(x=>x.t>=3);
 
   // ── Confidence bands ──
@@ -2699,7 +2717,30 @@ async function renderAnalysisTab(signalsIn){
 
   const card = (title,body) => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:#0f172a;margin-bottom:10px">${title}</div>${body}</div>`;
 
+  // ── Signal quality alert ──
+  const qualityAlerts = [];
+  if(overall.r !== null && overall.r < 30)
+    qualityAlerts.push(`⚠️ Win rate is <b>${overall.r}%</b> — well below a viable threshold (≥40%). Signals are losing money systematically.`);
+  if(streak >= 5 && streakType === "L")
+    qualityAlerts.push(`🔴 <b>${streak} consecutive losses</b> — consider pausing live trading until root cause is identified.`);
+  const worstSession = timeBreak.filter(x=>x.r!==null&&x.t>=5).sort((a,b)=>(a.r||0)-(b.r||0))[0];
+  if(worstSession && worstSession.r !== null && worstSession.r < 10)
+    qualityAlerts.push(`🕐 <b>${worstSession.label}</b> has only ${worstSession.r}% win rate across ${worstSession.t} signals — avoid trading in this window.`);
+  if(avgConf > 70 && overall.r !== null && overall.r < 20)
+    qualityAlerts.push(`📉 Confidence score has <b>no predictive value</b> — ${avgConf}% avg confidence yet only ${overall.r}% win rate. The scoring model needs recalibration.`);
+  if(ceWR&&peWR&&ceWR.t>=5&&peWR.t>=5&&Math.max(ceWR.r,peWR.r)<20)
+    qualityAlerts.push(`📊 Both CE (${ceWR.r}%) and PE (${peWR.r}%) are losing — suggests systematic direction bias issue, not just market type.`);
+
   el.innerHTML = `
+    <!-- Signal Quality Alert (shown when win rate critically low) -->
+    ${qualityAlerts.length ? `<div style="background:#fef2f2;border:2px solid #fca5a5;border-radius:10px;padding:12px 14px;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:800;color:#991b1b;margin-bottom:8px">🚨 Signal Quality Issues Detected</div>
+      ${qualityAlerts.map(a=>`<div style="font-size:10px;color:#7f1d1d;margin-bottom:6px;padding-left:8px;border-left:3px solid #ef4444;line-height:1.4">${a}</div>`).join("")}
+      <div style="margin-top:10px;padding-top:8px;border-top:1px solid #fca5a5;font-size:9px;color:#991b1b;font-weight:600">
+        💡 Recommended actions: Raise min confidence to ≥80% · Trade only Opening/Early sessions · Review strike selection (use ATM not OTM) · Check trend alignment logic
+      </div>
+    </div>` : ""}
+
     <!-- Actionable summary -->
     ${summaryPoints.length?`<div style="background:linear-gradient(135deg,#f0fdf4,#ecfdf5);border:1px solid #bbf7d0;border-radius:10px;padding:12px 14px;margin-bottom:10px">
       <div style="font-size:11px;font-weight:800;color:#15803d;margin-bottom:8px">💡 Key Insights</div>
@@ -2731,7 +2772,7 @@ async function renderAnalysisTab(signalsIn){
     ${card("📈 Signal Type Breakdown",`
       ${ceWR&&ceWR.t>=2?bar("CE Options 📈",ceWR.r,ceWR.t,` avg ${avgPnlOf(ceSignals)}%`):""}
       ${peWR&&peWR.t>=2?bar("PE Options 📉",peWR.r,peWR.t,` avg ${avgPnlOf(peSignals)}%`):""}
-      ${sigTypes.map(x=>bar(x.t+" signal",x.r,x.t)).join("")}
+      ${sigTypes.map(x=>bar(x.type==="BUY"?"BUY Signals 📈":x.type==="SELL"?"SELL Signals 📉":x.type+" Signals",x.r,x.t)).join("")}
     `)}
 
     <!-- Confidence bands -->
@@ -3582,7 +3623,41 @@ async function fetchIntraday(key,interval="30minute"){
   const d=await withRetry(()=>apiGet("/v2/historical-candle/intraday/"+encodeURIComponent(key)+"/"+interval),"intraday:"+interval+":"+key.slice(0,20));
   return d?.data?.candles||[];
 }
-async function fetchOptions(key,expiry){
+// ── Previous Day High/Low (PDH/PDL) ──
+// Fetches last 2 daily candles and returns the PREVIOUS day's high/low.
+// Cached per instrKey for the trading day — only refetches if date changes.
+// Used by Phase 1 gate: CE signals valid only near PDH, PE near PDL.
+async function fetchPDHL(instrKey){
+  const today = new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+  const cached = _pdhlCache[instrKey];
+  if(cached && cached.date === today) return cached; // already fetched today
+
+  try{
+    // Fetch last 5 daily candles — gives us prev day even on Monday (skips weekend)
+    const from5d = new Date(Date.now()-7*24*3600*1000).toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+    const candles = await fetchCandles(instrKey, from5d, today, "day");
+    // candles are newest-first from Upstox: [0]=today(partial), [1]=prev day
+    if(!candles || candles.length < 2){
+      lg(`fetchPDHL: not enough candles for ${instrKey.slice(0,20)}`,"w");
+      return null;
+    }
+    // candles[0] = today (open,high,low,close so far — partial)
+    // candles[1] = previous completed trading day
+    const prev  = candles[1];
+    const pdh   = +prev[2]; // high
+    const pdl   = +prev[3]; // low
+    const pdc   = +prev[4]; // close (previous day close)
+    const result = { pdh, pdl, pdc, date: today };
+    _pdhlCache[instrKey] = result;
+    lg(`PDH/PDL ${instrKey.slice(0,15)}: PDH=${pdh} PDL=${pdl} PDC=${pdc}`,"o");
+    return result;
+  }catch(e){
+    lg(`fetchPDHL ${instrKey.slice(0,15)}: ${e.message}`,"w");
+    return null;
+  }
+}
+
+async function fetchOptions(key, expiry){
   const d=await withRetry(()=>apiGet("/v2/option/chain?instrument_key="+encodeURIComponent(key)+"&expiry_date="+expiry),"chain:"+key.slice(0,20));
   return d?.data||[];
 }
@@ -3954,24 +4029,35 @@ function getIntradayPhase(){
   // If Upstox API confirmed market is closed (holiday or weekend), mark as holiday
   if(_mktStatusCache && !_mktStatusCache.open && Date.now()-_mktStatusTs < MKT_CACHE_MS){
     const day = now.toLocaleString("en-US",{timeZone:"Asia/Kolkata",weekday:"short"});
-    if(day!=="Sat"&&day!=="Sun"&&mins>=9*60+15&&mins<=15*60+30) return "holiday"; // weekday trading hours but market closed = NSE holiday
+    if(day!=="Sat"&&day!=="Sun"&&mins>=9*60+15&&mins<=15*60+30) return "holiday";
   }
-  if(mins < 9*60+15)  return "pre";
-  if(mins < 9*60+45)  return "opening";
-  if(mins < 14*60)    return "midday";
-  if(mins < 15*60+30) return "closing";
+  if(mins < 9*60+15)   return "pre";
+  if(mins < 9*60+45)   return "opening";  // 9:15–9:45 — historically BEST (100% WR in data)
+  if(mins < 10*60+30)  return "early";    // 9:45–10:30 — historically GOOD (67% WR in data)
+  if(mins < 12*60+30)  return "mid";      // 10:30–12:30 — historically TERRIBLE (2% WR)
+  if(mins < 14*60)     return "afternoon";// 12:30–14:00 — historically TERRIBLE (5% WR)
+  if(mins < 15*60+30)  return "closing";  // 14:00–15:30 — historically BAD (4% WR)
   return "closed";
 }
 
-// Returns confidence penalty for time of day (0 = no penalty)
+// Returns confidence adjustment for time of day — calibrated to ACTUAL historical win rates.
+// Data from Analysis tab (May 2026):
+//   Opening 9:15–9:45 : 100% WR (6 signals)   → +5  bonus
+//   Early   9:45–10:30:  67% WR (9 signals)    → +0  (baseline)
+//   Mid    10:30–12:30:   2% WR (59 signals)   → -25 heavy penalty
+//   Afternoon 12:30–2 :   5% WR (221 signals)  → -25 heavy penalty
+//   Pre-close 2–3:30  :   4% WR (112 signals)  → -20 penalty
+// The previous logic was BACKWARDS (Opening got -15, Mid/Afternoon got 0).
 function getTimeOfDayPenalty(){
   const phase = getIntradayPhase();
-  if(phase==="opening") return -15; // first 30 min: high noise, many fake breakouts
-  if(phase==="closing") return  -5; // last 90 min: slightly elevated risk
-  if(phase==="pre")     return  -8; // pre-market: use prev-day signals cautiously
-  if(phase==="closed")  return  -8; // after hours: use prev-day signals cautiously
-  // holiday and midday: no penalty — historical signals are clean
-  return 0;
+  if(phase==="opening")   return  +5;  // historically BEST period — slight bonus
+  if(phase==="early")     return   0;  // good period — no penalty (baseline)
+  if(phase==="mid")       return -25;  // 2% historical WR — heavy penalty, kills most signals
+  if(phase==="afternoon") return -25;  // 5% historical WR — heavy penalty
+  if(phase==="closing")   return -20;  // 4% historical WR — strong penalty
+  if(phase==="pre")       return  -8;  // pre-market: use with caution
+  if(phase==="closed")    return  -8;  // after-hours: use with caution
+  return 0; // holiday
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -4956,51 +5042,64 @@ function calcSmartOptionSLTarget(entry, spot, strike, iv, delta, theta, expiry, 
   const dte     = Math.max(0, Math.round((expDate - today) / 86400000));
 
   // ── 2. IV-based intraday expected move of the UNDERLYING ──
-  // Use fraction of day remaining for DTE=0 (assume ~6.25hr trading day)
   const ivDecimal     = (iv || 20) / 100;
-  const timeFraction  = dte === 0 ? (1 / 252) * 0.5 : (1 / 252);   // DTE=0: half day max
+  const timeFraction  = dte === 0 ? (1 / 252) * 0.5 : (1 / 252);
   const dailySpotMove = spot * ivDecimal * Math.sqrt(timeFraction);
 
   // ── 3. Convert underlying move → premium move via delta ──
-  const absDelta        = Math.abs(delta) || 0.3;
+  const absDelta        = Math.abs(delta) || 0.4;
   const dailyPremiumMove = dailySpotMove * absDelta;
 
-  // ── 4. VIX adjustment on SL width ──
-  const liveVix  = vix || 15;
+  // ── 4. VIX & ATM adjustments ──
+  const liveVix   = vix || 15;
   const vixFactor = liveVix > 20 ? 1.15 : liveVix < 13 ? 0.90 : 1.0;
-
-  // ── 5. ATM vs OTM SL modifier ──
   const moneyness = spot > 0 ? Math.abs(strike - spot) / spot : 0;
-  const atmFactor = moneyness < 0.01 ? 1.1 : moneyness > 0.04 ? 0.9 : 1.0;
+  const atmFactor = moneyness < 0.01 ? 1.1 : moneyness > 0.04 ? 0.85 : 1.0;
 
-  // ── 6. Compute SL ──
-  // Use IV-based move for SL width, bounded between 20%-40% loss
-  // (never tighter than 20% — option noise; never wider than 40% — capital protection)
-  const slWidth   = dailyPremiumMove * vixFactor * atmFactor;
-  const rawSL     = entry - Math.max(slWidth, entry * 0.20);
-  const sl        = +Math.min(entry * 0.80, Math.max(entry * 0.60, rawSL)).toFixed(2);
-  const risk      = entry - sl;
-
-  // ── 7. Target: DTE-based R:R ratio ──
-  // Logic: the more time left, the bigger the move can be.
-  // DTE=0 (expiry today): can only move during today's session → max ~1.5:1 R:R
-  // DTE=1-2            : one more session possible → up to 2:1
-  // DTE=3-7            : multi-day trend → up to 2.5:1
-  // DTE>7              : full swing trade → up to 3:1
-  const baseRR = dte === 0 ? 1.5 : dte <= 2 ? 2.0 : dte <= 7 ? 2.5 : 3.0;
-
-  // Theta guard: if theta eats >8% of premium per day, reduce target R:R by 0.25
+  // ── 5. Theta daily drag (how much premium decays per day) ──
   const dailyThetaLoss = Math.abs(theta || 0);
   const thetaEatsPct   = entry > 0 ? dailyThetaLoss / entry : 0;
-  const targetRR       = thetaEatsPct > 0.08 ? Math.max(1.5, baseRR - 0.25) : baseRR;
 
-  const rawTarget = +(entry + risk * targetRR).toFixed(2);
+  // ── 6. Compute SL ──
+  // ROOT CAUSE FIX: Previous SL was 20–40% loss, causing targets of +60–100%
+  // which are rarely achievable. New bounds:
+  //   ATM (delta≥0.45): SL = 15–25% loss (less noise, moves with underlying cleanly)
+  //   Near-ATM (0.35–0.45): SL = 20–30% loss
+  //   OTM (delta<0.35): SL = 15–25% loss (tight — OTM decays fast, cut quick)
+  // These bounds give achievable targets at 1.5–2.0 R:R.
+  const slWidth    = dailyPremiumMove * vixFactor * atmFactor;
+  let   slMinPct, slMaxPct;
+  if(absDelta >= 0.45){
+    slMinPct = 0.15; slMaxPct = 0.25; // ATM: tight SL, clean delta moves
+  } else if(absDelta >= 0.35){
+    slMinPct = 0.20; slMaxPct = 0.30; // near-ATM
+  } else {
+    slMinPct = 0.15; slMaxPct = 0.25; // OTM: cut fast, theta kills it anyway
+  }
+  const rawSL = entry - Math.max(slWidth, entry * slMinPct);
+  const sl    = +Math.min(entry * (1 - slMinPct), Math.max(entry * (1 - slMaxPct), rawSL)).toFixed(2);
+  const risk  = entry - sl;
 
-  // ── 8. Realistic cap per DTE ──
-  // DTE=0: max +80% gain intraday (realistic upper bound for index options)
-  // DTE=1-2: max +120%
-  // DTE>2: max +180%
-  const maxGainPct = dte === 0 ? 0.80 : dte <= 2 ? 1.20 : 1.80;
+  // ── 7. Target: realistic R:R based on DTE + theta drag ──
+  // ROOT CAUSE FIX: Previous targets (+60–100%) are unreachable.
+  // Theta eats premium every day. Realistic targets must account for decay.
+  // Base R:R reduced significantly:
+  //   DTE=0: 1.2 (intraday only, fast move or SL)
+  //   DTE=1-2: 1.5 (one or two sessions)
+  //   DTE=3-7: 1.8 (multi-day, but theta compounds)
+  //   DTE>7: 2.0 (enough time, but don't be greedy)
+  // If theta eats >6%/day, reduce further — decay is a headwind.
+  let baseRR = dte === 0 ? 1.2 : dte <= 2 ? 1.5 : dte <= 7 ? 1.8 : 2.0;
+  if(thetaEatsPct > 0.10) baseRR = Math.max(1.2, baseRR - 0.30); // heavy theta drag
+  else if(thetaEatsPct > 0.06) baseRR = Math.max(1.2, baseRR - 0.15);
+  const targetRR  = baseRR;
+
+  // ── 8. Realistic gain cap per DTE ──
+  // DTE=0: max +40% (intraday squeeze possible)
+  // DTE=1-2: max +60%
+  // DTE>2: max +100% (don't chase moonshots — take +80–100% and move on)
+  const maxGainPct = dte === 0 ? 0.40 : dte <= 2 ? 0.60 : 1.00;
+  const rawTarget  = +(entry + risk * targetRR).toFixed(2);
   const tgt        = +Math.min(entry * (1 + maxGainPct), rawTarget).toFixed(2);
 
   const rr     = risk > 0 ? +((tgt - entry) / risk).toFixed(2) : targetRR;
@@ -5749,22 +5848,93 @@ async function loadOptions(force=true){
         // ── Factor A: Intraday momentum (last 30 min = last 6 × 5-min candles) ──
         // When market is closed, intradayCandles will be [] — skip momentum, use day change only
         let momentumScore = 0, momentumLabel = "N/A (market closed)", intradayVWAP = 0;
+
+        // ── EMA helper (computed once, used by multiple checks below) ──
+        const calcEMA = (closes, period) => {
+          if(closes.length < period) return null;
+          const k = 2 / (period + 1);
+          let ema = closes.slice(0, period).reduce((a,b)=>a+b,0) / period;
+          for(let i = period; i < closes.length; i++) ema = closes[i]*k + ema*(1-k);
+          return ema;
+        };
+
+        // ── Intraday signal context (EMA, volume, freshness) ──
+        let emaCtx = {
+          ema9: null, ema21: null,
+          emaCross: null,       // "bullish_cross" | "bearish_cross" | "no_cross"
+          emaCrossCandles: 999, // candles since cross (999 = never/unknown)
+          emaTrendBull: null,   // true if ema9 > ema21 right now
+          momentumFresh: false, // true if momentum direction changed in last 2 candles
+          volumeSpike: false,   // true if last candle volume > 1.5× 10-candle avg
+          volRatio: null,
+        };
+
         if(intradayCandles.length >= 3){
+          const closes  = intradayCandles.map(c=>+c[4]);
+          const volumes = intradayCandles.map(c=>+c[5]);
+          const n       = intradayCandles.length;
+
+          // ── EMA 9 & 21 ──
+          if(n >= 9)  emaCtx.ema9  = calcEMA(closes, 9);
+          if(n >= 21) emaCtx.ema21 = calcEMA(closes, 21);
+
+          // Current EMA trend
+          if(emaCtx.ema9 != null && emaCtx.ema21 != null)
+            emaCtx.emaTrendBull = emaCtx.ema9 > emaCtx.ema21;
+
+          // ── EMA crossover detection (scan last 3 candles for a fresh cross) ──
+          // A bullish cross = ema9 just crossed ABOVE ema21 in last 1-3 candles
+          if(n >= 22){
+            let crossFound = null, crossAge = 999;
+            for(let lookback = 1; lookback <= 3; lookback++){
+              const prevCloses = closes.slice(0, n - lookback);
+              const prev9  = calcEMA(prevCloses, 9);
+              const prev21 = calcEMA(prevCloses, 21);
+              if(prev9 == null || prev21 == null) break;
+              const wasBull = prev9 > prev21;
+              const isBull  = emaCtx.emaTrendBull;
+              if(isBull && !wasBull){ crossFound = "bullish_cross";  crossAge = lookback; break; }
+              if(!isBull && wasBull){ crossFound = "bearish_cross";  crossAge = lookback; break; }
+            }
+            emaCtx.emaCross        = crossFound || "no_cross";
+            emaCtx.emaCrossCandles = crossAge;
+          }
+
+          // ── Momentum freshness ──
+          // Fresh = direction changed in last 1-2 candles (just turned, not stale)
+          // Stale = same direction for 4+ consecutive candles (move likely exhausted)
+          if(n >= 3){
+            const last2 = intradayCandles.slice(-2);
+            const prev2 = intradayCandles.slice(-4,-2);
+            const last2Bull  = last2.every(c=>+c[4]>+c[1]);
+            const last2Bear  = last2.every(c=>+c[4]<+c[1]);
+            const prev2Bear  = prev2.length >= 2 && prev2.every(c=>+c[4]<+c[1]);
+            const prev2Bull  = prev2.length >= 2 && prev2.every(c=>+c[4]>+c[1]);
+            emaCtx.momentumFresh = (last2Bull && prev2Bear) || (last2Bear && prev2Bull);
+          }
+
+          // ── Volume confirmation ──
+          // Last candle volume vs 10-candle average. Spike ≥ 1.5× = real move.
+          if(n >= 5){
+            const lookback = Math.min(10, n-1);
+            const avgVol = volumes.slice(-lookback-1,-1).reduce((a,b)=>a+b,0)/lookback;
+            const lastVol = volumes[n-1];
+            emaCtx.volRatio   = avgVol > 0 ? +(lastVol/avgVol).toFixed(2) : null;
+            emaCtx.volumeSpike = emaCtx.volRatio != null && emaCtx.volRatio >= 1.5;
+          }
+
           const recent = intradayCandles.slice(-6); // last 30 min
           const oldest = recent[0], latest = recent[recent.length-1];
           const openRecent = +oldest[1], closeRecent = +latest[4];
           const movePct = (closeRecent - openRecent) / openRecent * 100;
 
-          // Count up vs down candles in recent window
           const upCandles   = recent.filter(c=>+c[4]>+c[1]).length;
           const downCandles = recent.filter(c=>+c[4]<+c[1]).length;
 
-          // Momentum score: range -3 to +3
           if(movePct > 0.4)       momentumScore += 2;
           else if(movePct > 0.15) momentumScore += 1;
           else if(movePct < -0.4) momentumScore -= 2;
           else if(movePct < -0.15)momentumScore -= 1;
-          // Candle composition bonus
           if(upCandles >= 4)       momentumScore += 1;
           else if(downCandles >= 4)momentumScore -= 1;
 
@@ -5775,14 +5945,18 @@ async function loadOptions(force=true){
                         : momentumScore <= -1? "FALLING"
                         : "FLAT";
 
-          // ── Factor B: VWAP position ──
-          // VWAP = Σ(typical_price × volume) / Σ(volume)
           let tpvSum=0, volSum=0;
           for(const c of intradayCandles){
             const tp=(+c[2]+ +c[3]+ +c[4])/3, vol=+c[5];
             tpvSum+=tp*vol; volSum+=vol;
           }
           intradayVWAP = volSum>0 ? tpvSum/volSum : 0;
+
+          // Log EMA context
+          lg(`EMA ctx: 9=${emaCtx.ema9?.toFixed(1)||"N/A"} 21=${emaCtx.ema21?.toFixed(1)||"N/A"} `
+            +`trend=${emaCtx.emaTrendBull==null?"N/A":emaCtx.emaTrendBull?"BULL":"BEAR"} `
+            +`cross=${emaCtx.emaCross||"N/A"}(${emaCtx.emaCrossCandles}c ago) `
+            +`fresh=${emaCtx.momentumFresh} vol=${emaCtx.volRatio}x spike=${emaCtx.volumeSpike}`,"o");
         }
 
         // ── Factor C: Day change vs prev close (context weight = 15%) ──
@@ -5820,9 +5994,58 @@ async function loadOptions(force=true){
           compositeScore: +compositeScore.toFixed(2),
           bullish: optNiftyBullish, neutral: isNeutral,
           vix: optVix,
-          // Human-readable summary for log
-          summary: `momentum=${momentumLabel}(${momentumScore}) vwap=${intradayVWAP>0?(spot>=intradayVWAP?"ABOVE":"BELOW"):"N/A"} day=${optNiftyChgPct.toFixed(2)}% → composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":optNiftyBullish?"BULLISH":"BEARISH"}`
+          // ── EMA / volume / freshness context ──
+          ema9:           emaCtx.ema9,
+          ema21:          emaCtx.ema21,
+          emaTrendBull:   emaCtx.emaTrendBull,
+          emaCross:       emaCtx.emaCross,       // "bullish_cross"|"bearish_cross"|"no_cross"
+          emaCrossCandles:emaCtx.emaCrossCandles, // how many candles ago the cross happened
+          momentumFresh:  emaCtx.momentumFresh,  // true = momentum just turned (best entry)
+          volumeSpike:    emaCtx.volumeSpike,    // true = volume > 1.5× avg (confirms move)
+          volRatio:       emaCtx.volRatio,
+          summary: `momentum=${momentumLabel}(${momentumScore}) vwap=${intradayVWAP>0?(spot>=intradayVWAP?"ABOVE":"BELOW"):"N/A"} day=${optNiftyChgPct.toFixed(2)}% ema=${emaCtx.emaTrendBull==null?"N/A":emaCtx.emaTrendBull?"9>21":"9<21"} cross=${emaCtx.emaCross||"N/A"} → composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":optNiftyBullish?"BULLISH":"BEARISH"}`
         };
+
+        // ── Phase 1 Gate A: Consolidation check ──
+        // If last 3 candles have range < 0.25% of spot, market is going sideways.
+        // Directional options in a ranging market always decay to SL — block them.
+        let isConsolidating = false;
+        if(intradayCandles.length >= 3){
+          const last3 = intradayCandles.slice(-3);
+          const hiMax = Math.max(...last3.map(c=>+c[2]));
+          const loMin = Math.min(...last3.map(c=>+c[3]));
+          const rangePct = spot > 0 ? (hiMax - loMin) / spot * 100 : 1;
+          isConsolidating = rangePct < 0.25;
+          if(isConsolidating) lg(`⚠ Market CONSOLIDATING — last 3 candles range only ${rangePct.toFixed(3)}% — directional signals blocked`,"w");
+        }
+        marketCtx.isConsolidating = isConsolidating;
+
+        // ── Phase 1 Gate B: Fetch Nifty PDH/PDL ──
+        // Each per-underlying PDH/PDL is fetched inside the index loop below.
+        // Nifty's PDH/PDL fetched here for the composite marketCtx.
+        const niftyPDHL = await fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null);
+        marketCtx.niftyPDH = niftyPDHL?.pdh || null;
+        marketCtx.niftyPDL = niftyPDHL?.pdl || null;
+        if(niftyPDHL) lg(`Nifty PDH/PDL: ${niftyPDHL.pdh}/${niftyPDHL.pdl}`,"o");
+
+        // ── Phase 1 Gate C: Second-scan confirmation ──
+        // Store this scan's compositeScore so NEXT scan can compare.
+        // If direction flipped since last scan and conviction is weak → flag it.
+        const prevCtx = _prevScanCtx["NIFTY"];
+        const scanAge = prevCtx ? (Date.now() - prevCtx.time) / 60000 : 999; // minutes
+        let directionFlipped = false;
+        if(prevCtx && scanAge < 30){ // only compare if last scan was within 30 min
+          const prevBull = prevCtx.compositeScore > 0.5;
+          const currBull = compositeScore > 0.5;
+          const prevBear = prevCtx.compositeScore < -0.5;
+          const currBear = compositeScore < -0.5;
+          directionFlipped = (prevBull && currBear) || (prevBear && currBull);
+          if(directionFlipped) lg(`⚠ Direction FLIPPED since last scan (${prevCtx.compositeScore.toFixed(1)} → ${compositeScore.toFixed(1)}) — confidence penalised`,"w");
+        }
+        marketCtx.directionFlipped = directionFlipped;
+        marketCtx.prevCompositeScore = prevCtx?.compositeScore ?? null;
+        // Save current for next scan
+        _prevScanCtx["NIFTY"] = { compositeScore: +compositeScore.toFixed(2), time: Date.now() };
 
         const dirStr = compositeScore > 2    ? "STRONGLY BULLISH ↑↑"
                      : compositeScore > 0.5  ? "BULLISH ↑"
@@ -5877,7 +6100,26 @@ async function loadOptions(force=true){
         const maxPain = calcMaxPain(chain);
         const oiWalls = calcOIWalls(chain);
 
-        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null,marketCtx);
+        // ── Phase 1: Per-underlying PDH/PDL + PCR trend ──
+        // Fetch PDH/PDL for this specific underlying (BankNifty/Sensex/FinNifty differ from Nifty)
+        const undPDHL = await fetchPDHL(und.key).catch(()=>null);
+        // PCR trend: compare current PCR to last scan's PCR
+        const prevPCR = _prevPCRCache[und.name] ?? pcr;
+        const pcrTrend = +(pcr - prevPCR).toFixed(3); // positive=more bearish, negative=more bullish
+        _prevPCRCache[und.name] = pcr; // save for next scan
+        // Build enriched context for scanChain with per-underlying PDH/PDL
+        const undMarketCtx = {
+          ...marketCtx,
+          pdh:      undPDHL?.pdh || marketCtx.niftyPDH || null,
+          pdl:      undPDHL?.pdl || marketCtx.niftyPDL || null,
+          pdc:      undPDHL?.pdc || null,
+          pcr,
+          pcrTrend, // negative=CE OI growing relative to PE=bullish signal; positive=bearish
+          prevPCR,
+        };
+        if(undPDHL) lg(`${und.name} PDH/PDL: ${undPDHL.pdh}/${undPDHL.pdl} PCR: ${prevPCR}→${pcr} (trend ${pcrTrend>=0?"+":""}${pcrTrend})`,"o");
+
+        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null,undMarketCtx);
         const _cap=CFG.maxOptCapital>0?CFG.maxOptCapital:Infinity;
         const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf&&p.amtRequired<=_cap);
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
@@ -6008,16 +6250,20 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   let dirMult;
   const cs = marketCtx?.compositeScore ?? (niftyBullish ? 1 : -1);
   const isNeutral = marketCtx?.neutral === true;
-  if(isNeutral){
-    dirMult = 0.70; // neutral: moderate confidence for both sides
+  if(isNeutral || Math.abs(cs) < 1.0){
+    dirMult = 0.65; // weak/neutral trend: moderate confidence for both sides
   } else {
     const ceAligned = cs > 0, peAligned = cs < 0;
     const aligned = (isCE && ceAligned) || (!isCE && peAligned);
     const absCs = Math.abs(cs);
     if(aligned){
-      dirMult = absCs >= 2 ? 1.0 : absCs >= 1 ? 0.85 : 0.75;
+      // Aligned with trend — reward strong conviction
+      dirMult = absCs >= 3 ? 1.05 : absCs >= 2 ? 1.0 : absCs >= 1.5 ? 0.90 : 0.78;
     } else {
-      dirMult = absCs >= 2 ? 0.35 : absCs >= 1 ? 0.50 : 0.65;
+      // Counter-trend — penalise hard. Even a strong counter signal needs the market
+      // to reverse, which is a low-probability bet. Max mult 0.45 → max raw ~45 pts
+      // which is well below the 70% default threshold.
+      dirMult = absCs >= 3 ? 0.25 : absCs >= 2 ? 0.35 : 0.45;
     }
   }
 
@@ -6028,7 +6274,51 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
     const mAligned = (isCE && ms > 0) || (!isCE && ms < 0);
     if(mAligned && Math.abs(ms) >= 2) momentumBonus = 8;
     else if(mAligned && Math.abs(ms) >= 1) momentumBonus = 4;
-    else if(!mAligned && Math.abs(ms) >= 2) momentumBonus = -6; // momentum against = penalty
+    else if(!mAligned && Math.abs(ms) >= 2) momentumBonus = -6;
+  }
+
+  // ── EMA crossover bonus ──────────────────────────────────────────────────────
+  // EMA 9 crossing above 21 on 5-min = short-term trend just turned bullish.
+  // This is the single best entry timing signal available from price alone.
+  // Fresh cross (1-2 candles ago) = ideal entry. Stale cross (3+ candles) = reduced.
+  // EMA trend without cross = moderate confirmation. Counter-EMA = penalty.
+  let emaBonus = 0;
+  if(marketCtx?.emaTrendBull != null){
+    const emaAligned = (isCE && marketCtx.emaTrendBull) || (!isCE && !marketCtx.emaTrendBull);
+    const cross      = marketCtx.emaCross;
+    const crossAge   = marketCtx.emaCrossCandles ?? 999;
+    if(emaAligned){
+      if(cross === (isCE?"bullish_cross":"bearish_cross")){
+        // Fresh EMA cross in our direction — strongest signal
+        emaBonus = crossAge <= 1 ? +15 : crossAge <= 2 ? +10 : +6;
+      } else {
+        // EMA trend in our direction but no fresh cross — mild confirmation
+        emaBonus = +5;
+      }
+    } else {
+      // EMA trend AGAINST our option direction — signal is fighting the trend
+      emaBonus = cross === (isCE?"bearish_cross":"bullish_cross") ? -15 : -8;
+    }
+  }
+
+  // ── Momentum freshness bonus ─────────────────────────────────────────────────
+  // Fresh momentum (direction just turned in last 2 candles) = best entry timing.
+  // Stale momentum (same direction 4+ candles) = move may be exhausted, mean reversion risk.
+  let freshnessBonus = 0;
+  if(marketCtx?.momentumFresh === true){
+    const freshAligned = (isCE && (marketCtx.compositeScore??0) > 0)
+                      || (!isCE && (marketCtx.compositeScore??0) < 0);
+    freshnessBonus = freshAligned ? +8 : 0;
+  }
+
+  // ── Volume confirmation bonus ────────────────────────────────────────────────
+  // A directional move with above-average volume is real. Without volume it's noise.
+  // Volume spike (≥1.5× avg) = confirmed move. Low volume breakout = high SL hit risk.
+  let volumeBonus = 0;
+  if(marketCtx?.volRatio != null){
+    if(marketCtx.volRatio >= 2.0)      volumeBonus = +10; // strong surge — conviction move
+    else if(marketCtx.volRatio >= 1.5) volumeBonus =  +6; // above avg — confirmed
+    else if(marketCtx.volRatio < 0.7)  volumeBonus =  -8; // very low volume — likely noise
   }
 
   // ── All scores below apply to all options; dirMult applied at end ──
@@ -6040,9 +6330,27 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // High IV = expensive premium = bad for buyers
   const ivScore = iv >= 60 ? 20 : iv >= 40 ? 35 : iv >= 25 ? 60 : iv >= 15 ? 80 : 55;
 
-  // ── OI change score (25%) — buildup in trend direction = conviction ──
-  const oiScore = oiChg >= 40 ? 95 : oiChg >= 25 ? 82 : oiChg >= 10 ? 68
-                : oiChg >= 0  ? 50 : oiChg >= -10 ? 35 : 20;
+  // ── OI / PCR trend score (25%) ──
+  // REPLACED: Raw OI change was misleading — CE OI builds when market makers SELL
+  // calls to retail (bearish for CE buyers, not bullish). High CE OI = resistance.
+  // NEW: Use PCR trend from marketCtx.
+  //   PCR falling (negative pcrTrend) = CE OI growing relative to PE = market turning bullish
+  //   PCR rising (positive pcrTrend)  = PE OI growing relative to CE = market turning bearish
+  //   PCR neutral/no trend            = no conviction signal
+  // Aligned with option direction = bonus; opposing = penalty.
+  const pcrTrend = marketCtx?.pcrTrend ?? 0;
+  const pcr      = marketCtx?.pcr ?? 1;
+  let oiScore;
+  if(Math.abs(pcrTrend) < 0.03){
+    // PCR barely moved — neutral, no conviction from positioning
+    oiScore = 50;
+  } else {
+    const pcrBullish = pcrTrend < 0; // falling PCR = CE buildup = bullish
+    const aligned    = (isCE && pcrBullish) || (!isCE && !pcrBullish);
+    const strength   = Math.abs(pcrTrend);
+    if(aligned)  oiScore = strength > 0.15 ? 90 : strength > 0.08 ? 75 : 62;
+    else         oiScore = strength > 0.15 ? 25 : strength > 0.08 ? 35 : 45;
+  }
 
   // ── Moneyness (15%) — slight OTM is best for directional plays ──
   const moneyness = spot > 0 ? Math.abs((strike - spot) / spot * 100) : 10;
@@ -6073,7 +6381,9 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   const isBuyAction = (isCE && (marketCtx?.compositeScore??1) > 0) || (!isCE && (marketCtx?.compositeScore??-1) < 0);
   const ivAdjFinal  = isBuyAction ? ivPercentileAdj : -ivPercentileAdj;
 
-  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10 + sigBonus + momentumBonus + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
+  let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10
+          + sigBonus + momentumBonus + emaBonus + freshnessBonus + volumeBonus
+          + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
 
   // ── Trend strength boost ──
   // Strongly aligned (market clearly trending in option direction)
@@ -6114,9 +6424,39 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
 
 function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, maxPain, stockPCR, marketCtx=null) {
   const picks = [];
-  // Neutral market: when composite score is in dead-band, show both CE and PE
-  const isNeutral = marketCtx?.neutral === true;
+  const isNeutral     = marketCtx?.neutral === true;
   const compositeScore = marketCtx?.compositeScore ?? (niftyBullish ? 1 : -1);
+
+  // ── Phase 1 Gate A: Consolidation block ──
+  // If market is ranging in a tight band, all directional options will decay.
+  // Return empty — confidence filter cannot save a ranging-market signal.
+  if(marketCtx?.isConsolidating){
+    lg(`${name}: CONSOLIDATING — skipping all signals this scan`,"w");
+    return [];
+  }
+
+  // ── Phase 1 Gate B: PDH/PDL position ──
+  // Valid entry zones: CE near/above PDH (breakout territory), PE near/below PDL.
+  // Mid-range = high probability of mean reversion hitting SL.
+  const pdh = marketCtx?.pdh || null;
+  const pdl = marketCtx?.pdl || null;
+  const pdc = marketCtx?.pdc || null;
+  let priceZone = "mid"; // "abovePDH" | "belowPDL" | "nearPDH" | "nearPDL" | "mid"
+  if(pdh && pdl && spot > 0){
+    const pdhDist = (spot - pdh) / pdh * 100; // +ve = above PDH
+    const pdlDist = (pdl - spot) / pdl * 100; // +ve = below PDL
+    if(pdhDist >= 0)         priceZone = "abovePDH"; // strong breakout
+    else if(pdhDist >= -0.3) priceZone = "nearPDH";  // within 0.3% of PDH — approaching
+    else if(pdlDist >= 0)    priceZone = "belowPDL";  // strong breakdown
+    else if(pdlDist >= -0.3) priceZone = "nearPDL";   // within 0.3% of PDL — approaching
+    // else "mid" — in the middle, no clean level
+  }
+
+  // ── Phase 1 Gate C: Second-scan direction confirmation ──
+  // If direction just flipped since last scan (15 min ago), the new direction
+  // may be a head-fake. Apply confidence penalty; strong setups still pass ≥70%.
+  const dirFlipPenalty = marketCtx?.directionFlipped ? -15 : 0;
+  if(dirFlipPenalty) lg(`${name}: direction-flip penalty ${dirFlipPenalty} applied`,"w");
 
   for (const row of chain) {
     const sp = row.strike_price;
@@ -6142,8 +6482,11 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       if (oiChg <= -CFG.oi)   signals.push({l:"OI "+oiChg.toFixed(0)+"% Unwind",s:1});
       if (theta < -0.5)       signals.push({l:"Θ "+theta?.toFixed(2),     s:1});
       if (sp === atm)         signals.push({l:"ATM",                       s:1});
-      if (!signals.length && absD >= 0.10 && ltp > 0) signals.push({l:"Delta "+delta?.toFixed(2), s:1});
-      if (!signals.length)    continue;
+
+      // FIX: Require at least 2 confirming signals before considering this option.
+      // A single factor (e.g. just delta >= threshold) is noise, not a setup.
+      // The minimum useful combination is: delta + one of (OI buildup / IV / ATM).
+      if(signals.length < 2) continue;
 
       // Entry / SL / Target
       const entry = ltp;
@@ -6159,13 +6502,37 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       // ── Confidence: now uses marketCtx composite score for direction multiplier ──
       const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain, stockPCR, marketCtx);
       const _fiiConf    = applyFIIBias(_rawOptConf, optType==="CE" ? niftyBullish : !niftyBullish);
-      const confidence  = applyCalibration(_fiiConf, "OPTION");
 
-      // ── trendAligned: based on composite momentum, not just day change ──
-      // In neutral market, both CE and PE are treated as "aligned" (show both)
+      // ── Phase 1: PDH/PDL zone adjustment ──
+      // CE near/above PDH = breakout zone = good entry.
+      // CE in mid-range   = mean reversion risk = significant penalty.
+      // PE near/below PDL = breakdown zone = good entry.
+      // PE in mid-range   = same — penalty.
+      let zoneAdj = 0;
+      const isCE_ = optType === "CE";
+      if(priceZone === "abovePDH" &&  isCE_) zoneAdj = +10; // clean breakout — bonus
+      else if(priceZone === "nearPDH" &&  isCE_) zoneAdj =  +5; // approaching — mild bonus
+      else if(priceZone === "belowPDL" && !isCE_) zoneAdj = +10; // clean breakdown — bonus
+      else if(priceZone === "nearPDL" && !isCE_) zoneAdj =  +5; // approaching — mild bonus
+      else if(priceZone === "mid"){
+        // Mid-range: heavy penalty — no clean directional level to trade from
+        zoneAdj = -18;
+      }
+      // Wrong zone (e.g. CE when price is below PDL): extra penalty
+      if(priceZone === "belowPDL" &&  isCE_) zoneAdj = -25;
+      if(priceZone === "abovePDH" && !isCE_) zoneAdj = -25;
+
+      const confidence = Math.round(Math.min(100, Math.max(0, _fiiConf + zoneAdj + dirFlipPenalty)));
+      const calibConf  = applyCalibration(confidence, "OPTION");
+
+      // ── trendAligned: require |compositeScore| >= 1.0 for conviction ──
+      // FIX: Old code used compositeScore > 0 — even a score of 0.01 was "bullish".
+      // Scores between -1.0 and +1.0 are effectively noise (market not clearly trending).
+      // Now: treat |score| < 1.0 as neutral → show both CE and PE, let confidence decide.
       const isCE   = optType === "CE";
-      const trendAligned = isNeutral
-        ? true  // neutral = show all, let confidence sort them
+      const effectiveNeutral = isNeutral || Math.abs(compositeScore) < 1.0;
+      const trendAligned = effectiveNeutral
+        ? true  // neutral zone = show both sides, confidence sorts quality
         : (isCE ? compositeScore > 0 : compositeScore < 0);
 
       // Direction label reflects composite momentum, not just day change
@@ -6190,7 +6557,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         strike: sp, type: optType, entry, sl, tgt, rr,
         iv, delta, theta, oi, oiChg, action, signals,
         score: signals.reduce((a, s) => a + s.s, 0),
-        confidence, atm: sp === atm, spot, expiry, und: name,
+        confidence: calibConf, atm: sp === atm, spot, expiry, und: name,
         lot, amtRequired, maxLoss, maxProfit,
         trendAligned,
         trendDir: momentumDir,
@@ -6199,6 +6566,17 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         slTgtMethod,
         stockPCR: stockPCR||null,
         vix: vix||15,
+        priceZone,
+        pdh: pdh||null,
+        pdl: pdl||null,
+        zoneAdj,
+        dirFlipPenalty,
+        // EMA / volume / freshness — shown as badges on card
+        emaCross:       marketCtx?.emaCross       || null,
+        emaCrossCandles:marketCtx?.emaCrossCandles ?? null,
+        emaTrendBull:   marketCtx?.emaTrendBull   ?? null,
+        momentumFresh:  marketCtx?.momentumFresh  || false,
+        volRatio:       marketCtx?.volRatio        ?? null,
       });
     }
   }
@@ -6622,6 +7000,24 @@ function renderStatsOptions(idxGroups, niftyBull, chgPct, vix, marketCtx){
   const dirBanner = `<div style="background:${bg};border:1px solid ${border};border-radius:8px;padding:9px 13px;margin-bottom:12px;font-size:11px;font-weight:700;color:${color}">${dirLine}${gapNote}</div>`;
   document.getElementById("options-body").insertAdjacentHTML("afterbegin", dirBanner);
 
+  // ── Time-quality warning banner ──
+  // Based on historical win rates from Analysis tab: Mid/Afternoon/Pre-close are consistently poor.
+  // Confidence penalties are already applied (-20 to -25), but also show an explicit warning.
+  const _phase = getIntradayPhase();
+  const _phaseWarn = {
+    mid:       { label:"Mid Day (10:30–12:30)",  wr:"~2%",  color:"#991b1b", bg:"#fef2f2", border:"#fca5a5" },
+    afternoon: { label:"Afternoon (12:30–2 PM)", wr:"~5%",  color:"#991b1b", bg:"#fef2f2", border:"#fca5a5" },
+    closing:   { label:"Pre-close (2–3:30 PM)",  wr:"~4%",  color:"#92400e", bg:"#fffbeb", border:"#fde68a" },
+  }[_phase];
+  if(_phaseWarn){
+    document.getElementById("options-body").insertAdjacentHTML("afterbegin",
+      `<div style="background:${_phaseWarn.bg};border:1px solid ${_phaseWarn.border};border-radius:8px;padding:9px 13px;margin-bottom:8px;font-size:10px;font-weight:700;color:${_phaseWarn.color}">
+        ⏰ ${_phaseWarn.label} — Historically <b>${_phaseWarn.wr} win rate</b> · Signal confidence penalised by 20–25 pts · Only very high-confidence setups shown.
+        <div style="font-size:9px;font-weight:500;margin-top:3px;opacity:.85">Best trading window: 9:15–10:30 AM (Opening &amp; Early session)</div>
+      </div>`
+    );
+  }
+
   document.getElementById("stats-options").style.gridTemplateColumns="repeat(auto-fill,minmax(min(calc(50% - 5px),200px),1fr))";
   document.getElementById("stats-options").innerHTML=idxGroups.map(g=>{
     const pc=g.pcr>1?"up":g.pcr>0.7?"am":"dn";
@@ -6774,8 +7170,44 @@ function optCard(p,i){
     </div>
     ${p.slTgtMethod?`<div style="font-size:8px;color:#94a3b8;margin-top:3px;padding:0 2px">📐 ${p.slTgtMethod}${isWeeklyExpiryDay()?" · ⚡ EXPIRY DAY":""}</div>`:""}
     ${isWeeklyExpiryDay()?`<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:3px 8px;margin-top:4px;margin-bottom:6px;font-size:9px;font-weight:700;color:#92400e">⚡ EXPIRY DAY — Gamma elevated · ATM moves 3-5× normal · Tight SL applied</div>`:""}
-    ${getIntradayPhase()==="opening"?`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:3px 8px;margin-bottom:6px;font-size:9px;font-weight:700;color:#9a3412">⏰ OPENING HOUR (9:15–9:45) — High noise period, -15 confidence applied</div>`:""}
-    <div class="bar-row" style="margin-bottom:8px">
+    ${getIntradayPhase()==="opening"?`<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:3px 8px;margin-bottom:6px;font-size:9px;font-weight:700;color:#15803d">⏰ OPENING HOUR (9:15–9:45) — Best historical win rate · +5 confidence bonus applied</div>`:""}
+
+    <!-- EMA + Volume quality badges -->
+    ${(()=>{
+      const badges=[];
+      // EMA cross badge
+      if(p.emaCross==="bullish_cross"&&p.type==="CE")
+        badges.push(`<span style="background:#dcfce7;color:#15803d;border:1px solid #86efac;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📶 EMA CROSS ↑ ${p.emaCrossCandles<=1?"FRESH":""+p.emaCrossCandles+"c ago"}</span>`);
+      else if(p.emaCross==="bearish_cross"&&p.type==="PE")
+        badges.push(`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📶 EMA CROSS ↓ ${p.emaCrossCandles<=1?"FRESH":""+p.emaCrossCandles+"c ago"}</span>`);
+      else if(p.emaTrendBull===true&&p.type==="CE")
+        badges.push(`<span style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📶 EMA Bull</span>`);
+      else if(p.emaTrendBull===false&&p.type==="PE")
+        badges.push(`<span style="background:#fef2f2;color:#991b1b;border:1px solid #fecaca;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📶 EMA Bear</span>`);
+      // Volume badge
+      if(p.volRatio>=2.0)
+        badges.push(`<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📊 VOL ${p.volRatio}× surge</span>`);
+      else if(p.volRatio>=1.5)
+        badges.push(`<span style="background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">📊 VOL ${p.volRatio}× above avg</span>`);
+      // Freshness badge
+      if(p.momentumFresh)
+        badges.push(`<span style="background:#fefce8;color:#854d0e;border:1px solid #fde68a;font-size:8px;font-weight:700;padding:2px 7px;border-radius:10px">⚡ FRESH momentum</span>`);
+      return badges.length?`<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">${badges.join("")}</div>`:"";
+    })()}
+
+    ${p.priceZone?`<div style="font-size:9px;font-weight:700;padding:3px 8px;border-radius:5px;margin-bottom:5px;${
+      p.priceZone==="abovePDH"?"background:#f0fdf4;color:#15803d":
+      p.priceZone==="nearPDH" ?"background:#f0fdf4;color:#15803d;opacity:.8":
+      p.priceZone==="belowPDL"?"background:#fef2f2;color:#991b1b":
+      p.priceZone==="nearPDL" ?"background:#fef2f2;color:#991b1b;opacity:.8":
+                                "background:#fffbeb;color:#92400e"
+    }">${
+      p.priceZone==="abovePDH"?`📈 Above PDH ₹${p.pdh||""} — breakout zone (+10 conf)`:
+      p.priceZone==="nearPDH" ?`📈 Near PDH ₹${p.pdh||""} — approaching breakout (+5 conf)`:
+      p.priceZone==="belowPDL"?`📉 Below PDL ₹${p.pdl||""} — breakdown zone (+10 conf)`:
+      p.priceZone==="nearPDL" ?`📉 Near PDL ₹${p.pdl||""} — approaching breakdown (+5 conf)`:
+      `⚠ Mid-range (PDH ₹${p.pdh||"?"} / PDL ₹${p.pdl||"?"}) — caution, no key level (-18 conf)`
+    }${p.dirFlipPenalty?"  ·  ⚠ Direction flipped ("+p.dirFlipPenalty+" conf)":""}</div>`:""}
       <span class="bar-lbl">Confidence</span>
       <div class="bar-track"><div class="bar-fill" style="width:${p.confidence}%;background:${p.confidence>=CFG.minOptConf?"#16a34a":p.confidence>=(CFG.minOptConf-15)?"#d97706":"#dc2626"}"></div></div>
       <span class="bar-val ${confC}">${p.confidence}%</span>

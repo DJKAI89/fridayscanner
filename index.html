@@ -934,6 +934,9 @@ const _prevScanCtx = {};
 // Previous PCR per underlying — for PCR trend signal (replaces raw OI change)
 // sym → pcr from last scan
 const _prevPCRCache = {};
+// Previous avg IV per underlying — for IV trend detection (Fix 3)
+// IV expanding = good for option buyers; contracting = premium crush risk
+const _prevAvgIVCache = {};
 let _secMap       = {}; // sector name → {g: gains count, c: total count}
 
 // ══════════════════════════════════════
@@ -5795,9 +5798,114 @@ function updateOptProgress(msg){
   if(upd) upd.textContent="⏳ "+msg;
 }
 
-// ══════════════════════════════════════
-// OPTIONS SCAN
-// ══════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+// computeCtxFromCandles — builds a full marketCtx from intraday 5-min candles
+// Used for EVERY index individually (Nifty, BankNifty, SENSEX, FinNifty)
+// and for sector-mapped stock option scanning.
+// ══════════════════════════════════════════════════════════════════════════
+function computeCtxFromCandles(candles, spot, chgPct, vix, pdhl=null){
+  const calcEMA = (closes, period) => {
+    if(closes.length < period) return null;
+    const k = 2 / (period + 1);
+    let ema = closes.slice(0, period).reduce((a,b)=>a+b,0) / period;
+    for(let i = period; i < closes.length; i++) ema = closes[i]*k + ema*(1-k);
+    return ema;
+  };
+
+  let momentumScore = 0, momentumLabel = "N/A", intradayVWAP = 0;
+  let emaCtx = {
+    ema9:null, ema21:null, emaCross:null, emaCrossCandles:999,
+    emaTrendBull:null, momentumFresh:false, volumeSpike:false, volRatio:null,
+  };
+
+  if(candles.length >= 3){
+    const closes  = candles.map(c=>+c[4]);
+    const volumes = candles.map(c=>+c[5]);
+    const n       = candles.length;
+
+    if(n >= 9)  emaCtx.ema9  = calcEMA(closes, 9);
+    if(n >= 21) emaCtx.ema21 = calcEMA(closes, 21);
+    if(emaCtx.ema9 != null && emaCtx.ema21 != null)
+      emaCtx.emaTrendBull = emaCtx.ema9 > emaCtx.ema21;
+
+    if(n >= 22){
+      let crossFound = null, crossAge = 999;
+      for(let lb = 1; lb <= 3; lb++){
+        const prev9  = calcEMA(closes.slice(0, n-lb), 9);
+        const prev21 = calcEMA(closes.slice(0, n-lb), 21);
+        if(prev9==null||prev21==null) break;
+        const wasBull = prev9 > prev21;
+        const isBull  = emaCtx.emaTrendBull;
+        if(isBull && !wasBull){ crossFound="bullish_cross"; crossAge=lb; break; }
+        if(!isBull && wasBull){ crossFound="bearish_cross"; crossAge=lb; break; }
+      }
+      emaCtx.emaCross        = crossFound || "no_cross";
+      emaCtx.emaCrossCandles = crossAge;
+    }
+
+    if(n >= 3){
+      const last2 = candles.slice(-2), prev2 = candles.slice(-4,-2);
+      const last2Bull = last2.every(c=>+c[4]>+c[1]);
+      const last2Bear = last2.every(c=>+c[4]<+c[1]);
+      const prev2Bear = prev2.length>=2 && prev2.every(c=>+c[4]<+c[1]);
+      const prev2Bull = prev2.length>=2 && prev2.every(c=>+c[4]>+c[1]);
+      emaCtx.momentumFresh = (last2Bull&&prev2Bear)||(last2Bear&&prev2Bull);
+    }
+
+    if(n >= 5){
+      const lb  = Math.min(10, n-1);
+      const avg = volumes.slice(-lb-1,-1).reduce((a,b)=>a+b,0)/lb;
+      emaCtx.volRatio    = avg>0 ? +(volumes[n-1]/avg).toFixed(2) : null;
+      emaCtx.volumeSpike = emaCtx.volRatio!=null && emaCtx.volRatio>=1.5;
+    }
+
+    const recent    = candles.slice(-6);
+    const movePct   = (+recent[recent.length-1][4] - +recent[0][1]) / +recent[0][1] * 100;
+    const upCandles = recent.filter(c=>+c[4]>+c[1]).length;
+    const dnCandles = recent.filter(c=>+c[4]<+c[1]).length;
+    if(movePct > 0.4)        momentumScore += 2;
+    else if(movePct > 0.15)  momentumScore += 1;
+    else if(movePct < -0.4)  momentumScore -= 2;
+    else if(movePct < -0.15) momentumScore -= 1;
+    if(upCandles >= 4)       momentumScore += 1;
+    else if(dnCandles >= 4)  momentumScore -= 1;
+    momentumScore = Math.max(-3, Math.min(3, momentumScore));
+
+    momentumLabel = momentumScore>=2?"RISING STRONGLY":momentumScore>=1?"RISING"
+                  :momentumScore<=-2?"FALLING STRONGLY":momentumScore<=-1?"FALLING":"FLAT";
+
+    let tpvSum=0, volSum=0;
+    for(const c of candles){ const tp=(+c[2]+ +c[3]+ +c[4])/3,v=+c[5]; tpvSum+=tp*v; volSum+=v; }
+    intradayVWAP = volSum>0 ? tpvSum/volSum : 0;
+  }
+
+  const dayScore    = chgPct > 1 ? 2 : chgPct > 0.3 ? 1 : chgPct < -1 ? -2 : chgPct < -0.3 ? -1 : 0;
+  const vwapScore   = intradayVWAP > 0 ? (spot >= intradayVWAP ? 1 : -1) : 0;
+  const compositeScore = (momentumScore*1.33) + (dayScore*0.5) + (vwapScore*1.75);
+  const deadBand    = candles.length >= 3 ? 0.5 : 1.0;
+  const isBullish   = compositeScore > 0;
+  const isNeutral   = Math.abs(compositeScore) < deadBand;
+
+  return {
+    spot, vwap: intradayVWAP, momentumScore, momentumLabel,
+    dayChange: chgPct, dayScore, vwapScore,
+    compositeScore: +compositeScore.toFixed(2),
+    bullish: isBullish, neutral: isNeutral,
+    vix,
+    ema9:            emaCtx.ema9,
+    ema21:           emaCtx.ema21,
+    emaTrendBull:    emaCtx.emaTrendBull,
+    emaCross:        emaCtx.emaCross,
+    emaCrossCandles: emaCtx.emaCrossCandles,
+    momentumFresh:   emaCtx.momentumFresh,
+    volumeSpike:     emaCtx.volumeSpike,
+    volRatio:        emaCtx.volRatio,
+    pdh: pdhl?.pdh || null,
+    pdl: pdhl?.pdl || null,
+    pdc: pdhl?.pdc || null,
+    summary:`momentum=${momentumLabel}(${momentumScore}) vwap=${intradayVWAP>0?(spot>=intradayVWAP?"ABOVE":"BELOW"):"N/A"} day=${chgPct.toFixed(2)}% ema=${emaCtx.emaTrendBull==null?"N/A":emaCtx.emaTrendBull?"9>21":"9<21"} cross=${emaCtx.emaCross||"N/A"} → composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":isBullish?"BULLISH":"BEARISH"}`,
+  };
+}
 async function loadOptions(force=true){
   if(optLoading)return;
   // Always re-scan — never skip even if tab was visited before
@@ -5842,217 +5950,93 @@ async function loadOptions(force=true){
         const vQ2  = mktD["NSE_INDEX|India VIX"];
         if(!nQ2?.last_price) throw new Error("Nifty quote missing");
 
+        // ── Fetch all 4 index candles IN PARALLEL — no added latency vs sequential ──
+        // Fix: Previously only Nifty candles were fetched. BankNifty/SENSEX/FinNifty
+        // were getting Nifty's EMA crossover for their option signals — completely wrong.
+        // Now each index has its own EMA, momentum, VWAP and compositeScore.
+        updateOptProgress("Step 1b: Fetching per-index intraday candles (parallel)...");
+        const [niftyCandles, bankNiftyCandles, sensexCandles, finNiftyCandles] = await Promise.all([
+          fetchIntraday("NSE_INDEX|Nifty 50",         "5minute").catch(()=>[]),
+          fetchIntraday("NSE_INDEX|Nifty Bank",        "5minute").catch(()=>[]),
+          fetchIntraday("BSE_INDEX|SENSEX",            "5minute").catch(()=>[]),
+          fetchIntraday("NSE_INDEX|Nifty Fin Service", "5minute").catch(()=>[]),
+        ]);
+
+        // Also fetch PDH/PDL for all 4 indices in parallel
+        const [niftyPDHL, bankNiftyPDHL, sensexPDHL, finNiftyPDHL] = await Promise.all([
+          fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null),
+          fetchPDHL("NSE_INDEX|Nifty Bank").catch(()=>null),
+          fetchPDHL("BSE_INDEX|SENSEX").catch(()=>null),
+          fetchPDHL("NSE_INDEX|Nifty Fin Service").catch(()=>null),
+        ]);
+
         const spot   = nQ2.last_price;
         optVix = vQ2?.last_price || 15;
 
-        // ── Factor A: Intraday momentum (last 30 min = last 6 × 5-min candles) ──
-        // When market is closed, intradayCandles will be [] — skip momentum, use day change only
-        let momentumScore = 0, momentumLabel = "N/A (market closed)", intradayVWAP = 0;
-
-        // ── EMA helper (computed once, used by multiple checks below) ──
-        const calcEMA = (closes, period) => {
-          if(closes.length < period) return null;
-          const k = 2 / (period + 1);
-          let ema = closes.slice(0, period).reduce((a,b)=>a+b,0) / period;
-          for(let i = period; i < closes.length; i++) ema = closes[i]*k + ema*(1-k);
-          return ema;
-        };
-
-        // ── Intraday signal context (EMA, volume, freshness) ──
-        let emaCtx = {
-          ema9: null, ema21: null,
-          emaCross: null,       // "bullish_cross" | "bearish_cross" | "no_cross"
-          emaCrossCandles: 999, // candles since cross (999 = never/unknown)
-          emaTrendBull: null,   // true if ema9 > ema21 right now
-          momentumFresh: false, // true if momentum direction changed in last 2 candles
-          volumeSpike: false,   // true if last candle volume > 1.5× 10-candle avg
-          volRatio: null,
-        };
-
-        if(intradayCandles.length >= 3){
-          const closes  = intradayCandles.map(c=>+c[4]);
-          const volumes = intradayCandles.map(c=>+c[5]);
-          const n       = intradayCandles.length;
-
-          // ── EMA 9 & 21 ──
-          if(n >= 9)  emaCtx.ema9  = calcEMA(closes, 9);
-          if(n >= 21) emaCtx.ema21 = calcEMA(closes, 21);
-
-          // Current EMA trend
-          if(emaCtx.ema9 != null && emaCtx.ema21 != null)
-            emaCtx.emaTrendBull = emaCtx.ema9 > emaCtx.ema21;
-
-          // ── EMA crossover detection (scan last 3 candles for a fresh cross) ──
-          // A bullish cross = ema9 just crossed ABOVE ema21 in last 1-3 candles
-          if(n >= 22){
-            let crossFound = null, crossAge = 999;
-            for(let lookback = 1; lookback <= 3; lookback++){
-              const prevCloses = closes.slice(0, n - lookback);
-              const prev9  = calcEMA(prevCloses, 9);
-              const prev21 = calcEMA(prevCloses, 21);
-              if(prev9 == null || prev21 == null) break;
-              const wasBull = prev9 > prev21;
-              const isBull  = emaCtx.emaTrendBull;
-              if(isBull && !wasBull){ crossFound = "bullish_cross";  crossAge = lookback; break; }
-              if(!isBull && wasBull){ crossFound = "bearish_cross";  crossAge = lookback; break; }
-            }
-            emaCtx.emaCross        = crossFound || "no_cross";
-            emaCtx.emaCrossCandles = crossAge;
-          }
-
-          // ── Momentum freshness ──
-          // Fresh = direction changed in last 1-2 candles (just turned, not stale)
-          // Stale = same direction for 4+ consecutive candles (move likely exhausted)
-          if(n >= 3){
-            const last2 = intradayCandles.slice(-2);
-            const prev2 = intradayCandles.slice(-4,-2);
-            const last2Bull  = last2.every(c=>+c[4]>+c[1]);
-            const last2Bear  = last2.every(c=>+c[4]<+c[1]);
-            const prev2Bear  = prev2.length >= 2 && prev2.every(c=>+c[4]<+c[1]);
-            const prev2Bull  = prev2.length >= 2 && prev2.every(c=>+c[4]>+c[1]);
-            emaCtx.momentumFresh = (last2Bull && prev2Bear) || (last2Bear && prev2Bull);
-          }
-
-          // ── Volume confirmation ──
-          // Last candle volume vs 10-candle average. Spike ≥ 1.5× = real move.
-          if(n >= 5){
-            const lookback = Math.min(10, n-1);
-            const avgVol = volumes.slice(-lookback-1,-1).reduce((a,b)=>a+b,0)/lookback;
-            const lastVol = volumes[n-1];
-            emaCtx.volRatio   = avgVol > 0 ? +(lastVol/avgVol).toFixed(2) : null;
-            emaCtx.volumeSpike = emaCtx.volRatio != null && emaCtx.volRatio >= 1.5;
-          }
-
-          const recent = intradayCandles.slice(-6); // last 30 min
-          const oldest = recent[0], latest = recent[recent.length-1];
-          const openRecent = +oldest[1], closeRecent = +latest[4];
-          const movePct = (closeRecent - openRecent) / openRecent * 100;
-
-          const upCandles   = recent.filter(c=>+c[4]>+c[1]).length;
-          const downCandles = recent.filter(c=>+c[4]<+c[1]).length;
-
-          if(movePct > 0.4)       momentumScore += 2;
-          else if(movePct > 0.15) momentumScore += 1;
-          else if(movePct < -0.4) momentumScore -= 2;
-          else if(movePct < -0.15)momentumScore -= 1;
-          if(upCandles >= 4)       momentumScore += 1;
-          else if(downCandles >= 4)momentumScore -= 1;
-
-          momentumScore = Math.max(-3, Math.min(3, momentumScore));
-          momentumLabel = momentumScore >= 2 ? "RISING STRONGLY"
-                        : momentumScore >= 1 ? "RISING"
-                        : momentumScore <= -2? "FALLING STRONGLY"
-                        : momentumScore <= -1? "FALLING"
-                        : "FLAT";
-
-          let tpvSum=0, volSum=0;
-          for(const c of intradayCandles){
-            const tp=(+c[2]+ +c[3]+ +c[4])/3, vol=+c[5];
-            tpvSum+=tp*vol; volSum+=vol;
-          }
-          intradayVWAP = volSum>0 ? tpvSum/volSum : 0;
-
-          // Log EMA context
-          lg(`EMA ctx: 9=${emaCtx.ema9?.toFixed(1)||"N/A"} 21=${emaCtx.ema21?.toFixed(1)||"N/A"} `
-            +`trend=${emaCtx.emaTrendBull==null?"N/A":emaCtx.emaTrendBull?"BULL":"BEAR"} `
-            +`cross=${emaCtx.emaCross||"N/A"}(${emaCtx.emaCrossCandles}c ago) `
-            +`fresh=${emaCtx.momentumFresh} vol=${emaCtx.volRatio}x spike=${emaCtx.volumeSpike}`,"o");
-        }
-
-        // ── Factor C: Day change vs prev close (context weight = 15%) ──
+        // Day change for Nifty (used for global optNiftyBullish + optNiftyChgPct)
         const netChg = nQ2.net_change != null ? nQ2.net_change
                      : (nQ2.ohlc?.close ? spot - nQ2.ohlc.close
                      : nQ2.ohlc?.open  ? spot - nQ2.ohlc.open : 0);
         optNiftyChgPct = spot > 0 ? (netChg / spot) * 100 : 0;
-        // Day change score: -2 to +2
-        const dayScore = optNiftyChgPct > 1    ?  2
-                       : optNiftyChgPct > 0.3  ?  1
-                       : optNiftyChgPct < -1   ? -2
-                       : optNiftyChgPct < -0.3 ? -1
-                       : 0;
 
-        // ── Factor B score: VWAP position ──
-        const vwapScore = intradayVWAP > 0 ? (spot >= intradayVWAP ? 1 : -1) : 0;
-
-        // ── Composite direction ──
-        // Weights: momentum(40%) day(15%) vwap(25%) → scored out of 7
-        // momentumScore: -3..+3 × 40% weight → multiply by 1.33
-        // dayScore:      -2..+2 × 15% weight → multiply by 0.5
-        // vwapScore:     -1..+1 × 25% weight → multiply by 1.75
-        const compositeScore = (momentumScore * 1.33) + (dayScore * 0.5) + (vwapScore * 1.75);
-
-        // Threshold: positive = bullish, negative = bearish
-        // Wider dead-band when market closed (no intraday momentum available)
-        const deadBand = intradayCandles.length >= 3 ? 0.5 : 1.0;
-        optNiftyBullish = compositeScore > 0;
-        const isNeutral = Math.abs(compositeScore) < deadBand;
-
-        // Store full context for use in scanChain confidence scoring
-        marketCtx = {
-          spot, vwap: intradayVWAP, momentumScore, momentumLabel,
-          dayChange: optNiftyChgPct, dayScore, vwapScore,
-          compositeScore: +compositeScore.toFixed(2),
-          bullish: optNiftyBullish, neutral: isNeutral,
-          vix: optVix,
-          // ── EMA / volume / freshness context ──
-          ema9:           emaCtx.ema9,
-          ema21:          emaCtx.ema21,
-          emaTrendBull:   emaCtx.emaTrendBull,
-          emaCross:       emaCtx.emaCross,       // "bullish_cross"|"bearish_cross"|"no_cross"
-          emaCrossCandles:emaCtx.emaCrossCandles, // how many candles ago the cross happened
-          momentumFresh:  emaCtx.momentumFresh,  // true = momentum just turned (best entry)
-          volumeSpike:    emaCtx.volumeSpike,    // true = volume > 1.5× avg (confirms move)
-          volRatio:       emaCtx.volRatio,
-          summary: `momentum=${momentumLabel}(${momentumScore}) vwap=${intradayVWAP>0?(spot>=intradayVWAP?"ABOVE":"BELOW"):"N/A"} day=${optNiftyChgPct.toFixed(2)}% ema=${emaCtx.emaTrendBull==null?"N/A":emaCtx.emaTrendBull?"9>21":"9<21"} cross=${emaCtx.emaCross||"N/A"} → composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":optNiftyBullish?"BULLISH":"BEARISH"}`
+        // ── Build per-index marketCtx using the shared helper ──
+        const _indexCtxMap = {
+          NIFTY:     computeCtxFromCandles(niftyCandles,    spot, optNiftyChgPct, optVix, niftyPDHL),
+          BANKNIFTY: computeCtxFromCandles(bankNiftyCandles, 0,   0,              optVix, bankNiftyPDHL),
+          SENSEX:    computeCtxFromCandles(sensexCandles,    0,   0,              optVix, sensexPDHL),
+          FINNIFTY:  computeCtxFromCandles(finNiftyCandles,  0,   0,              optVix, finNiftyPDHL),
         };
+        // Patch day change into BankNifty/SENSEX/FinNifty once their spots are known
+        // (spots are fetched later in the index loop; context is enriched there)
 
-        // ── Phase 1 Gate A: Consolidation check ──
-        // If last 3 candles have range < 0.25% of spot, market is going sideways.
-        // Directional options in a ranging market always decay to SL — block them.
+        // Global Nifty context (used for consolidation, direction flip, stock scanner)
+        marketCtx = _indexCtxMap.NIFTY;
+
+        lg(`Per-index EMA: `
+          +`NIFTY=${_indexCtxMap.NIFTY.emaTrendBull==null?"N/A":_indexCtxMap.NIFTY.emaTrendBull?"Bull":"Bear"} `
+          +`BANKNIFTY=${_indexCtxMap.BANKNIFTY.emaTrendBull==null?"N/A":_indexCtxMap.BANKNIFTY.emaTrendBull?"Bull":"Bear"} `
+          +`SENSEX=${_indexCtxMap.SENSEX.emaTrendBull==null?"N/A":_indexCtxMap.SENSEX.emaTrendBull?"Bull":"Bear"} `
+          +`FINNIFTY=${_indexCtxMap.FINNIFTY.emaTrendBull==null?"N/A":_indexCtxMap.FINNIFTY.emaTrendBull?"Bull":"Bear"}`,"o");
+
+        // ── Consolidation check (on Nifty — primary gate for all signals) ──
         let isConsolidating = false;
-        if(intradayCandles.length >= 3){
-          const last3 = intradayCandles.slice(-3);
-          const hiMax = Math.max(...last3.map(c=>+c[2]));
-          const loMin = Math.min(...last3.map(c=>+c[3]));
-          const rangePct = spot > 0 ? (hiMax - loMin) / spot * 100 : 1;
+        if(niftyCandles.length >= 3){
+          const last3   = niftyCandles.slice(-3);
+          const hiMax   = Math.max(...last3.map(c=>+c[2]));
+          const loMin   = Math.min(...last3.map(c=>+c[3]));
+          const rangePct= marketCtx.spot > 0 ? (hiMax-loMin)/marketCtx.spot*100 : 1;
           isConsolidating = rangePct < 0.25;
-          if(isConsolidating) lg(`⚠ Market CONSOLIDATING — last 3 candles range only ${rangePct.toFixed(3)}% — directional signals blocked`,"w");
+          if(isConsolidating) lg(`⚠ CONSOLIDATING — 3-candle range ${rangePct.toFixed(3)}% < 0.25% — directional signals blocked`,"w");
         }
-        marketCtx.isConsolidating = isConsolidating;
 
-        // ── Phase 1 Gate B: Fetch Nifty PDH/PDL ──
-        // Each per-underlying PDH/PDL is fetched inside the index loop below.
-        // Nifty's PDH/PDL fetched here for the composite marketCtx.
-        const niftyPDHL = await fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null);
-        marketCtx.niftyPDH = niftyPDHL?.pdh || null;
-        marketCtx.niftyPDL = niftyPDHL?.pdl || null;
-        if(niftyPDHL) lg(`Nifty PDH/PDL: ${niftyPDHL.pdh}/${niftyPDHL.pdl}`,"o");
-
-        // ── Phase 1 Gate C: Second-scan confirmation ──
-        // Store this scan's compositeScore so NEXT scan can compare.
-        // If direction flipped since last scan and conviction is weak → flag it.
+        // ── Second-scan confirmation (Nifty composite) ──
         const prevCtx = _prevScanCtx["NIFTY"];
-        const scanAge = prevCtx ? (Date.now() - prevCtx.time) / 60000 : 999; // minutes
+        const scanAge = prevCtx ? (Date.now()-prevCtx.time)/60000 : 999;
         let directionFlipped = false;
-        if(prevCtx && scanAge < 30){ // only compare if last scan was within 30 min
-          const prevBull = prevCtx.compositeScore > 0.5;
-          const currBull = compositeScore > 0.5;
-          const prevBear = prevCtx.compositeScore < -0.5;
-          const currBear = compositeScore < -0.5;
-          directionFlipped = (prevBull && currBear) || (prevBear && currBull);
-          if(directionFlipped) lg(`⚠ Direction FLIPPED since last scan (${prevCtx.compositeScore.toFixed(1)} → ${compositeScore.toFixed(1)}) — confidence penalised`,"w");
+        if(prevCtx && scanAge < 30){
+          const prevBull = prevCtx.compositeScore > 0.5, currBull = marketCtx.compositeScore > 0.5;
+          const prevBear = prevCtx.compositeScore < -0.5, currBear = marketCtx.compositeScore < -0.5;
+          directionFlipped = (prevBull&&currBear)||(prevBear&&currBull);
+          if(directionFlipped) lg(`⚠ Direction FLIPPED: ${prevCtx.compositeScore.toFixed(1)} → ${marketCtx.compositeScore.toFixed(1)}`,"w");
         }
-        marketCtx.directionFlipped = directionFlipped;
-        marketCtx.prevCompositeScore = prevCtx?.compositeScore ?? null;
-        // Save current for next scan
-        _prevScanCtx["NIFTY"] = { compositeScore: +compositeScore.toFixed(2), time: Date.now() };
+        _prevScanCtx["NIFTY"] = { compositeScore: marketCtx.compositeScore, time: Date.now() };
 
-        const dirStr = compositeScore > 2    ? "STRONGLY BULLISH ↑↑"
-                     : compositeScore > 0.5  ? "BULLISH ↑"
-                     : compositeScore > -0.5 ? "NEUTRAL ↔ (show both CE & PE)"
-                     : compositeScore > -2   ? "BEARISH ↓"
-                     :                         "STRONGLY BEARISH ↓↓";
+        // Patch shared flags into ALL per-index contexts
+        for(const ctx of Object.values(_indexCtxMap)){
+          ctx.isConsolidating  = isConsolidating;
+          ctx.directionFlipped = directionFlipped;
+          ctx.niftyPDH         = niftyPDHL?.pdh || null;
+          ctx.niftyPDL         = niftyPDHL?.pdl || null;
+          ctx.prevCompositeScore = prevCtx?.compositeScore ?? null;
+          ctx.vix              = optVix;
+        }
 
+        optNiftyBullish = marketCtx.bullish;
+        const compositeScore = marketCtx.compositeScore;
+        const dirStr = compositeScore > 2 ? "STRONGLY BULLISH ↑↑"
+                     : compositeScore > 0.5 ? "BULLISH ↑"
+                     : compositeScore > -0.5 ? "NEUTRAL ↔"
+                     : compositeScore > -2 ? "BEARISH ↓" : "STRONGLY BEARISH ↓↓";
         lg(`✅ Market direction: ${dirStr} | ${marketCtx.summary}`,"o");
         mktFetched = true;
         break;
@@ -6066,10 +6050,9 @@ async function loadOptions(force=true){
     );
 
     // ─ INDEX OPTIONS: Nifty, BankNifty, Sensex, FinNifty ─
-    // Staggered sequentially with 600ms gap to avoid proxy rate limits
     for(let ui=0; ui<INDEX_OPTS.length; ui++){
       const und=INDEX_OPTS[ui];
-      if(ui>0) await sleep(600); // stagger: prevents simultaneous corsproxy hits
+      if(ui>0) await sleep(600);
       updateOptProgress(`Index options ${ui+1}/${INDEX_OPTS.length}: ${und.name}...`);
       try{
         // Spot price
@@ -6100,26 +6083,35 @@ async function loadOptions(force=true){
         const maxPain = calcMaxPain(chain);
         const oiWalls = calcOIWalls(chain);
 
-        // ── Phase 1: Per-underlying PDH/PDL + PCR trend ──
-        // Fetch PDH/PDL for this specific underlying (BankNifty/Sensex/FinNifty differ from Nifty)
-        const undPDHL = await fetchPDHL(und.key).catch(()=>null);
-        // PCR trend: compare current PCR to last scan's PCR
-        const prevPCR = _prevPCRCache[und.name] ?? pcr;
-        const pcrTrend = +(pcr - prevPCR).toFixed(3); // positive=more bearish, negative=more bullish
-        _prevPCRCache[und.name] = pcr; // save for next scan
-        // Build enriched context for scanChain with per-underlying PDH/PDL
-        const undMarketCtx = {
-          ...marketCtx,
-          pdh:      undPDHL?.pdh || marketCtx.niftyPDH || null,
-          pdl:      undPDHL?.pdl || marketCtx.niftyPDL || null,
-          pdc:      undPDHL?.pdc || null,
-          pcr,
-          pcrTrend, // negative=CE OI growing relative to PE=bullish signal; positive=bearish
-          prevPCR,
-        };
-        if(undPDHL) lg(`${und.name} PDH/PDL: ${undPDHL.pdh}/${undPDHL.pdl} PCR: ${prevPCR}→${pcr} (trend ${pcrTrend>=0?"+":""}${pcrTrend})`,"o");
+        // ── Use this index's own marketCtx (Fix 1: per-index EMA/momentum) ──
+        const undCtxKey = {NIFTY:"NIFTY",BANKNIFTY:"BANKNIFTY",SENSEX:"SENSEX",FINNIFTY:"FINNIFTY"}[und.name]||"NIFTY";
+        const undMarketCtx = { ..._indexCtxMap[undCtxKey] };
+        // Patch real spot + day change now that we have the quote
+        undMarketCtx.spot      = spot;
+        undMarketCtx.dayChange = spotChg;
+        undMarketCtx.dayScore  = spotChg > 1 ? 2 : spotChg > 0.3 ? 1 : spotChg < -1 ? -2 : spotChg < -0.3 ? -1 : 0;
+        // Recompute compositeScore with correct dayScore for this index
+        undMarketCtx.compositeScore = +((undMarketCtx.momentumScore*1.33)+(undMarketCtx.dayScore*0.5)+(undMarketCtx.vwapScore*1.75)).toFixed(2);
+        undMarketCtx.bullish   = undMarketCtx.compositeScore > 0;
+        undMarketCtx.neutral   = Math.abs(undMarketCtx.compositeScore) < 0.5;
+        undMarketCtx.pcr       = pcr;
+        undMarketCtx.pcrTrend  = pcrTrend;
+        undMarketCtx.prevPCR   = prevPCR;
+        if(undPDHL){ undMarketCtx.pdh=undPDHL.pdh; undMarketCtx.pdl=undPDHL.pdl; undMarketCtx.pdc=undPDHL.pdc; }
+        lg(`${und.name} ctx: composite=${undMarketCtx.compositeScore} ema=${undMarketCtx.emaTrendBull==null?"N/A":undMarketCtx.emaTrendBull?"Bull":"Bear"} cross=${undMarketCtx.emaCross||"N/A"} PDH=${undMarketCtx.pdh||"?"}/PDL=${undMarketCtx.pdl||"?"}`,"o");
 
-        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,optNiftyBullish,optVix,maxPain,null,undMarketCtx);
+        // Fix 3: IV trend for index options
+        const idxChainIVs = chain.flatMap(r=>[r.call_options?.option_greeks?.iv, r.put_options?.option_greeks?.iv]).filter(v=>v>0);
+        const idxAvgIV    = idxChainIVs.length ? +(idxChainIVs.reduce((a,b)=>a+b,0)/idxChainIVs.length).toFixed(1) : null;
+        const idxPrevAvgIV= _prevAvgIVCache[und.name] ?? idxAvgIV;
+        if(idxAvgIV != null) _prevAvgIVCache[und.name] = idxAvgIV;
+        const idxIVTrend  = (idxAvgIV != null && idxPrevAvgIV != null) ? +(idxAvgIV - idxPrevAvgIV).toFixed(2) : 0;
+        undMarketCtx.ivTrend   = idxIVTrend;
+        undMarketCtx.avgIV     = idxAvgIV;
+        undMarketCtx.prevAvgIV = idxPrevAvgIV;
+        if(idxIVTrend !== 0) lg(`${und.name} IV trend: ${idxPrevAvgIV}→${idxAvgIV} (${idxIVTrend>0?"+":""}${idxIVTrend})`,"o");
+
+        const picks=scanChain(chain,atm,spot,und.name,expiry,und.lot,undMarketCtx.bullish,optVix,maxPain,null,undMarketCtx);
         const _cap=CFG.maxOptCapital>0?CFG.maxOptCapital:Infinity;
         const filteredPicks=picks.filter(p=>p.confidence>=CFG.minOptConf&&p.amtRequired<=_cap);
         const alignedCount=filteredPicks.filter(p=>p.trendAligned).length;
@@ -6128,8 +6120,23 @@ async function loadOptions(force=true){
       }catch(e){ lg(und.name+" err: "+e.message,"w"); }
     } // end INDEX_OPTS loop
 
-    // ─ STOCK OPTIONS: Top F&O stocks ─
-    // Use top 10 most liquid F&O stocks (reduces API calls from 200+ to 20)
+    // ─ STOCK OPTIONS ─
+    // Fix 2: Map each stock to its sector index context.
+    // Previously all stocks got Nifty's EMA/momentum — wrong for banking stocks.
+    // Banking stocks → BankNifty context. Others → Nifty context.
+    // No extra API calls needed: index candles already fetched above.
+    const SECTOR_CTX_MAP = {
+      HDFCBANK:"BANKNIFTY", ICICIBANK:"BANKNIFTY", KOTAKBANK:"BANKNIFTY",
+      AXISBANK:"BANKNIFTY", SBIN:"BANKNIFTY",      IDFCFIRSTB:"BANKNIFTY",
+      BANDHANBNK:"BANKNIFTY", RBLBANK:"BANKNIFTY", FEDERALBNK:"BANKNIFTY",
+      INDIANB:"BANKNIFTY",  BANKINDIA:"BANKNIFTY", BANKBARODA:"BANKNIFTY",
+      CANBK:"BANKNIFTY",    PNB:"BANKNIFTY",       UNIONBANK:"BANKNIFTY",
+      INDUSINDBK:"BANKNIFTY",
+      // IT stocks — they move with Nifty IT but we use Nifty as proxy
+      TCS:"NIFTY", INFY:"NIFTY", WIPRO:"NIFTY", HCLTECH:"NIFTY", TECHM:"NIFTY",
+      // All others → Nifty
+    };
+
     const TOP_FO = [
       "RELIANCE","TCS","HDFCBANK","ICICIBANK","INFY","SBIN","AXISBANK",
       "BAJFINANCE","WIPRO","KOTAKBANK","ITC","LT","TMCV","ADANIENT","MARUTI"
@@ -6137,11 +6144,10 @@ async function loadOptions(force=true){
     const foStocks = FO_STOCK_LIST.filter(s=>TOP_FO.includes(s.s));
     lg(`Scanning ${foStocks.length} top F&O stocks`);
 
-    // Fetch spots for FO stocks (1 batch)
     let foSpots={};
     try{
       const foKeys=foStocks.map(s=>s.key).join(",");
-      const bd=await fetchQ(foKeys); // fetchQ normalizes : → |
+      const bd=await fetchQ(foKeys);
       Object.assign(foSpots,bd);
       lg(`FO spots: ${Object.keys(foSpots).length} received`);
     }catch(e){lg("FO spots: "+e.message,"w");}
@@ -6155,6 +6161,17 @@ async function loadOptions(force=true){
         if(spot<1){lg(inst.s+": no spot","w");continue;}
         const spotPts2=q?.net_change!=null?q.net_change:(q?.ohlc?.open?(spot-q.ohlc.open):0);
         const spotChg=getChgPct(q);
+
+        // Fix 2: pick sector-appropriate index context
+        const stkCtxKey = SECTOR_CTX_MAP[inst.s] || "NIFTY";
+        const stkMarketCtx = { ..._indexCtxMap[stkCtxKey],
+          spot, dayChange: spotChg,
+          dayScore: spotChg>1?2:spotChg>0.3?1:spotChg<-1?-2:spotChg<-0.3?-1:0,
+        };
+        stkMarketCtx.compositeScore = +((stkMarketCtx.momentumScore*1.33)+(stkMarketCtx.dayScore*0.5)+(stkMarketCtx.vwapScore*1.75)).toFixed(2);
+        stkMarketCtx.bullish = stkMarketCtx.compositeScore > 0;
+        stkMarketCtx.neutral = Math.abs(stkMarketCtx.compositeScore) < 0.5;
+        lg(`${inst.s} using ${stkCtxKey} ctx: composite=${stkMarketCtx.compositeScore} ema=${stkMarketCtx.emaTrendBull==null?"N/A":stkMarketCtx.emaTrendBull?"Bull":"Bear"}`,"o");
 
         const expiries=await fetchExpiries(inst.key);
         if(!expiries.length){lg(inst.s+": no expiries","w");continue;}
@@ -6171,7 +6188,26 @@ async function loadOptions(force=true){
         const peOI=chain.reduce((s,x)=>s+(x.put_options?.market_data?.oi||0),0);
         const pcr=ceOI>0?+(peOI/ceOI).toFixed(2):1;
         const stkMaxPain = calcMaxPain(chain);
-        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,optNiftyBullish,optVix,stkMaxPain,pcr,marketCtx);
+
+        // Fix 3: IV trend — compute avg IV across chain, compare to last scan
+        const chainIVs = chain.flatMap(r=>[r.call_options?.option_greeks?.iv, r.put_options?.option_greeks?.iv]).filter(v=>v>0);
+        const avgIV    = chainIVs.length ? +(chainIVs.reduce((a,b)=>a+b,0)/chainIVs.length).toFixed(1) : null;
+        const prevAvgIV= _prevAvgIVCache[inst.s] ?? avgIV;
+        if(avgIV != null) _prevAvgIVCache[inst.s] = avgIV;
+        const ivTrend  = (avgIV != null && prevAvgIV != null) ? +(avgIV - prevAvgIV).toFixed(2) : 0;
+        // ivTrend > 0 = IV expanding (good for option buyers), < 0 = IV contracting (bad for buyers)
+        stkMarketCtx.ivTrend  = ivTrend;
+        stkMarketCtx.avgIV    = avgIV;
+        stkMarketCtx.prevAvgIV= prevAvgIV;
+        // PCR trend for stock
+        const prevStockPCR = _prevPCRCache[inst.s] ?? pcr;
+        _prevPCRCache[inst.s] = pcr;
+        stkMarketCtx.pcr      = pcr;
+        stkMarketCtx.pcrTrend = +(pcr - prevStockPCR).toFixed(3);
+        stkMarketCtx.prevPCR  = prevStockPCR;
+        if(ivTrend !== 0) lg(`${inst.s} IV trend: ${prevAvgIV}→${avgIV} (${ivTrend>0?"+":""}${ivTrend}) PCR: ${prevStockPCR}→${pcr}`,"o");
+
+        const picks=scanChain(chain,atm,spot,inst.s,expiry,inst.lot,stkMarketCtx.bullish,optVix,stkMaxPain,pcr,stkMarketCtx);
         lg(`${inst.s}: ${chain.length} strikes → ${picks.length} signals`,picks.length?"o":"");
         if(picks.length) groups.push({name:inst.s,spot,spotChg,spotPts:spotPts2,pcr,expiry,picks,type:"stock",fullName:inst.n});
       }catch(e){lg(inst.s+" opts: "+e.message,"w");}
@@ -6381,8 +6417,25 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   const isBuyAction = (isCE && (marketCtx?.compositeScore??1) > 0) || (!isCE && (marketCtx?.compositeScore??-1) < 0);
   const ivAdjFinal  = isBuyAction ? ivPercentileAdj : -ivPercentileAdj;
 
+  // ── IV Trend bonus (Fix 3) ───────────────────────────────────────────────────
+  // IV expanding (rising) = option premiums growing = good for buyers, bad for sellers
+  // IV contracting (falling) = premium crush = even correct direction hits SL from vega loss
+  // This is the "IV crush" problem that kills option buyers after news events.
+  let ivTrendBonus = 0;
+  const ivTrend = marketCtx?.ivTrend ?? 0;
+  if(isBuyAction){
+    if(ivTrend >= 1.5)      ivTrendBonus = +10; // IV surging — strong buy environment
+    else if(ivTrend >= 0.5) ivTrendBonus =  +5; // IV rising — favourable
+    else if(ivTrend <= -1.5)ivTrendBonus = -15; // IV crushing hard — avoid buying options
+    else if(ivTrend <= -0.5)ivTrendBonus =  -8; // IV contracting — caution
+  } else {
+    // For sell signals, IV contracting is good (collect premium, decay faster)
+    if(ivTrend <= -1.0)     ivTrendBonus = +6;
+    else if(ivTrend >= 1.5) ivTrendBonus = -5; // IV rising = short option risk
+  }
+
   let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10
-          + sigBonus + momentumBonus + emaBonus + freshnessBonus + volumeBonus
+          + sigBonus + momentumBonus + emaBonus + freshnessBonus + volumeBonus + ivTrendBonus
           + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
 
   // ── Trend strength boost ──

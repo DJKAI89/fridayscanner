@@ -6154,22 +6154,39 @@ async function loadOptions(force=true){
         const oiWalls = calcOIWalls(chain);
 
         // ── Use this index's own marketCtx (Fix 1: per-index EMA/momentum) ──
-        // Null-guard: if _indexCtxMap failed to build (Step 1b error), fall back to Nifty ctx
         const undCtxKey = {NIFTY:"NIFTY",BANKNIFTY:"BANKNIFTY",SENSEX:"SENSEX",FINNIFTY:"FINNIFTY"}[und.name]||"NIFTY";
         const undMarketCtx = { ...(_indexCtxMap?.[undCtxKey] || marketCtx) };
+
         // Patch real spot + day change now that we have the quote
         undMarketCtx.spot      = spot;
         undMarketCtx.dayChange = spotChg;
-        undMarketCtx.dayScore  = spotChg > 1 ? 2 : spotChg > 0.3 ? 1 : spotChg < -1 ? -2 : spotChg < -0.3 ? -1 : 0;
-        // Recompute compositeScore with correct dayScore for this index
-        undMarketCtx.compositeScore = +((undMarketCtx.momentumScore*1.33)+(undMarketCtx.dayScore*0.5)+(undMarketCtx.vwapScore*1.75)).toFixed(2);
-        undMarketCtx.bullish   = undMarketCtx.compositeScore > 0;
-        undMarketCtx.neutral   = Math.abs(undMarketCtx.compositeScore) < 0.5;
-        undMarketCtx.pcr       = pcr;
-        undMarketCtx.pcrTrend  = pcrTrend;
-        undMarketCtx.prevPCR   = prevPCR;
-        if(undPDHL){ undMarketCtx.pdh=undPDHL.pdh; undMarketCtx.pdl=undPDHL.pdl; undMarketCtx.pdc=undPDHL.pdc; }
-        lg(`${und.name} ctx: composite=${undMarketCtx.compositeScore} ema=${undMarketCtx.emaTrendBull==null?"N/A":undMarketCtx.emaTrendBull?"Bull":"Bear"} cross=${undMarketCtx.emaCross||"N/A"} PDH=${undMarketCtx.pdh||"?"}/PDL=${undMarketCtx.pdl||"?"}`,"o");
+        undMarketCtx.dayScore  = spotChg>1?2:spotChg>0.3?1:spotChg<-1?-2:spotChg<-0.3?-1:0;
+
+        // Recompute compositeScore with correct dayScore using new 4-factor weights
+        const _ema = undMarketCtx.emaTrendBull==null?0:undMarketCtx.emaTrendBull?1:-1;
+        const _emaCrossBonus = (undMarketCtx.emaCross==="bullish_cross"&&(undMarketCtx.emaCrossCandles??999)<=2)?0.5
+                              :(undMarketCtx.emaCross==="bearish_cross"&&(undMarketCtx.emaCrossCandles??999)<=2)?-0.5:0;
+        undMarketCtx.compositeScore = +(
+          (undMarketCtx.momentumScore||0)*1.0 +
+          (undMarketCtx.dayScore)*0.3 +
+          (undMarketCtx.vwapScore||0)*1.5 +
+          (_ema+_emaCrossBonus)*2.0
+        ).toFixed(2);
+        undMarketCtx.bullish = undMarketCtx.compositeScore > 0;
+        undMarketCtx.neutral = Math.abs(undMarketCtx.compositeScore) < 0.5;
+
+        // PCR trend — compute here now that we have pcr from the chain
+        const _prevPCR  = _prevPCRCache[und.name] ?? pcr;
+        const _pcrTrend = +( pcr - _prevPCR ).toFixed(3);
+        _prevPCRCache[und.name] = pcr;
+        undMarketCtx.pcr      = pcr;
+        undMarketCtx.pcrTrend = _pcrTrend;
+        undMarketCtx.prevPCR  = _prevPCR;
+
+        // PDH/PDL already embedded in undMarketCtx via _indexCtxMap (pre-fetched in Step 1b)
+        // No separate undPDHL fetch needed — already in undMarketCtx.pdh / undMarketCtx.pdl
+
+        lg(`${und.name} ctx: composite=${undMarketCtx.compositeScore} ema=${undMarketCtx.emaTrendBull==null?"N/A":undMarketCtx.emaTrendBull?"Bull":"Bear"} cross=${undMarketCtx.emaCross||"N/A"} PCR=${_prevPCR}→${pcr}(${_pcrTrend>=0?"+":""}${_pcrTrend}) PDH=${undMarketCtx.pdh||"?"}/PDL=${undMarketCtx.pdl||"?"}`,"o");
 
         // Fix 3: IV trend for index options
         const idxChainIVs = chain.flatMap(r=>[r.call_options?.option_greeks?.iv, r.put_options?.option_greeks?.iv]).filter(v=>v>0);

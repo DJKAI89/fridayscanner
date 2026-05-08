@@ -2115,6 +2115,13 @@ function buildOptionSignal(p, vix){
     winRateEst:  55,
     vix:         vix||null,
     slTgtMethod: p.slTgtMethod||null,
+    // ── Signal context saved for future compositeScore calibration ──
+    // After 4-6 weeks of data, use these to calculate which score ranges
+    // actually predict wins vs losses and recalibrate weights accordingly.
+    compositeScore: p.compositeScore ?? null,
+    momentumScore:  p.momentumScore  ?? null,
+    emaCross:       p.emaCross       ?? null,
+    priceZone:      p.priceZone      ?? null,
     status:      "OPEN",
     exitPrice:   null,
     exitTime:    null,
@@ -2790,6 +2797,34 @@ async function renderAnalysisTab(signalsIn){
     `)}
 
     <!-- Daily P&L trend -->
+    <!-- compositeScore calibration breakdown (shown once signals have score data) -->
+    ${(()=>{
+      const scoredSignals = closed.filter(s=>s.compositeScore!=null);
+      if(scoredSignals.length < 5) return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:9px;color:#64748b">
+        📐 <b>CompositeScore calibration</b> — will appear after ${5-scoredSignals.length} more scored signals accumulate.
+        Score is now saved with each new signal for future calibration.
+      </div>`;
+      // Bucket signals by compositeScore range
+      const buckets = [
+        {label:"Strong Bear ≤-2", min:-99, max:-2},
+        {label:"Weak Bear -2..-0.5", min:-2, max:-0.5},
+        {label:"Neutral ±0.5", min:-0.5, max:0.5},
+        {label:"Weak Bull 0.5..2", min:0.5, max:2},
+        {label:"Strong Bull ≥2", min:2, max:99},
+      ];
+      const rows = buckets.map(b=>{
+        const g = scoredSignals.filter(s=>s.compositeScore>=b.min&&s.compositeScore<b.max);
+        const r = wr(g);
+        return r&&r.t>=2 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:9px">
+          <span style="color:#374151;font-weight:600">${b.label}</span>
+          <span style="color:${sc(r.r)};font-weight:700">${pct(r.r)} · ${r.t} signals</span>
+        </div>` : "";
+      }).filter(Boolean).join("");
+      return rows ? card("📐 CompositeScore Calibration",rows+`
+        <div style="font-size:8px;color:#94a3b8;margin-top:6px">Use this to recalibrate factor weights — score ranges with highest win rate should get higher weight in computeCtxFromCandles().</div>
+      `) : "";
+    })()}
+
     ${days.length>=3?card("📅 Recent Daily Performance",`
       ${days.map(([date,d])=>{
         const dayWR = d.hits+d.sls>0?Math.round(d.hits/(d.hits+d.sls)*100):null;
@@ -5879,9 +5914,41 @@ function computeCtxFromCandles(candles, spot, chgPct, vix, pdhl=null){
     intradayVWAP = volSum>0 ? tpvSum/volSum : 0;
   }
 
+  // ── Composite direction score ─────────────────────────────────────────────
+  // 4-factor model. Weights calibrated to signal importance:
+  //
+  //   Factor          Weight   Range    Reasoning
+  //   EMA trend+cross  2.0    -2.5..+2.5  Strongest predictor — EMA 9/21 cross
+  //                                        is a well-validated short-term trend signal.
+  //                                        Fresh cross (1-2 candles) gets +0.5 bonus.
+  //   VWAP position    1.5    -1.5..+1.5  Price above VWAP = institutional net buying.
+  //                                        More reliable than raw momentum alone.
+  //   Momentum score   1.0    -3..+3     Last 30-min candle direction. Good but noisy
+  //                                        — reduced from old weight of 1.33.
+  //   Day change       0.3    -0.6..+0.6  Context only. Least reliable intraday predictor
+  //                                        — reduced from old weight of 0.5.
+  //
+  // Max theoretical score: ±(2.5 + 1.5 + 3 + 0.6) = ±7.6
+  // Practical range: ±4 to ±5 in trending markets
+  //
+  // NOTE: These weights are still best-estimate. True calibration requires
+  // storing compositeScore in each signal and back-testing after 4-6 weeks of data.
+  // compositeScore is now saved in buildOptionSignal for this purpose.
   const dayScore    = chgPct > 1 ? 2 : chgPct > 0.3 ? 1 : chgPct < -1 ? -2 : chgPct < -0.3 ? -1 : 0;
   const vwapScore   = intradayVWAP > 0 ? (spot >= intradayVWAP ? 1 : -1) : 0;
-  const compositeScore = (momentumScore*1.33) + (dayScore*0.5) + (vwapScore*1.75);
+
+  // EMA trend score: +1 bull, -1 bear, 0 unknown. Fresh cross adds ±0.5 bonus.
+  const emaScore = emaCtx.emaTrendBull == null ? 0 : emaCtx.emaTrendBull ? 1 : -1;
+  const emaCrossBonus = (emaCtx.emaCross==="bullish_cross" && emaCtx.emaCrossCandles<=2) ?  0.5
+                      : (emaCtx.emaCross==="bearish_cross" && emaCtx.emaCrossCandles<=2) ? -0.5
+                      : 0;
+  const emaFactor = (emaScore + emaCrossBonus); // range: -1.5 to +1.5
+
+  const compositeScore = (momentumScore * 1.0)
+                       + (dayScore      * 0.3)
+                       + (vwapScore     * 1.5)
+                       + (emaFactor     * 2.0);
+
   const deadBand    = candles.length >= 3 ? 0.5 : 1.0;
   const isBullish   = compositeScore > 0;
   const isNeutral   = Math.abs(compositeScore) < deadBand;
@@ -5936,38 +6003,41 @@ async function loadOptions(force=true){
     //   momentum=BULL, VWAP=above → composite=BULLISH → CE suggested ✅
     updateOptProgress("Step 1: Fetching Nifty direction + VIX + intraday momentum...");
     let optNiftyBullish, optNiftyChgPct, optVix, marketCtx;
+    // Hoisted to outer scope — _indexCtxMap is built inside the try block below
+    // but must be visible to the index loop and stock loop that run AFTER the try.
+    let _indexCtxMap = null;
 
     let mktFetched = false;
     for(let attempt=1; attempt<=3; attempt++){
       try{
-        // Fetch spot quote + VIX + intraday 5-min candles in parallel
-        const [mktD, intradayCandles] = await Promise.all([
-          fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX"),
-          fetchIntraday("NSE_INDEX|Nifty 50","5minute").catch(()=>[])
-        ]);
+        // Fetch Nifty spot + VIX. Intraday candles fetched in Step 1b below.
+        const mktD = await fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX");
 
         const nQ2  = mktD["NSE_INDEX|Nifty 50"];
         const vQ2  = mktD["NSE_INDEX|India VIX"];
         if(!nQ2?.last_price) throw new Error("Nifty quote missing");
 
-        // ── Fetch all 4 index candles IN PARALLEL — no added latency vs sequential ──
-        // Fix: Previously only Nifty candles were fetched. BankNifty/SENSEX/FinNifty
-        // were getting Nifty's EMA crossover for their option signals — completely wrong.
-        // Now each index has its own EMA, momentum, VWAP and compositeScore.
-        updateOptProgress("Step 1b: Fetching per-index intraday candles (parallel)...");
+        // ── Fetch all 4 index candles with small stagger to avoid Upstox rate-limit ──
+        // Problem with fully-parallel Promise.all: Upstox throttles simultaneous
+        // intraday requests → some return HTTP 400 even when market is open.
+        // Fix: stagger each fetch 200ms apart. Total added time = 600ms, acceptable.
+        // Also removed duplicate Nifty fetch (was fetched above AND again here).
+        updateOptProgress("Step 1b: Fetching per-index intraday candles...");
+        const sleep200 = ms => new Promise(r=>setTimeout(r,ms));
         const [niftyCandles, bankNiftyCandles, sensexCandles, finNiftyCandles] = await Promise.all([
           fetchIntraday("NSE_INDEX|Nifty 50",         "5minute").catch(()=>[]),
-          fetchIntraday("NSE_INDEX|Nifty Bank",        "5minute").catch(()=>[]),
-          fetchIntraday("BSE_INDEX|SENSEX",            "5minute").catch(()=>[]),
-          fetchIntraday("NSE_INDEX|Nifty Fin Service", "5minute").catch(()=>[]),
+          sleep200(200).then(()=>fetchIntraday("NSE_INDEX|Nifty Bank",       "5minute").catch(()=>[])),
+          sleep200(400).then(()=>fetchIntraday("BSE_INDEX|SENSEX",           "5minute").catch(()=>[])),
+          sleep200(600).then(()=>fetchIntraday("NSE_INDEX|Nifty Fin Service","5minute").catch(()=>[])),
         ]);
+        lg(`Candle counts: Nifty=${niftyCandles.length} BankNifty=${bankNiftyCandles.length} SENSEX=${sensexCandles.length} FinNifty=${finNiftyCandles.length}`,"o");
 
-        // Also fetch PDH/PDL for all 4 indices in parallel
+        // Also fetch PDH/PDL for all 4 indices with same stagger
         const [niftyPDHL, bankNiftyPDHL, sensexPDHL, finNiftyPDHL] = await Promise.all([
           fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null),
-          fetchPDHL("NSE_INDEX|Nifty Bank").catch(()=>null),
-          fetchPDHL("BSE_INDEX|SENSEX").catch(()=>null),
-          fetchPDHL("NSE_INDEX|Nifty Fin Service").catch(()=>null),
+          sleep200(150).then(()=>fetchPDHL("NSE_INDEX|Nifty Bank").catch(()=>null)),
+          sleep200(300).then(()=>fetchPDHL("BSE_INDEX|SENSEX").catch(()=>null)),
+          sleep200(450).then(()=>fetchPDHL("NSE_INDEX|Nifty Fin Service").catch(()=>null)),
         ]);
 
         const spot   = nQ2.last_price;
@@ -5980,7 +6050,7 @@ async function loadOptions(force=true){
         optNiftyChgPct = spot > 0 ? (netChg / spot) * 100 : 0;
 
         // ── Build per-index marketCtx using the shared helper ──
-        const _indexCtxMap = {
+        _indexCtxMap = {
           NIFTY:     computeCtxFromCandles(niftyCandles,    spot, optNiftyChgPct, optVix, niftyPDHL),
           BANKNIFTY: computeCtxFromCandles(bankNiftyCandles, 0,   0,              optVix, bankNiftyPDHL),
           SENSEX:    computeCtxFromCandles(sensexCandles,    0,   0,              optVix, sensexPDHL),
@@ -6084,8 +6154,9 @@ async function loadOptions(force=true){
         const oiWalls = calcOIWalls(chain);
 
         // ── Use this index's own marketCtx (Fix 1: per-index EMA/momentum) ──
+        // Null-guard: if _indexCtxMap failed to build (Step 1b error), fall back to Nifty ctx
         const undCtxKey = {NIFTY:"NIFTY",BANKNIFTY:"BANKNIFTY",SENSEX:"SENSEX",FINNIFTY:"FINNIFTY"}[und.name]||"NIFTY";
-        const undMarketCtx = { ..._indexCtxMap[undCtxKey] };
+        const undMarketCtx = { ...(_indexCtxMap?.[undCtxKey] || marketCtx) };
         // Patch real spot + day change now that we have the quote
         undMarketCtx.spot      = spot;
         undMarketCtx.dayChange = spotChg;
@@ -6144,6 +6215,20 @@ async function loadOptions(force=true){
     const foStocks = FO_STOCK_LIST.filter(s=>TOP_FO.includes(s.s));
     lg(`Scanning ${foStocks.length} top F&O stocks`);
 
+    // ── Per-stock PDH/PDL pre-fetch ──────────────────────────────────────────
+    // Previously only indices had PDH/PDL context. Stock options had no idea if
+    // HDFCBANK was near its own PDH or mid-range — a major scoring gap.
+    // _pdhlCache deduplicates within the same calendar day (only 1 API call per stock).
+    // Stagger at 150ms per stock → 15 stocks = ~2.25s total, runs before the scan loop.
+    updateOptProgress("Fetching per-stock PDH/PDL...");
+    const _stockPDHLMap = {};
+    await Promise.all(foStocks.map((inst, i) =>
+      new Promise(r => setTimeout(r, i * 150))
+        .then(() => fetchPDHL(inst.key).catch(() => null))
+        .then(pdhl => { if(pdhl) _stockPDHLMap[inst.s] = pdhl; })
+    ));
+    lg(`Stock PDH/PDL: ${Object.keys(_stockPDHLMap).length}/${foStocks.length} resolved`, "o");
+
     let foSpots={};
     try{
       const foKeys=foStocks.map(s=>s.key).join(",");
@@ -6163,15 +6248,23 @@ async function loadOptions(force=true){
         const spotChg=getChgPct(q);
 
         // Fix 2: pick sector-appropriate index context
+        // Null-guard: fall back to global marketCtx if _indexCtxMap wasn't built
         const stkCtxKey = SECTOR_CTX_MAP[inst.s] || "NIFTY";
-        const stkMarketCtx = { ..._indexCtxMap[stkCtxKey],
+        const stkMarketCtx = { ...(_indexCtxMap?.[stkCtxKey] || marketCtx),
           spot, dayChange: spotChg,
           dayScore: spotChg>1?2:spotChg>0.3?1:spotChg<-1?-2:spotChg<-0.3?-1:0,
         };
-        stkMarketCtx.compositeScore = +((stkMarketCtx.momentumScore*1.33)+(stkMarketCtx.dayScore*0.5)+(stkMarketCtx.vwapScore*1.75)).toFixed(2);
+        stkMarketCtx.compositeScore = +((stkMarketCtx.momentumScore*1.0)+(stkMarketCtx.dayScore*0.3)+(stkMarketCtx.vwapScore*1.5)+((stkMarketCtx.emaScore||0)*2.0)).toFixed(2);
         stkMarketCtx.bullish = stkMarketCtx.compositeScore > 0;
         stkMarketCtx.neutral = Math.abs(stkMarketCtx.compositeScore) < 0.5;
-        lg(`${inst.s} using ${stkCtxKey} ctx: composite=${stkMarketCtx.compositeScore} ema=${stkMarketCtx.emaTrendBull==null?"N/A":stkMarketCtx.emaTrendBull?"Bull":"Bear"}`,"o");
+        // Per-stock PDH/PDL — overrides the sector-index PDH/PDL with stock's own levels
+        const stockPDHL = _stockPDHLMap[inst.s];
+        if(stockPDHL){
+          stkMarketCtx.pdh = stockPDHL.pdh;
+          stkMarketCtx.pdl = stockPDHL.pdl;
+          stkMarketCtx.pdc = stockPDHL.pdc;
+        }
+        lg(`${inst.s} using ${stkCtxKey} ctx: composite=${stkMarketCtx.compositeScore} ema=${stkMarketCtx.emaTrendBull==null?"N/A":stkMarketCtx.emaTrendBull?"Bull":"Bear"} PDH=${stkMarketCtx.pdh||"?"}/PDL=${stkMarketCtx.pdl||"?"}`,"o");
 
         const expiries=await fetchExpiries(inst.key);
         if(!expiries.length){lg(inst.s+": no expiries","w");continue;}

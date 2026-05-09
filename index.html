@@ -3602,7 +3602,11 @@ async function apiGet(url){
 
     }catch(e){
       if(e.message === "TOKEN_EXPIRED"){ handleTokenExpired(); throw e; }
-      // Network/parse error from this proxy — log and try next
+      // HTTP 4xx = client error — rethrow immediately so withRetry won't retry it.
+      // (400 = data not available / bad request, 401 = token expired handled above,
+      //  403 = unauthorized, 404 = not found — none of these are fixed by retrying)
+      if(e.message?.startsWith("HTTP 4")) throw e;
+      // Network/parse error from this proxy — log and try next proxy
       lg(`${p.n} ✗ ${e.message}`,"w");
     }
   }
@@ -6017,28 +6021,28 @@ async function loadOptions(force=true){
         const vQ2  = mktD["NSE_INDEX|India VIX"];
         if(!nQ2?.last_price) throw new Error("Nifty quote missing");
 
-        // ── Fetch all 4 index candles with small stagger to avoid Upstox rate-limit ──
-        // Problem with fully-parallel Promise.all: Upstox throttles simultaneous
-        // intraday requests → some return HTTP 400 even when market is open.
-        // Fix: stagger each fetch 200ms apart. Total added time = 600ms, acceptable.
-        // Also removed duplicate Nifty fetch (was fetched above AND again here).
+        // ── Fetch all 4 index candles SEQUENTIALLY with 400ms gap ──────────────
+        // Problem with parallel/staggered: Upstox intraday endpoint rate-limits even
+        // 200ms-staggered requests → all return 400 at 1 PM when market is fully open.
+        // Sequential with 400ms gap is slower (+1.2s) but reliable.
         updateOptProgress("Step 1b: Fetching per-index intraday candles...");
-        const sleep200 = ms => new Promise(r=>setTimeout(r,ms));
-        const [niftyCandles, bankNiftyCandles, sensexCandles, finNiftyCandles] = await Promise.all([
-          fetchIntraday("NSE_INDEX|Nifty 50",         "5minute").catch(()=>[]),
-          sleep200(200).then(()=>fetchIntraday("NSE_INDEX|Nifty Bank",       "5minute").catch(()=>[])),
-          sleep200(400).then(()=>fetchIntraday("BSE_INDEX|SENSEX",           "5minute").catch(()=>[])),
-          sleep200(600).then(()=>fetchIntraday("NSE_INDEX|Nifty Fin Service","5minute").catch(()=>[])),
-        ]);
+        const niftyCandles     = await fetchIntraday("NSE_INDEX|Nifty 50",         "5minute").catch(()=>[]);
+        await sleep(400);
+        const bankNiftyCandles = await fetchIntraday("NSE_INDEX|Nifty Bank",        "5minute").catch(()=>[]);
+        await sleep(400);
+        const sensexCandles    = await fetchIntraday("BSE_INDEX|SENSEX",            "5minute").catch(()=>[]);
+        await sleep(400);
+        const finNiftyCandles  = await fetchIntraday("NSE_INDEX|Nifty Fin Service", "5minute").catch(()=>[]);
         lg(`Candle counts: Nifty=${niftyCandles.length} BankNifty=${bankNiftyCandles.length} SENSEX=${sensexCandles.length} FinNifty=${finNiftyCandles.length}`,"o");
 
-        // Also fetch PDH/PDL for all 4 indices with same stagger
-        const [niftyPDHL, bankNiftyPDHL, sensexPDHL, finNiftyPDHL] = await Promise.all([
-          fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null),
-          sleep200(150).then(()=>fetchPDHL("NSE_INDEX|Nifty Bank").catch(()=>null)),
-          sleep200(300).then(()=>fetchPDHL("BSE_INDEX|SENSEX").catch(()=>null)),
-          sleep200(450).then(()=>fetchPDHL("NSE_INDEX|Nifty Fin Service").catch(()=>null)),
-        ]);
+        // ── Fetch PDH/PDL for all 4 indices sequentially ──────────────────────
+        const niftyPDHL     = await fetchPDHL("NSE_INDEX|Nifty 50").catch(()=>null);
+        await sleep(300);
+        const bankNiftyPDHL = await fetchPDHL("NSE_INDEX|Nifty Bank").catch(()=>null);
+        await sleep(300);
+        const sensexPDHL    = await fetchPDHL("BSE_INDEX|SENSEX").catch(()=>null);
+        await sleep(300);
+        const finNiftyPDHL  = await fetchPDHL("NSE_INDEX|Nifty Fin Service").catch(()=>null);
 
         const spot   = nQ2.last_price;
         optVix = vQ2?.last_price || 15;

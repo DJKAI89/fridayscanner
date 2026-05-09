@@ -6557,10 +6557,6 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
           + sigBonus + momentumBonus + emaBonus + freshnessBonus + volumeBonus + ivTrendBonus
           + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
 
-  // ── Trend strength boost ──
-  // Strongly aligned (market clearly trending in option direction)
-  if(vix < 18) raw += 5;  // low VIX = clean trend = higher conviction
-
   // ── VIX impact — high VIX = expensive premium for buyers ──
   // For aligned options: slight penalty (premium expensive but direction is right)
   // For counter-trend: already penalized by dirMult
@@ -6582,14 +6578,9 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
     else if(towardMP && mpDist > 0.5) raw += 3;
   }
 
-  // Stock-specific PCR boost
-  if(stockPCR && stockPCR > 0){
-    const isCE_ = optType === "CE";
-    if(isCE_ && stockPCR > 1.2)  raw += 5;
-    if(isCE_ && stockPCR < 0.6)  raw -= 4;
-    if(!isCE_ && stockPCR < 0.7) raw += 5;
-    if(!isCE_ && stockPCR > 1.3) raw -= 4;
-  }
+  // Note: stockPCR absolute level boost removed — pcrTrend direction is already
+  // captured in oiScore (25% weight, lines above). Adding absolute PCR level on top
+  // was double-counting AND using an ambiguous signal (high PE OI = fear OR support?).
 
   // Apply direction multiplier
   raw = raw * dirMult;
@@ -7710,6 +7701,10 @@ async function lookupStock(){
       ]);
       await sleep(400);
       const stockIntraday = await fetchIntraday(inst.key,"5minute").catch(()=>[]);
+      // Fix 3: fetch stock's own PDH/PDL — gives zone scoring in calcOptConfidence
+      await sleep(300);
+      const stockPDHL = await fetchPDHL(inst.key).catch(()=>null);
+      if(stockPDHL) lg(`${sym} PDH/PDL: ${stockPDHL.pdh}/${stockPDHL.pdl}`,"o");
 
       const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
       const vQ2=mD["NSE_INDEX|India VIX"]||mD["NSE_INDEX:India VIX"];
@@ -7721,13 +7716,20 @@ async function lookupStock(){
                      : (nQ2.ohlc?.open ? nSpot-nQ2.ohlc.open : 0);
         nChgPct = nSpot>0 ? (netChg/nSpot)*100 : 0;
 
+        // Fix 3: use BankNifty spot+dayChange for banking stocks, not Nifty's
+        // mD already includes BankNifty quote when needsBankNifty=true
+        const bnQ = needsBankNifty ? (mD["NSE_INDEX|Nifty Bank"]||mD["NSE_INDEX:Nifty Bank"]) : null;
+        const idxSpot   = bnQ ? bnQ.last_price : nSpot;
+        const idxNetChg = bnQ ? (bnQ.net_change ?? (bnQ.ohlc?.open ? bnQ.last_price-bnQ.ohlc.open : 0)) : netChg;
+        const idxChgPct = idxSpot > 0 ? (idxNetChg/idxSpot*100) : nChgPct;
+
         // ── Build index direction ctx via shared helper ────────────────────
-        const idxCtx   = computeCtxFromCandles(sectorCandles, nSpot, nChgPct, vix, null);
+        const idxCtx = computeCtxFromCandles(sectorCandles, idxSpot, idxChgPct, vix, null);
 
         // ── Build stock-specific ctx via shared helper ─────────────────────
         // Uses the stock's OWN 5-min candles — EMA 9/21, momentum freshness,
-        // volume spike. This is the per-stock EMA fix applied to all stocks.
-        const stockCtx = computeCtxFromCandles(stockIntraday, ltp, chgPct||0, vix, null);
+        // volume spike. stockPDHL passed so zone scoring works in scanChain.
+        const stockCtx = computeCtxFromCandles(stockIntraday, ltp, chgPct||0, vix, stockPDHL);
 
         lg(`Stock EMA (${sym}): 9=${stockCtx.ema9?.toFixed(1)||"N/A"} 21=${stockCtx.ema21?.toFixed(1)||"N/A"} trend=${stockCtx.emaTrendBull==null?"N/A":stockCtx.emaTrendBull?"Bull":"Bear"} cross=${stockCtx.emaCross||"N/A"} vol=${stockCtx.volRatio}x fresh=${stockCtx.momentumFresh}`);
         lg(`${needsBankNifty?"BankNifty":"Nifty"} EMA: trend=${idxCtx.emaTrendBull==null?"N/A":idxCtx.emaTrendBull?"Bull":"Bear"} composite=${idxCtx.compositeScore}`);
@@ -7763,6 +7765,10 @@ async function lookupStock(){
           stockMomentumScore: stockCtx.momentumScore,
           stockMomentumLabel: stockCtx.momentumLabel,
           idxComposite, stockComposite,
+          // Fix 3: per-stock PDH/PDL for zone scoring in scanChain
+          pdh: stockPDHL?.pdh ?? null,
+          pdl: stockPDHL?.pdl ?? null,
+          pdc: stockPDHL?.pdc ?? null,
         };
 
         lg(`Analyse (${sym}): stock=${stockComposite>=0?"+":""}${stockComposite} idx=${idxComposite>=0?"+":""}${idxComposite} blended=${blendedComposite} → ${isNeutral?"NEUTRAL":nBull?"BULLISH":"BEARISH"}`);

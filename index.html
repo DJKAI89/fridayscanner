@@ -6513,12 +6513,17 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // ── Signal bonus (up to 12 pts) ──
   const sigBonus = Math.min(12, signals.filter(s=>s.s>=2).length * 6);
 
-  // ── Expiry day bonus: ATM OI buildup on expiry = very high signal strength ──
+  // ── Expiry day bonus ─────────────────────────────────────────────────────────
+  // On expiry day gamma is elevated — ATM options move fast, far OTM expire worthless.
+  // Removed: oiChg >= 10 check (misleading — oiChg was removed as signal elsewhere).
+  // Now purely based on moneyness: ATM = gamma bonus, far OTM = danger penalty.
   let expiryBonus = 0;
   if(isWeeklyExpiryDay()){
-    const moneyness = spot>0 ? Math.abs(strike-spot)/spot : 0;
-    if(moneyness < 0.01 && oiChg >= 10) expiryBonus = 10; // ATM + strong OI build on expiry
-    else if(moneyness > 0.04)            expiryBonus = -8; // Far OTM on expiry = dangerous
+    const expMoney = spot>0 ? Math.abs(strike-spot)/spot : 0;
+    if(expMoney < 0.005)       expiryBonus = +12; // very near ATM on expiry = gamma play
+    else if(expMoney < 0.01)   expiryBonus =  +7; // ATM zone
+    else if(expMoney > 0.04)   expiryBonus = -10; // far OTM on expiry = almost certainly worthless
+    else if(expMoney > 0.025)  expiryBonus =  -5; // OTM on expiry = risky
   }
 
   // ── IV Percentile vs VIX: cheap IV → buy bonus, rich IV → buy penalty ──
@@ -6565,13 +6570,15 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // Low VIX bonus: cheap premium + clear trend
   else if(vix < 14) raw += 5;
 
-  // ── Max Pain gravity boost ──
-  // If strike is between spot and max pain → expiry likely to pull price there → boost
-  if(maxPain && maxPain > 0 && spot > 0){
+  // ── Max Pain gravity boost — EXPIRY DAY ONLY ──────────────────────────────
+  // Max pain pinning only happens in the LAST 30-60 min of expiry day as market
+  // makers hedge. Applying it on any other day (6 DTE, 3 DTE etc.) is pure noise —
+  // price has no reason to move toward max pain 3 days before expiry.
+  if(maxPain && maxPain > 0 && spot > 0 && isWeeklyExpiryDay()){
     const towardMP = (optType==="CE" && maxPain > spot && strike <= maxPain)
                   || (optType==="PE" && maxPain < spot && strike >= maxPain);
     const mpDist = Math.abs((maxPain - spot) / spot * 100);
-    if(towardMP && mpDist > 1.5) raw += 6;   // price needs to move toward max pain
+    if(towardMP && mpDist > 1.5) raw += 6;
     else if(towardMP && mpDist > 0.5) raw += 3;
   }
 
@@ -7676,12 +7683,33 @@ async function lookupStock(){
     let vix=15,vixSc=70,pcrSc=50,nBull=true,nChgPct=0,realPCR=0.9;
     let lkpMarketCtx = null; // composite context passed to scanChain
     try{
-      // Fetch Nifty quote + VIX + Nifty 5-min intraday + stock 5-min intraday in parallel
-      const [mD, niftyIntraday, stockIntraday] = await Promise.all([
-        fetchQ("NSE_INDEX|Nifty 50,NSE_INDEX|India VIX"),
-        fetchIntraday("NSE_INDEX|Nifty 50","5minute").catch(()=>[]),
-        fetchIntraday(inst.key,"5minute").catch(()=>[])
+      // ── Determine sector index for this stock ──────────────────────────────
+      // Banking stocks → BankNifty candles for direction context
+      // Others → Nifty candles
+      const LKP_SECTOR_MAP = {
+        HDFCBANK:"NSE_INDEX|Nifty Bank", ICICIBANK:"NSE_INDEX|Nifty Bank",
+        KOTAKBANK:"NSE_INDEX|Nifty Bank", AXISBANK:"NSE_INDEX|Nifty Bank",
+        SBIN:"NSE_INDEX|Nifty Bank",     IDFCFIRSTB:"NSE_INDEX|Nifty Bank",
+        BANDHANBNK:"NSE_INDEX|Nifty Bank",RBLBANK:"NSE_INDEX|Nifty Bank",
+        FEDERALBNK:"NSE_INDEX|Nifty Bank",INDUSINDBK:"NSE_INDEX|Nifty Bank",
+        INDIANB:"NSE_INDEX|Nifty Bank",  BANKINDIA:"NSE_INDEX|Nifty Bank",
+        BANKBARODA:"NSE_INDEX|Nifty Bank",CANBK:"NSE_INDEX|Nifty Bank",
+        PNB:"NSE_INDEX|Nifty Bank",      UNIONBANK:"NSE_INDEX|Nifty Bank",
+      };
+      const sectorIdxKey = LKP_SECTOR_MAP[sym] || "NSE_INDEX|Nifty 50";
+      const needsBankNifty = sectorIdxKey !== "NSE_INDEX|Nifty 50";
+
+      // ── Fetch: Nifty quote+VIX, sector index candles, stock own candles ──
+      // Stock candles fetched sequentially after index to avoid rate-limiting.
+      // Stock's OWN 5-min candles give accurate EMA/momentum for that stock.
+      const [mD, sectorCandles] = await Promise.all([
+        fetchQ(needsBankNifty
+          ? "NSE_INDEX|Nifty 50,NSE_INDEX|India VIX,NSE_INDEX|Nifty Bank"
+          : "NSE_INDEX|Nifty 50,NSE_INDEX|India VIX"),
+        fetchIntraday(sectorIdxKey,"5minute").catch(()=>[]),
       ]);
+      await sleep(400);
+      const stockIntraday = await fetchIntraday(inst.key,"5minute").catch(()=>[]);
 
       const nQ2=mD["NSE_INDEX|Nifty 50"]||mD["NSE_INDEX:Nifty 50"];
       const vQ2=mD["NSE_INDEX|India VIX"]||mD["NSE_INDEX:India VIX"];
@@ -7693,57 +7721,51 @@ async function lookupStock(){
                      : (nQ2.ohlc?.open ? nSpot-nQ2.ohlc.open : 0);
         nChgPct = nSpot>0 ? (netChg/nSpot)*100 : 0;
 
-        // ── Factor A: Nifty intraday momentum (last 30 min) ──
-        // intradayCandles is [] when market closed — fallback to day-change only
-        let nMomentumScore = 0, nMomentumLabel = isOpen()?"NEUTRAL":"N/A (market closed)", nIntradayVWAP = 0;
-        if(niftyIntraday.length >= 3){
-          const recent = niftyIntraday.slice(-6);
-          const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
-          const upC = recent.filter(c=>+c[4]>+c[1]).length;
-          const dnC = recent.filter(c=>+c[4]<+c[1]).length;
-          if(movePct>0.4) nMomentumScore+=2; else if(movePct>0.15) nMomentumScore+=1;
-          else if(movePct<-0.4) nMomentumScore-=2; else if(movePct<-0.15) nMomentumScore-=1;
-          if(upC>=4) nMomentumScore+=1; else if(dnC>=4) nMomentumScore-=1;
-          nMomentumScore = Math.max(-3,Math.min(3,nMomentumScore));
-          nMomentumLabel = nMomentumScore>=2?"RISING STRONGLY":nMomentumScore>=1?"RISING"
-                         :nMomentumScore<=-2?"FALLING STRONGLY":nMomentumScore<=-1?"FALLING":"FLAT";
-          let tpvSum=0,volSum=0;
-          for(const c of niftyIntraday){ const tp=(+c[2]+ +c[3]+ +c[4])/3,v=+c[5]; tpvSum+=tp*v; volSum+=v; }
-          nIntradayVWAP = volSum>0 ? tpvSum/volSum : 0;
-        }
+        // ── Build index direction ctx via shared helper ────────────────────
+        const idxCtx   = computeCtxFromCandles(sectorCandles, nSpot, nChgPct, vix, null);
 
-        // ── Factor B: Stock intraday momentum ──
-        // stockIntraday is [] when market closed
-        let sMomentumScore = 0, sMomentumLabel = isOpen()?"NEUTRAL":"N/A (market closed)";
-        if(stockIntraday.length >= 3){
-          const recent = stockIntraday.slice(-6);
-          const movePct = (+recent.at(-1)[4] - +recent[0][1]) / +recent[0][1] * 100;
-          const upC = recent.filter(c=>+c[4]>+c[1]).length;
-          const dnC = recent.filter(c=>+c[4]<+c[1]).length;
-          if(movePct>0.4) sMomentumScore+=2; else if(movePct>0.15) sMomentumScore+=1;
-          else if(movePct<-0.4) sMomentumScore-=2; else if(movePct<-0.15) sMomentumScore-=1;
-          if(upC>=4) sMomentumScore+=1; else if(dnC>=4) sMomentumScore-=1;
-          sMomentumScore = Math.max(-3,Math.min(3,sMomentumScore));
-          sMomentumLabel = sMomentumScore>=2?"RISING STRONGLY":sMomentumScore>=1?"RISING"
-                          :sMomentumScore<=-2?"FALLING STRONGLY":sMomentumScore<=-1?"FALLING":"FLAT";
-        }
+        // ── Build stock-specific ctx via shared helper ─────────────────────
+        // Uses the stock's OWN 5-min candles — EMA 9/21, momentum freshness,
+        // volume spike. This is the per-stock EMA fix applied to all stocks.
+        const stockCtx = computeCtxFromCandles(stockIntraday, ltp, chgPct||0, vix, null);
 
-        // ── Composite score: Nifty momentum(35%) + Stock momentum(30%) + VWAP(20%) + Day(15%) ──
-        const dayScore    = nChgPct>1?2:nChgPct>0.3?1:nChgPct<-1?-2:nChgPct<-0.3?-1:0;
-        const vwapScore   = nIntradayVWAP>0 ? (nSpot>=nIntradayVWAP?1:-1) : 0;
-        const compositeScore = (nMomentumScore*1.17) + (sMomentumScore*1.0) + (vwapScore*1.75) + (dayScore*0.5);
-        const isNeutral   = Math.abs(compositeScore) < 0.5;
-        nBull = compositeScore > 0;
+        lg(`Stock EMA (${sym}): 9=${stockCtx.ema9?.toFixed(1)||"N/A"} 21=${stockCtx.ema21?.toFixed(1)||"N/A"} trend=${stockCtx.emaTrendBull==null?"N/A":stockCtx.emaTrendBull?"Bull":"Bear"} cross=${stockCtx.emaCross||"N/A"} vol=${stockCtx.volRatio}x fresh=${stockCtx.momentumFresh}`);
+        lg(`${needsBankNifty?"BankNifty":"Nifty"} EMA: trend=${idxCtx.emaTrendBull==null?"N/A":idxCtx.emaTrendBull?"Bull":"Bear"} composite=${idxCtx.compositeScore}`);
+
+        // ── Composite: stock EMA takes priority, index direction confirms ──
+        // Stock's own EMA is the primary signal. Index direction is confirmation.
+        // If both agree → high conviction. If they disagree → lower conviction.
+        const stockComposite  = stockCtx.compositeScore;
+        const idxComposite    = idxCtx.compositeScore;
+        // Weighted blend: stock 60%, index 40%
+        const blendedComposite = +(stockComposite * 0.60 + idxComposite * 0.40).toFixed(2);
+        const isNeutral = Math.abs(blendedComposite) < 0.5;
+        nBull = blendedComposite > 0;
 
         lkpMarketCtx = {
-          spot: nSpot, vwap: nIntradayVWAP, momentumScore: nMomentumScore,
-          momentumLabel: nMomentumLabel, stockMomentumScore: sMomentumScore,
-          stockMomentumLabel: sMomentumLabel, dayChange: nChgPct, dayScore,
-          vwapScore, compositeScore: +compositeScore.toFixed(2),
-          bullish: nBull, neutral: isNeutral, vix
+          // ── Index fields (for direction reference) ──
+          spot: nSpot, vwap: idxCtx.vwap,
+          momentumScore: idxCtx.momentumScore, momentumLabel: idxCtx.momentumLabel,
+          dayChange: nChgPct, dayScore: idxCtx.dayScore, vwapScore: idxCtx.vwapScore,
+          compositeScore: blendedComposite,
+          bullish: nBull, neutral: isNeutral, vix,
+          // ── Stock-specific EMA/volume/freshness (Fix 2) ──
+          // scanChain uses these for EMA bonus, freshness bonus, volume bonus
+          ema9:            stockCtx.ema9,
+          ema21:           stockCtx.ema21,
+          emaTrendBull:    stockCtx.emaTrendBull,
+          emaCross:        stockCtx.emaCross,
+          emaCrossCandles: stockCtx.emaCrossCandles,
+          momentumFresh:   stockCtx.momentumFresh,
+          volumeSpike:     stockCtx.volumeSpike,
+          volRatio:        stockCtx.volRatio,
+          // ── Labels for display ──
+          stockMomentumScore: stockCtx.momentumScore,
+          stockMomentumLabel: stockCtx.momentumLabel,
+          idxComposite, stockComposite,
         };
 
-        lg(`Analyse market: Nifty ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% · ${nMomentumLabel} · Stock mom: ${sMomentumLabel} · composite=${compositeScore.toFixed(2)} → ${isNeutral?"NEUTRAL":nBull?"BULLISH":"BEARISH"}`);
+        lg(`Analyse (${sym}): stock=${stockComposite>=0?"+":""}${stockComposite} idx=${idxComposite>=0?"+":""}${idxComposite} blended=${blendedComposite} → ${isNeutral?"NEUTRAL":nBull?"BULLISH":"BEARISH"}`);
       }
       vixSc=interpVIX(vix).sc;
       // Fetch real Nifty PCR
@@ -7898,6 +7920,10 @@ async function lookupStock(){
         const _isNeut   = lkpMarketCtx?.neutral === true;
         const _mLabel   = lkpMarketCtx?.momentumLabel || "";
         const _sLabel   = lkpMarketCtx?.stockMomentumLabel || "";
+        const _emaLabel = lkpMarketCtx?.emaTrendBull==null?"N/A":lkpMarketCtx.emaTrendBull?"EMA Bull":"EMA Bear";
+        const _crossLbl = lkpMarketCtx?.emaCross&&lkpMarketCtx.emaCross!=="no_cross"
+          ? ` · ${lkpMarketCtx.emaCross==="bullish_cross"?"🟢":"🔴"} EMA cross ${lkpMarketCtx.emaCrossCandles}c ago`
+          : "";
         const _dirColor = _isNeut?"#d97706":_cs>0?"#15803d":"#dc2626";
         const _dirBg    = _isNeut?"#fffbeb":_cs>0?"#f0fdf4":"#fef2f2";
         const _dirBord  = _isNeut?"#fde68a":_cs>0?"#bbf7d0":"#fecaca";
@@ -7906,9 +7932,9 @@ async function lookupStock(){
 
         let _dirTxt;
         if(_isNeut){
-          _dirTxt=`↔ Market NEUTRAL — showing CE & PE · Nifty: ${nChgPct>=0?"+":""}${nChgPct.toFixed(2)}% · ${sym} momentum: ${_sLabel}`;
+          _dirTxt=`↔ Market NEUTRAL — showing CE & PE · ${sym} EMA: ${_emaLabel}${_crossLbl} · momentum: ${_sLabel}`;
         } else {
-          _dirTxt=`${_icon} Intraday ${_strong?"STRONGLY ":""}${_cs>0?"BULLISH":"BEARISH"} · Nifty: ${_mLabel} · ${sym}: ${_sLabel} → ${_cs>0?"CALL":"PUT"} aligned`;
+          _dirTxt=`${_icon} Intraday ${_strong?"STRONGLY ":""}${_cs>0?"BULLISH":"BEARISH"} · ${sym} ${_emaLabel}${_crossLbl} · ${_sLabel} → ${_cs>0?"CALL":"PUT"} aligned`;
         }
         // Warn when gap direction diverges from intraday momentum
         const _gapBull = nChgPct>=0, _momBull = _cs>0;

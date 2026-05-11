@@ -898,7 +898,7 @@ const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
 //   delta:      0.30 → 0.40  (only near-ATM options; delta<0.40 = OTM, hit SL from theta alone)
 //   oi:         5    → 15    (5% OI change is noise; 15%+ = meaningful institutional positioning)
 //   minOptConf: 50   → 70    (historical data shows 65% conf still has 7% win rate; 70+ is cleaner)
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.40,iv:15,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:70,maxOptCapital:0,moodRefresh:10};
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.40,iv:15,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:65,maxOptCapital:0,moodRefresh:10};
 let CFG = DEF; // start with DEF
 try{
   const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
@@ -4083,22 +4083,19 @@ function getIntradayPhase(){
 }
 
 // Returns confidence adjustment for time of day — calibrated to ACTUAL historical win rates.
-// Data from Analysis tab (May 2026):
-//   Opening 9:15–9:45 : 100% WR (6 signals)   → +5  bonus
-//   Early   9:45–10:30:  67% WR (9 signals)    → +0  (baseline)
-//   Mid    10:30–12:30:   2% WR (59 signals)   → -25 heavy penalty
-//   Afternoon 12:30–2 :   5% WR (221 signals)  → -25 heavy penalty
-//   Pre-close 2–3:30  :   4% WR (112 signals)  → -20 penalty
-// The previous logic was BACKWARDS (Opening got -15, Mid/Afternoon got 0).
+// NOTE: Original penalties (-25 mid, -25 afternoon) were set based on raw signal data
+// with ZERO quality gates. Now that consolidation block, PDH/PDL zone, direction flip
+// gate, and minimum signals gate all exist, signals that reach scoring are higher quality.
+// Penalties recalibrated down to reflect the improved gate architecture.
 function getTimeOfDayPenalty(){
   const phase = getIntradayPhase();
-  if(phase==="opening")   return  +5;  // historically BEST period — slight bonus
-  if(phase==="early")     return   0;  // good period — no penalty (baseline)
-  if(phase==="mid")       return -25;  // 2% historical WR — heavy penalty, kills most signals
-  if(phase==="afternoon") return -25;  // 5% historical WR — heavy penalty
-  if(phase==="closing")   return -20;  // 4% historical WR — strong penalty
-  if(phase==="pre")       return  -8;  // pre-market: use with caution
-  if(phase==="closed")    return  -8;  // after-hours: use with caution
+  if(phase==="opening")   return +8;   // 9:15–9:45: historically best → bonus
+  if(phase==="early")     return +3;   // 9:45–10:30: good period → small bonus
+  if(phase==="mid")       return -12;  // 10:30–12:30: was -25, reduced — gates filter bad signals
+  if(phase==="afternoon") return -12;  // 12:30–14:00: was -25, same reason
+  if(phase==="closing")   return -10;  // 14:00–15:30: was -20, reduced
+  if(phase==="pre")       return  -8;  // pre-market
+  if(phase==="closed")    return  -8;  // after hours
   return 0; // holiday
 }
 
@@ -6401,7 +6398,7 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   const cs = marketCtx?.compositeScore ?? (niftyBullish ? 1 : -1);
   const isNeutral = marketCtx?.neutral === true;
   if(isNeutral || Math.abs(cs) < 1.0){
-    dirMult = 0.65; // weak/neutral trend: moderate confidence for both sides
+    dirMult = 0.90; // neutral/uncertain — option quality still valid, just no strong direction
   } else {
     const ceAligned = cs > 0, peAligned = cs < 0;
     const aligned = (isCE && ceAligned) || (!isCE && peAligned);
@@ -6553,9 +6550,17 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
     else if(ivTrend >= 1.5) ivTrendBonus = -5; // IV rising = short option risk
   }
 
+  // ── Time penalty extracted — applied AFTER dirMult ──────────────────────────
+  // Why: time-of-day is a market condition (liquidity, volatility regime).
+  // If inside dirMult, a neutral market (0.90×) would also reduce the time penalty
+  // by 10% — mathematically wrong. A mid-day penalty should be -12 regardless of
+  // whether the market is neutral or strongly bullish.
+  const _timeAdj = getTimeOfDayPenalty();
+
   let raw = deltaScore*0.30 + ivScore*0.20 + oiScore*0.25 + atmScore*0.15 + thetaScore*0.10
           + sigBonus + momentumBonus + emaBonus + freshnessBonus + volumeBonus + ivTrendBonus
-          + getTimeOfDayPenalty() + expiryBonus + ivAdjFinal;
+          + expiryBonus + ivAdjFinal;
+          // ↑ getTimeOfDayPenalty() removed from here — applied after dirMult below
 
   // ── VIX impact — high VIX = expensive premium for buyers ──
   // For aligned options: slight penalty (premium expensive but direction is right)
@@ -6582,8 +6587,10 @@ function calcOptConfidence(delta, iv, oiChg, theta, signals, spot, strike, optTy
   // captured in oiScore (25% weight, lines above). Adding absolute PCR level on top
   // was double-counting AND using an ambiguous signal (high PE OI = fear OR support?).
 
-  // Apply direction multiplier
+  // Apply direction multiplier (option quality + directional bonuses)
   raw = raw * dirMult;
+  // Time penalty applied AFTER dirMult — market condition, not direction-dependent
+  raw += _timeAdj;
   return Math.round(Math.min(100, Math.max(0, raw)));
 }
 

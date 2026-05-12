@@ -7150,13 +7150,19 @@ function renderStatsOptions(idxGroups, niftyBull, chgPct, vix, marketCtx){
   const border = isNeutral ? "#fde68a" : cs > 0 ? "#bbf7d0" : "#fecaca";
   const strong = Math.abs(cs) > 2;
   const icon   = isNeutral ? "↔" : cs > 0 ? "📈" : "📉";
+  // "Intraday" only valid during market hours
+  const sessLbl = isOpen() ? "Intraday momentum" : "Last Session";
+  // Only show momentum label when it has real data (not N/A or empty)
+  const hasMomData = momentumLabel && !momentumLabel.startsWith("N/A") && momentumLabel !== "FLAT";
+  const momPart = hasMomData ? ` · ${momentumLabel}` : "";
+  const vwapPart = vwapPos ? ` · ${vwapPos}` : "";
   let dirLine;
   if(isNeutral){
-    dirLine = `↔ Market is NEUTRAL — showing both CE & PE · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · Momentum: ${momentumLabel}`;
+    dirLine = `↔ Market NEUTRAL — showing both CE & PE · Day ${chg>=0?"+":""}${chg.toFixed(2)}%${momPart}`;
   } else if(cs > 0){
-    dirLine = `${icon} Intraday momentum ${strong?"STRONGLY ":""}BULLISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · ${momentumLabel}${vwapPos?" · "+vwapPos:""} → CE aligned`;
+    dirLine = `${icon} ${sessLbl} ${strong?"STRONGLY ":""}BULLISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}%${momPart}${vwapPart} → CE aligned`;
   } else {
-    dirLine = `${icon} Intraday momentum ${strong?"STRONGLY ":""}BEARISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}% · ${momentumLabel}${vwapPos?" · "+vwapPos:""} → PE aligned`;
+    dirLine = `${icon} ${sessLbl} ${strong?"STRONGLY ":""}BEARISH · Day ${chg>=0?"+":""}${chg.toFixed(2)}%${momPart}${vwapPart} → PE aligned`;
   }
   // Add gap-vs-momentum note when they diverge (the exact scenario user reported)
   let gapNote = "";
@@ -7933,10 +7939,18 @@ async function lookupStock(){
         const _isNeut   = lkpMarketCtx?.neutral === true;
         const _mLabel   = lkpMarketCtx?.momentumLabel || "";
         const _sLabel   = lkpMarketCtx?.stockMomentumLabel || "";
-        const _emaLabel = lkpMarketCtx?.emaTrendBull==null?"N/A":lkpMarketCtx.emaTrendBull?"EMA Bull":"EMA Bear";
-        const _crossLbl = lkpMarketCtx?.emaCross&&lkpMarketCtx.emaCross!=="no_cross"
+        // Only show EMA label when candle data actually loaded (null = market closed or fetch failed)
+        const _hasEMA   = lkpMarketCtx?.emaTrendBull != null;
+        const _emaLabel = _hasEMA ? (lkpMarketCtx.emaTrendBull ? "EMA Bull" : "EMA Bear") : "";
+        const _crossLbl = _hasEMA && lkpMarketCtx?.emaCross && lkpMarketCtx.emaCross !== "no_cross"
           ? ` · ${lkpMarketCtx.emaCross==="bullish_cross"?"🟢":"🔴"} EMA cross ${lkpMarketCtx.emaCrossCandles}c ago`
           : "";
+        // Build optional label parts — omit entirely when data unavailable
+        const _emaTxt  = _hasEMA ? ` · ${sym} ${_emaLabel}${_crossLbl}` : "";
+        const _hasMom  = _sLabel && !_sLabel.startsWith("N/A") && _sLabel !== "NEUTRAL";
+        const _momTxt  = _hasMom ? ` · ${_sLabel}` : "";
+        // "Intraday" only valid during market hours — after close say "Last Session"
+        const _sessLbl = isOpen() ? "Intraday" : "Last Session";
         const _dirColor = _isNeut?"#d97706":_cs>0?"#15803d":"#dc2626";
         const _dirBg    = _isNeut?"#fffbeb":_cs>0?"#f0fdf4":"#fef2f2";
         const _dirBord  = _isNeut?"#fde68a":_cs>0?"#bbf7d0":"#fecaca";
@@ -7945,9 +7959,9 @@ async function lookupStock(){
 
         let _dirTxt;
         if(_isNeut){
-          _dirTxt=`↔ Market NEUTRAL — showing CE & PE · ${sym} EMA: ${_emaLabel}${_crossLbl} · momentum: ${_sLabel}`;
+          _dirTxt=`↔ Market NEUTRAL — showing CE & PE${_emaTxt}${_momTxt}`;
         } else {
-          _dirTxt=`${_icon} Intraday ${_strong?"STRONGLY ":""}${_cs>0?"BULLISH":"BEARISH"} · ${sym} ${_emaLabel}${_crossLbl} · ${_sLabel} → ${_cs>0?"CALL":"PUT"} aligned`;
+          _dirTxt=`${_icon} ${_sessLbl} ${_strong?"STRONGLY ":""}${_cs>0?"BULLISH":"BEARISH"}${_emaTxt}${_momTxt} → ${_cs>0?"CALL":"PUT"} aligned`;
         }
         // Warn when gap direction diverges from intraday momentum
         const _gapBull = nChgPct>=0, _momBull = _cs>0;

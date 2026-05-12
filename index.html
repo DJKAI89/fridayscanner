@@ -741,6 +741,22 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:#f1f5f9;color:#0f172
 </div>
   </div>
 
+  <!-- Position Sizing -->
+  <div class="setting-card">
+    <h4>💰 Position Sizing</h4>
+    <div class="set-row">
+      <div><div class="set-lbl">Portfolio Size (₹)</div><div class="set-sub">Total trading capital</div></div>
+      <input class="set-inp" id="s-port-size" type="number" value="500000" min="10000" step="10000" style="width:90px">
+    </div>
+    <div class="set-row">
+      <div><div class="set-lbl">Max Risk per Trade (%)</div><div class="set-sub">% of portfolio at risk per trade</div></div>
+      <input class="set-inp" id="s-risk-pct" type="number" value="2" min="0.5" max="10" step="0.5" style="width:70px">
+    </div>
+    <div style="font-size:9px;color:#64748b;margin-top:6px;padding:6px 8px;background:#f8fafc;border-radius:6px">
+      📐 Recommended lots = floor(Portfolio × Risk% ÷ Max Loss per lot). E.g. ₹5L at 2% = ₹10K max loss.
+    </div>
+  </div>
+
   <!-- Technical -->
 
   <div class="setting-card">
@@ -898,7 +914,7 @@ const CFG_VERSION = "v4"; // bump this to reset all users to new DEF
 //   delta:      0.30 → 0.40  (only near-ATM options; delta<0.40 = OTM, hit SL from theta alone)
 //   oi:         5    → 15    (5% OI change is noise; 15%+ = meaningful institutional positioning)
 //   minOptConf: 50   → 70    (historical data shows 65% conf still has 7% win rate; 70+ is cleaner)
-const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.40,iv:15,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:65,maxOptCapital:0,moodRefresh:10};
+const DEF={minStockConf:50,pot:3,risk:55,rr:1.2,rsiOS:35,rsiOB:65,vol:1.2,delta:0.40,iv:15,oi:15,optSL:25,optTgt:50,scanStocks:15,tick:15,portRef:60,scanOpts:15,minOptConf:65,maxOptCapital:0,moodRefresh:10,portSize:500000,riskPct:2};
 let CFG = DEF; // start with DEF
 try{
   const saved = JSON.parse(localStorage.getItem("friday_cfg")||"null");
@@ -3171,6 +3187,8 @@ function loadSettingsUI(){
   document.getElementById("s-min-stock-conf").value=CFG.minStockConf;
   document.getElementById("s-min-opt-conf").value=CFG.minOptConf;
   document.getElementById("s-max-opt-cap").value=CFG.maxOptCapital||0;
+  document.getElementById("s-port-size").value=CFG.portSize||DEF.portSize;
+  document.getElementById("s-risk-pct").value=CFG.riskPct||DEF.riskPct;
   updateTokenInfo();
 }
 function saveSettings(){
@@ -3196,6 +3214,8 @@ function saveSettings(){
     moodRefresh:  rv("s-mood-ref")     ||DEF.moodRefresh,
     minOptConf:     rv("s-min-opt-conf") ||DEF.minOptConf,
     maxOptCapital:  rv("s-max-opt-cap"),  // 0 = no limit
+    portSize:       rv("s-port-size")    ||DEF.portSize,
+    riskPct:        rv("s-risk-pct")     ||DEF.riskPct,
   };
   CFG._v = CFG_VERSION; // version stamp
   localStorage.setItem("friday_cfg",JSON.stringify(CFG));
@@ -6057,6 +6077,11 @@ async function loadOptions(force=true){
           SENSEX:    computeCtxFromCandles(sensexCandles,    0,   0,              optVix, sensexPDHL),
           FINNIFTY:  computeCtxFromCandles(finNiftyCandles,  0,   0,              optVix, finNiftyPDHL),
         };
+        // Store raw candles in each ctx so optCard can render the intraday chart
+        _indexCtxMap.NIFTY.candles     = niftyCandles;
+        _indexCtxMap.BANKNIFTY.candles = bankNiftyCandles;
+        _indexCtxMap.SENSEX.candles    = sensexCandles;
+        _indexCtxMap.FINNIFTY.candles  = finNiftyCandles;
         // Patch day change into BankNifty/SENSEX/FinNifty once their spots are known
         // (spots are fetched later in the index loop; context is enriched there)
 
@@ -6749,6 +6774,8 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         emaTrendBull:   marketCtx?.emaTrendBull   ?? null,
         momentumFresh:  marketCtx?.momentumFresh  || false,
         volRatio:       marketCtx?.volRatio        ?? null,
+        // Intraday candles for mini chart (last 20 candles of the underlying)
+        candles:        marketCtx?.candles?.slice(-20) || [],
       });
     }
   }
@@ -7406,6 +7433,83 @@ function optCard(p,i){
       <div class="cbox neutral"><div class="cb-l">SIGNAL SCORE</div><div class="cb-v am">${p.score}/9</div><div class="cb-s" style="color:#64748b">${p.signals.length} triggers</div></div>
     </div>
     <div class="c-inds">${p.signals.map(s=>`<span class="ind ok">${s.l}</span>`).join("")}</div>
+
+    <!-- ══ Feature 2: Position Sizing ══════════════════════════════════════ -->
+    ${(()=>{
+      const portSz  = CFG.portSize  || 500000;
+      const riskPct = CFG.riskPct   || 2;
+      const maxRisk = portSz * riskPct / 100;
+      const lossPerLot = p.maxLoss || 0;
+      if(lossPerLot <= 0) return "";
+      const recLots = Math.max(1, Math.floor(maxRisk / lossPerLot));
+      const recCapital = recLots * p.entry * p.lot;
+      const recLoss    = recLots * lossPerLot;
+      const color = recLots <= 1 ? "#92400e" : recLots >= 3 ? "#15803d" : "#1d4ed8";
+      const bg    = recLots <= 1 ? "#fffbeb" : recLots >= 3 ? "#f0fdf4" : "#eff6ff";
+      return `<div style="background:${bg};border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:8px">
+        <div style="font-size:8px;color:#64748b;font-weight:700;margin-bottom:4px">💰 POSITION SIZING (₹${(portSz/100000).toFixed(1)}L portfolio · ${riskPct}% risk = ₹${fmt(maxRisk,0)} max loss)</div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><span style="font-size:18px;font-weight:800;color:${color}">${recLots} lot${recLots>1?"s":""}</span><span style="font-size:9px;color:#64748b;margin-left:6px">recommended</span></div>
+          <div style="text-align:right;font-size:9px;color:#64748b">Capital: ₹${fmt(recCapital,0)}<br>Max loss: ₹${fmt(recLoss,0)}</div>
+        </div>
+        ${recLots>3?`<div style="font-size:8px;color:#64748b;margin-top:3px">⚠ Capped — consider ${Math.min(recLots,3)} lots to diversify across signals</div>`:""}
+      </div>`;
+    })()}
+
+    <!-- ══ Feature 1: Payoff Calculator ════════════════════════════════════ -->
+    ${(()=>{
+      const delta_ = Math.abs(p.delta||0.4);
+      const theta_ = Math.abs(p.theta||0);
+      const spot_  = p.spot||0;
+      if(spot_<=0||p.entry<=0) return "";
+      // Break-even: underlying must move beyond this for profit at expiry
+      const isCE_ = p.type==="CE";
+      const bePrem = p.entry; // premium paid
+      const beSpot = isCE_ ? p.strike + bePrem : p.strike - bePrem;
+      const bePct  = spot_>0 ? ((beSpot - spot_)/spot_*100).toFixed(2) : "?";
+      // Scenario P&L: delta approximation ΔPremium ≈ delta × ΔSpot
+      const scenarios = [-3,-2,-1,-0.5,0,0.5,1,2,3].map(pct=>{
+        const dSpot   = spot_ * pct / 100;
+        const dPrem   = delta_ * dSpot * (isCE_?1:-1);
+        const newPrem = Math.max(0, p.entry + dPrem);
+        const pnl     = newPrem - p.entry;
+        const pnlPct  = p.entry>0 ? (pnl/p.entry*100).toFixed(0) : 0;
+        return {pct, newPrem:+newPrem.toFixed(2), pnl:+pnl.toFixed(2), pnlPct};
+      });
+      // Theta decay
+      const d1 = Math.max(0,+(p.entry - theta_*1).toFixed(2));
+      const d2 = Math.max(0,+(p.entry - theta_*2).toFixed(2));
+      const d3 = Math.max(0,+(p.entry - theta_*3).toFixed(2));
+      const scenRows = scenarios.filter(s=>[-2,-1,0,1,2].includes(s.pct)).map(s=>`
+        <div style="display:flex;justify-content:space-between;padding:3px 6px;border-radius:4px;background:${s.pnl>0?"#f0fdf4":s.pnl<0?"#fef2f2":"#f8fafc"}">
+          <span style="font-size:9px;color:#374151;font-weight:600">${s.pct>0?"+":""}${s.pct}% (₹${fmt(spot_*(1+s.pct/100),0)})</span>
+          <span style="font-size:9px;font-weight:700;color:${s.pnl>0?"#16a34a":s.pnl<0?"#dc2626":"#64748b"}">₹${fmt(s.newPrem)} ${s.pnlPct!="0"?`(${s.pnlPct>0?"+":""}${s.pnlPct}%)`:""}</span>
+        </div>`).join("");
+      return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:8px">
+        <div style="font-size:8px;color:#64748b;font-weight:700;margin-bottom:6px">📊 PAYOFF CALCULATOR (delta approx · underlying moves)</div>
+        ${scenRows}
+        <div style="display:flex;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid #e2e8f0">
+          <div style="flex:1;text-align:center">
+            <div style="font-size:7px;color:#64748b">BREAK-EVEN</div>
+            <div style="font-size:10px;font-weight:700;color:#374151">₹${fmt(beSpot,0)}</div>
+            <div style="font-size:8px;color:${+bePct>0?"#dc2626":"#16a34a"}">${+bePct>0?"+":""}${bePct}% move needed</div>
+          </div>
+          <div style="flex:1;text-align:center">
+            <div style="font-size:7px;color:#64748b">THETA DECAY</div>
+            <div style="font-size:9px;color:#64748b">1d: <b>₹${d1}</b> · 2d: <b>₹${d2}</b> · 3d: <b>₹${d3}</b></div>
+            <div style="font-size:7px;color:#dc2626">-₹${theta_.toFixed(2)}/day</div>
+          </div>
+        </div>
+      </div>`;
+    })()}
+
+    <!-- ══ Feature 4: Mini Candle Chart ════════════════════════════════════ -->
+    ${p.candles&&p.candles.length>=5 ? `
+      <div style="margin-bottom:8px">
+        <div style="font-size:8px;color:#64748b;font-weight:700;margin-bottom:3px">📈 ${p.und} INTRADAY (5-min · last ${Math.min(20,p.candles.length)} candles)</div>
+        ${drawMiniCandleChart(p.candles,[],{entry:p.entry,sl:p.sl,target:p.tgt,width:340,height:100})}
+      </div>` : ""}
+
     <div class="c-why ${rc}">${p.type==="CE"?"📈 Call":"📉 Put"} on ${p.und} · Strike ${p.strike}. Capital: ₹${fmt(p.amtRequired,0)} for ${p.lot} Quantities. Max profit ₹${fmt(p.maxProfit,0)} if target hit. SL at ₹${fmt(p.sl)} limits loss to ₹${fmt(p.maxLoss,0)}.</div>
   </div>`;
 }
@@ -7782,6 +7886,8 @@ async function lookupStock(){
           pdh: stockPDHL?.pdh ?? null,
           pdl: stockPDHL?.pdl ?? null,
           pdc: stockPDHL?.pdc ?? null,
+          // Stock's own intraday candles for mini chart
+          candles: stockIntraday.slice(-20),
         };
 
         lg(`Analyse (${sym}): stock=${stockComposite>=0?"+":""}${stockComposite} idx=${idxComposite>=0?"+":""}${idxComposite} blended=${blendedComposite} → ${isNeutral?"NEUTRAL":nBull?"BULLISH":"BEARISH"}`);
@@ -7901,6 +8007,9 @@ async function lookupStock(){
       } else {
 
         const expiry = pickBestExpiry(expiries);
+        // Feature 3: get next expiry for comparison
+        const _expIdx   = expiries.indexOf(expiry);
+        const nextExpiry = _expIdx >= 0 && _expIdx < expiries.length-1 ? expiries[_expIdx+1] : null;
         if(!expiry){
           document.getElementById("lkp-fo-stats").innerHTML="";
           document.getElementById("lkp-fo-badge").textContent="F&O — No active expiry";
@@ -7998,6 +8107,66 @@ async function lookupStock(){
           _foHtml = `<div style="font-size:11px;color:#64748b;padding:8px">No signals meet confidence ≥${CFG.minOptConf}%. Lower Options Min Confidence in ⚙ Settings.</div>`;
         }
         document.getElementById("lkp-fo-cards").innerHTML=_foHtml;
+
+        // ── Feature 3: Multi-Expiry Comparison ──────────────────────────────
+        // Fetch next expiry's ATM CE+PE and show side-by-side comparison
+        if(nextExpiry){
+          try{
+            await sleep(400); // stagger to avoid rate limit
+            const nextChain = await fetchOptions(foInst.key, nextExpiry);
+            if(nextChain.length){
+              const dteCurrent = Math.max(0,Math.round((new Date(expiry)-new Date())/86400000));
+              const dteNext    = Math.max(0,Math.round((new Date(nextExpiry)-new Date())/86400000));
+              // Find ATM row in each chain
+              const findATM = (ch,atmStrike,side)=>{
+                const row = ch.find(r=>r.strike_price===atmStrike) || ch.reduce((a,b)=>Math.abs(b.strike_price-atmStrike)<Math.abs(a.strike_price-atmStrike)?b:a,ch[0]);
+                const opt = side==="CE" ? row?.call_options : row?.put_options;
+                return {
+                  ltp:   opt?.market_data?.ltp    || 0,
+                  iv:    opt?.option_greeks?.iv    || 0,
+                  delta: opt?.option_greeks?.delta || 0,
+                  theta: opt?.option_greeks?.theta || 0,
+                  strike:row?.strike_price || atm,
+                };
+              };
+              // Build comparison for ATM CE and ATM PE
+              const compareRows = ["CE","PE"].map(side=>{
+                const cur  = findATM(chain,    atm, side);
+                const nxt  = findATM(nextChain, atm, side);
+                const icon = side==="CE"?"📈":"📉";
+                const costDiff = nxt.ltp>0&&cur.ltp>0 ? +((nxt.ltp-cur.ltp)/cur.ltp*100).toFixed(0) : null;
+                return `<div style="margin-bottom:6px">
+                  <div style="font-size:9px;font-weight:700;color:#374151;margin-bottom:3px">${icon} ATM ${side} ${atm}</div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+                    <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:6px;padding:6px 8px">
+                      <div style="font-size:7px;color:#0369a1;font-weight:700">CURRENT · ${expiry} · ${dteCurrent}d</div>
+                      <div style="font-size:14px;font-weight:800;color:#1e40af">₹${fmt(cur.ltp)}</div>
+                      <div style="font-size:8px;color:#64748b">IV ${cur.iv?.toFixed(1)||"?"}% · Δ${Math.abs(cur.delta).toFixed(2)} · Θ${cur.theta?.toFixed(1)||"?"}</div>
+                    </div>
+                    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px">
+                      <div style="font-size:7px;color:#64748b;font-weight:700">NEXT · ${nextExpiry} · ${dteNext}d</div>
+                      <div style="font-size:14px;font-weight:800;color:#374151">₹${fmt(nxt.ltp)}</div>
+                      <div style="font-size:8px;color:#64748b">IV ${nxt.iv?.toFixed(1)||"?"}% · Δ${Math.abs(nxt.delta).toFixed(2)} · Θ${nxt.theta?.toFixed(1)||"?"}</div>
+                      ${costDiff!==null?`<div style="font-size:7px;color:${costDiff>0?"#dc2626":"#16a34a"};font-weight:600">${costDiff>0?"+":""}${costDiff}% vs current</div>`:""}
+                    </div>
+                  </div>
+                  <div style="font-size:8px;color:#64748b;margin-top:3px;padding:4px 6px;background:#fffbeb;border-radius:4px">
+                    💡 ${side==="CE"
+                      ? (cur.ltp>0&&nxt.ltp>0 ? `Current week cheaper by ₹${fmt(nxt.ltp-cur.ltp)} but ${dteCurrent}d less time. ${dteCurrent<=3?"High gamma risk — expires soon.":"Reasonable for intraday swing."}` : "Comparison unavailable")
+                      : (cur.ltp>0&&nxt.ltp>0 ? `Next week gives ${dteNext-dteCurrent} more days for ₹${fmt(nxt.ltp-cur.ltp)} extra premium.` : "Comparison unavailable")}
+                  </div>
+                </div>`;
+              }).join("");
+
+              const existing = document.getElementById("lkp-fo-cards").innerHTML;
+              document.getElementById("lkp-fo-cards").innerHTML = existing +
+                `<div style="margin-top:12px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px">
+                  <div style="font-size:10px;font-weight:800;color:#374151;margin-bottom:8px">📅 MULTI-EXPIRY COMPARISON · ATM ${atm}</div>
+                  ${compareRows}
+                </div>`;
+            }
+          }catch(e2){ lg("Multi-expiry compare: "+e2.message,"w"); }
+        }
 
         } // end else (chain.length)
         } // end else (expiry found)

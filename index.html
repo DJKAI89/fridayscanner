@@ -6704,33 +6704,7 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       const _optAdj = applyExpiryDayAdjustment(_opt, delta, iv, entry, spot, sp);
       let { sl, tgt, rr, method: slTgtMethod } = _optAdj;
 
-      // ── SELL signal SL/Target correction ─────────────────────────────────
-      // calcSmartOptionSLTarget always computes for a BUYER (SL below entry, target above).
-      // For SELL/short option signals the logic is REVERSED:
-      //   - Seller PROFITS when premium DROPS  → target should be BELOW entry
-      //   - Seller LOSES when premium RISES    → SL should be ABOVE entry
-      // Without this fix: target=₹69 > entry=₹48 → isBull check `price<=target` fires
-      // instantly at any price below ₹69 → every SELL signal shows TARGET HIT immediately.
-      if(action === "SELL"){
-        const riskPct  = entry > 0 ? (entry - sl)  / entry : 0.25; // e.g. 0.25 = 25%
-        const rewardPct= entry > 0 ? (tgt - entry) / entry : 0.50; // e.g. 0.50 = 50%
-        sl  = +(entry * (1 + riskPct)).toFixed(2);    // SL ABOVE entry — exit if premium rises
-        tgt = +(Math.max(0.5, entry * (1 - rewardPct))).toFixed(2); // target BELOW entry — take profit
-        rr  = riskPct > 0 ? +(rewardPct / riskPct).toFixed(2) : rr;
-        slTgtMethod = slTgtMethod + " · SELL (flipped)";
-      }
-
       const lot = lotSize || 1;
-      // maxLoss for SELL = (sl - entry) × lot (premium can rise to SL level)
-      const maxLoss   = +(action==="SELL"
-        ? (sl - entry) * lot
-        : (entry - sl) * lot
-      ).toFixed(0);
-      // maxProfit for SELL = (entry - tgt) × lot (premium decays to target level)
-      const maxProfit = +(action==="SELL"
-        ? (entry - tgt) * lot
-        : (tgt   - entry) * lot
-      ).toFixed(0);
       const amtRequired = +(ltp * lot).toFixed(0);
 
       // ── Confidence: now uses marketCtx composite score for direction multiplier ──
@@ -6786,6 +6760,25 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
         else if(absD >= CFG.delta)           action = "BUY";
       }
       if(iv >= CFG.iv && oiChg <= -CFG.oi) action = "SELL";
+
+      // ── SELL signal SL/Target correction ─────────────────────────────────
+      // calcSmartOptionSLTarget always computes for a BUYER (SL below entry, target above).
+      // For SELL/short option signals the logic is REVERSED:
+      //   - Seller PROFITS when premium DROPS  → target BELOW entry
+      //   - Seller LOSES when premium RISES    → SL ABOVE entry
+      // Without this fix: target ₹69 > entry ₹48 → resolveOutcomes fires TARGET HIT instantly.
+      if(action === "SELL"){
+        const riskPct  = entry > 0 ? (entry - sl)  / entry : 0.25;
+        const rewardPct= entry > 0 ? (tgt - entry) / entry : 0.50;
+        sl  = +(entry * (1 + riskPct)).toFixed(2);               // SL above entry
+        tgt = +(Math.max(0.5, entry * (1 - rewardPct))).toFixed(2); // target below entry
+        rr  = riskPct > 0 ? +(rewardPct / riskPct).toFixed(2) : rr;
+        slTgtMethod = slTgtMethod + " · SELL (flipped)";
+      }
+
+      // maxLoss / maxProfit respect signal direction
+      const maxLoss   = +(action==="SELL" ? (sl-entry)*lot : (entry-sl)*lot).toFixed(0);
+      const maxProfit = +(action==="SELL" ? (entry-tgt)*lot : (tgt-entry)*lot).toFixed(0);
 
       picks.push({
         strike: sp, type: optType, entry, sl, tgt, rr,

@@ -1698,20 +1698,26 @@ function interpretFIIDII(d){
   const fiiNet = d.fii_net || 0;
   const diiNet = d.dii_net || 0;
 
-  // ── Cash market bias (-10 to +10) ──
-  // FII is the primary driver; DII absorption partially offsets
-  let cashBias = 0;
-  if(fiiNet >  4000) cashBias = +10;
-  else if(fiiNet >  2000) cashBias = +7;
-  else if(fiiNet >   500) cashBias = +4;
-  else if(fiiNet >  -500) cashBias = 0;
-  else if(fiiNet > -2000) cashBias = -4;
-  else if(fiiNet > -4000) cashBias = -7;
-  else                    cashBias = -10;
+  // ── Net institutional flow (FII + DII combined) ─────────────────────────
+  // When DII buys significantly more than FII sells, net is bullish.
+  // E.g. FII -₹1,959 Cr + DII +₹7,990 Cr = net +₹6,031 Cr → strongly bullish.
+  const netFlow = fiiNet + diiNet;
 
-  // DII absorbing FII selling = partially bullish offset
-  if(fiiNet < -1000 && diiNet > 1000) cashBias = Math.min(cashBias + 3, 0); // DII support
-  if(fiiNet > 1000  && diiNet < -500) cashBias = Math.max(cashBias - 2, 0); // DII distributing
+  // ── Cash market bias: weight FII 60% + DII 40% via net flow ──────────────
+  let cashBias = 0;
+  // Primary: net institutional flow
+  if(netFlow >  5000) cashBias = +10;
+  else if(netFlow >  2000) cashBias = +7;
+  else if(netFlow >   500) cashBias = +4;
+  else if(netFlow >  -500) cashBias =  0;
+  else if(netFlow > -2000) cashBias = -4;
+  else if(netFlow > -5000) cashBias = -7;
+  else                     cashBias = -10;
+
+  // Secondary: FII direction still matters (FII is the sharper signal intraday)
+  // Adjust by ±2 based on FII direction vs net
+  if(fiiNet > 1000)  cashBias = Math.min(cashBias + 2, 10);  // FII buying = extra bullish
+  if(fiiNet < -1000) cashBias = Math.max(cashBias - 2, -10); // FII selling = extra bearish pressure
 
   // ── Futures positioning bias (-5 to +5) ──
   let futBias = 0;
@@ -1755,7 +1761,8 @@ function interpretFIIDII(d){
   const crFmt = v => v >= 0 ? "+₹"+Math.abs(v).toFixed(0)+" Cr" : "-₹"+Math.abs(v).toFixed(0)+" Cr";
   const fiiLabel = crFmt(fiiNet);
   const diiLabel = crFmt(diiNet);
-  const detail   = `FII ${fiiLabel} · DII ${diiLabel}`;
+  const netLabel = crFmt(netFlow);
+  const detail   = `FII ${fiiLabel} · DII ${diiLabel} · Net ${netLabel}`;
 
   return { bias: totalBias, label, color, fiiLabel, diiLabel, detail,
            cashBias, futBias, optBias,
@@ -2348,15 +2355,16 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
     if(sig.type==="OPTION" && sig.expiry && sig.expiry <= expiryThreshold){
       const exitPx = optPriceMap[sig.id] ?? 0;
       const hitTgt = isBull ? exitPx>=sig.target : exitPx<=sig.target;
-      const hitSL  = isBull ? exitPx<=sig.sl     : exitPx>=sig.sl;
+      const hitSL2 = isBull ? exitPx<=sig.sl     : exitPx>=sig.sl;
+      const pnl2   = isBull ? (exitPx-sig.entry)/sig.entry*100 : (sig.entry-exitPx)/sig.entry*100;
       if(hitTgt){
-        sig.status="TARGET_HIT"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+        sig.status="TARGET_HIT"; sig.pnlPct=+pnl2.toFixed(2);
       } else if(exitPx===0 || exitPx < sig.entry*0.02){
-        sig.status="EXPIRED"; sig.pnlPct=-100;
-      } else if(hitSL){
-        sig.status="SL_HIT"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+        sig.status="EXPIRED"; sig.pnlPct=isBull?-100:+100; // SELL: full premium retained if expires worthless
+      } else if(hitSL2){
+        sig.status="SL_HIT"; sig.pnlPct=+pnl2.toFixed(2);
       } else {
-        sig.status="EXPIRED"; sig.pnlPct=+(((exitPx-sig.entry)/sig.entry)*100).toFixed(2);
+        sig.status="EXPIRED"; sig.pnlPct=+pnl2.toFixed(2);
       }
       sig.exitPrice=+exitPx.toFixed(2); sig.exitTime=istTime;
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
@@ -2371,9 +2379,14 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
     const hitTarget = isBull ? currentPrice>=sig.target : currentPrice<=sig.target;
     const hitSL     = isBull ? currentPrice<=sig.sl     : currentPrice>=sig.sl;
 
+    // P&L sign: BUY profits when price rises (+), SELL profits when price falls (+)
+    const calcPnlPct = (exitPx) => isBull
+      ? +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2)
+      : +(((sig.entry - exitPx) / sig.entry) * 100).toFixed(2);
+
     if(hitTarget){
       sig.status="TARGET_HIT"; sig.exitPrice=+currentPrice.toFixed(2); sig.exitTime=istTime;
-      sig.pnlPct=+(((currentPrice-sig.entry)/sig.entry)*100).toFixed(2);
+      sig.pnlPct=calcPnlPct(currentPrice);
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
       closed++;
       lg(`🎯 TARGET HIT: ${sig.name||sig.stock} ₹${sig.entry}→₹${currentPrice.toFixed(2)} (+${sig.pnlPct.toFixed(1)}%)`,"o");
@@ -2381,7 +2394,7 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
       sendNotification(`🎯 Target Hit: ${sig.name||sig.stock}`,`Entry ₹${sig.entry}→Exit ₹${currentPrice.toFixed(2)} +${sig.pnlPct.toFixed(1)}%`,"tgt-"+sig.id);
     } else if(hitSL){
       sig.status="SL_HIT"; sig.exitPrice=+sig.sl.toFixed(2); sig.exitTime=istTime;
-      sig.pnlPct=+(((sig.sl-sig.entry)/sig.entry)*100).toFixed(2);
+      sig.pnlPct=calcPnlPct(sig.sl);
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
       closed++;
       lg(`❌ SL HIT: ${sig.name||sig.stock} ₹${sig.entry}→SL ₹${sig.sl} (${sig.pnlPct.toFixed(1)}%)`,"o");
@@ -6689,12 +6702,36 @@ function scanChain(chain, atm, spot, name, expiry, lotSize, niftyBullish, vix, m
       const entry = ltp;
       const _opt  = calcSmartOptionSLTarget(entry, spot, sp, iv, delta, theta, expiry, vix, optType);
       const _optAdj = applyExpiryDayAdjustment(_opt, delta, iv, entry, spot, sp);
-      const sl    = _optAdj.sl, tgt = _optAdj.tgt, rr = _optAdj.rr, slTgtMethod = _optAdj.method;
+      let { sl, tgt, rr, method: slTgtMethod } = _optAdj;
+
+      // ── SELL signal SL/Target correction ─────────────────────────────────
+      // calcSmartOptionSLTarget always computes for a BUYER (SL below entry, target above).
+      // For SELL/short option signals the logic is REVERSED:
+      //   - Seller PROFITS when premium DROPS  → target should be BELOW entry
+      //   - Seller LOSES when premium RISES    → SL should be ABOVE entry
+      // Without this fix: target=₹69 > entry=₹48 → isBull check `price<=target` fires
+      // instantly at any price below ₹69 → every SELL signal shows TARGET HIT immediately.
+      if(action === "SELL"){
+        const riskPct  = entry > 0 ? (entry - sl)  / entry : 0.25; // e.g. 0.25 = 25%
+        const rewardPct= entry > 0 ? (tgt - entry) / entry : 0.50; // e.g. 0.50 = 50%
+        sl  = +(entry * (1 + riskPct)).toFixed(2);    // SL ABOVE entry — exit if premium rises
+        tgt = +(Math.max(0.5, entry * (1 - rewardPct))).toFixed(2); // target BELOW entry — take profit
+        rr  = riskPct > 0 ? +(rewardPct / riskPct).toFixed(2) : rr;
+        slTgtMethod = slTgtMethod + " · SELL (flipped)";
+      }
 
       const lot = lotSize || 1;
+      // maxLoss for SELL = (sl - entry) × lot (premium can rise to SL level)
+      const maxLoss   = +(action==="SELL"
+        ? (sl - entry) * lot
+        : (entry - sl) * lot
+      ).toFixed(0);
+      // maxProfit for SELL = (entry - tgt) × lot (premium decays to target level)
+      const maxProfit = +(action==="SELL"
+        ? (entry - tgt) * lot
+        : (tgt   - entry) * lot
+      ).toFixed(0);
       const amtRequired = +(ltp * lot).toFixed(0);
-      const maxLoss     = +(sl > 0 ? (ltp - sl) * lot : ltp * lot * 0.25).toFixed(0);
-      const maxProfit   = +((tgt - ltp) * lot).toFixed(0);
 
       // ── Confidence: now uses marketCtx composite score for direction multiplier ──
       const _rawOptConf = calcOptConfidence(delta, iv, oiChg, theta, signals, spot, sp, optType, niftyBullish, vix, maxPain, stockPCR, marketCtx);

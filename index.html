@@ -2343,6 +2343,7 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
         sig.status    = "EXPIRED";
         sig.exitPrice = +exitPx.toFixed(2);
         sig.exitTime  = istTime;
+        sig.exitDate  = istDate;
         sig.pnlPct    = +(((exitPx - sig.entry) / sig.entry) * 100).toFixed(2);
         sig.livePrice = null; sig.livePnlPct = null; sig.targetProgress = null;
         sig.note      = `Auto-expired after ${holdDays} day${holdDays>1?"s":""}`;
@@ -2366,7 +2367,7 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
       } else {
         sig.status="EXPIRED"; sig.pnlPct=+pnl2.toFixed(2);
       }
-      sig.exitPrice=+exitPx.toFixed(2); sig.exitTime=istTime;
+      sig.exitPrice=+exitPx.toFixed(2); sig.exitTime=istTime; sig.exitDate=istDate;
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
       closed++;
       continue;
@@ -2386,6 +2387,7 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
 
     if(hitTarget){
       sig.status="TARGET_HIT"; sig.exitPrice=+currentPrice.toFixed(2); sig.exitTime=istTime;
+      sig.exitDate=istDate; // close date — used by Recent Daily Performance to group correctly
       sig.pnlPct=calcPnlPct(currentPrice);
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
       closed++;
@@ -2394,6 +2396,7 @@ function _resolveOutcomes(signals, priceMap, optPriceMap, istDate, istTime){
       sendNotification(`🎯 Target Hit: ${sig.name||sig.stock}`,`Entry ₹${sig.entry}→Exit ₹${currentPrice.toFixed(2)} +${sig.pnlPct.toFixed(1)}%`,"tgt-"+sig.id);
     } else if(hitSL){
       sig.status="SL_HIT"; sig.exitPrice=+sig.sl.toFixed(2); sig.exitTime=istTime;
+      sig.exitDate=istDate; // close date for daily performance grouping
       sig.pnlPct=calcPnlPct(sig.sl);
       sig.livePrice=null; sig.livePnlPct=null; sig.targetProgress=null;
       closed++;
@@ -2724,8 +2727,22 @@ async function renderAnalysisTab(signalsIn){
   const bestTime = timeBreak.filter(x=>x.r!==null).sort((a,b)=>b.r-a.r)[0];
 
   // ── Avg P&L by day ── (last 7 trading days)
+  // Group by CLOSE DATE (when SL/target was hit), not signal generation date.
+  // e.g. signal generated 2026-05-06 but SL hit 2026-05-08 → counted under 2026-05-08.
   const byDate = {};
-  closed.forEach(s=>{ if(!byDate[s.date]) byDate[s.date]={hits:0,sls:0,pnl:0}; byDate[s.date][s.status==="TARGET_HIT"?"hits":"sls"]++; byDate[s.date].pnl+=(s.pnlPct||0); });
+  closed.forEach(s=>{
+    // exitTime is stored as "HH:MM:SS" — pair with the date it was closed.
+    // If exitTime exists, derive close date from it. Otherwise fall back to sig.date.
+    // exitTime alone doesn't carry the date — but we store it alongside the signal which
+    // has a date. If the signal status changed today, sig.date is still the open date.
+    // The close date is stored in sig.exitDate when available, else infer from sig.exitTime:
+    // if signal is closed and exitTime is present, close happened on the day it was written.
+    // Best source: sig.exitDate (if we store it), else use sig.date as fallback.
+    const closeDate = s.exitDate || s.date;
+    if(!byDate[closeDate]) byDate[closeDate]={hits:0,sls:0,pnl:0};
+    byDate[closeDate][s.status==="TARGET_HIT"?"hits":"sls"]++;
+    byDate[closeDate].pnl+=(s.pnlPct||0);
+  });
   const days = Object.entries(byDate).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,7);
 
   // ── Actionable summary ──
